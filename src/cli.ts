@@ -3,6 +3,7 @@
 // runtime import() of <config>/commands/*.ts.
 import { buildApplication, buildRouteMap } from "@stricli/core";
 import { codeRouteMap } from "./commands/code.ts";
+import { initCommand } from "./commands/init.ts";
 import { migrateCommand } from "./commands/migrate.ts";
 import {
   applyCommand,
@@ -18,6 +19,7 @@ import { VERSION } from "./lib/version.ts";
 
 const routes = buildRouteMap({
   routes: {
+    init: initCommand,
     apply: applyCommand,
     verify: verifyCommand,
     fix: fixCommand,

@@ -9,6 +9,7 @@ import { buildContext } from "./context.ts";
 import { runUserCommand } from "./engine/discovery.ts";
 
 const BUILTINS = new Set([
+  "init",
   "apply",
   "verify",
   "fix",

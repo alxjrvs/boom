@@ -1,34 +1,34 @@
-# Homebrew formula for botu. Lives here so the repo doubles as its own tap:
+# Homebrew formula — installs the prebuilt botu binary (a single self-contained
+# executable compiled from TypeScript via Bun). The repo doubles as its own tap:
 #   brew tap alxjrvs/botu https://github.com/alxjrvs/botu
-#   brew install botu               # from a tagged release (needs url+sha256)
-#   brew install --HEAD botu        # straight from main, no checksum needed
-#
-# On a new release: bump `url` to the tag tarball and fill `sha256` with
-#   curl -fsSL https://github.com/alxjrvs/botu/archive/refs/tags/vX.Y.Z.tar.gz | shasum -a 256
+#   brew install botu
+# sha256 values are filled in by the release workflow when a tag is cut.
 class Botu < Formula
-  desc "Installable dotfiles + workspace engine — just bash and git"
+  desc "Installable dotfiles + workspace engine — apply/verify/fix from botufile.toml"
   homepage "https://github.com/alxjrvs/botu"
-  url "https://github.com/alxjrvs/botu/archive/refs/tags/v0.0.1.tar.gz"
-  sha256 "452171702e5c064720aad1fab2f04bfc7468e159e7403111159c62170c3c6f3e"
-  license "MIT"
-  head "https://github.com/alxjrvs/botu.git", branch: "main"
+  version "0.0.1"
+
+  on_macos do
+    on_arm do
+      url "https://github.com/alxjrvs/botu/releases/download/v#{version}/botu-bun-darwin-arm64"
+      sha256 "REPLACE_WITH_DARWIN_ARM64_SHA256"
+    end
+    on_intel do
+      url "https://github.com/alxjrvs/botu/releases/download/v#{version}/botu-bun-darwin-x64"
+      sha256 "REPLACE_WITH_DARWIN_X64_SHA256"
+    end
+  end
+
+  on_linux do
+    url "https://github.com/alxjrvs/botu/releases/download/v#{version}/botu-bun-linux-x64"
+    sha256 "REPLACE_WITH_LINUX_X64_SHA256"
+  end
 
   def install
-    # Ship the engine intact under libexec; VERSION sits one level above engine/
-    # exactly where the launcher looks for it ($ENGINE_DIR/../VERSION).
-    libexec.install "engine"
-    libexec.install "VERSION"
-
-    # A tiny stub execs the real entrypoint. The launcher resolves its own path,
-    # so every engine/ sibling is found regardless of where the stub lives.
-    (bin/"botu").write <<~SH
-      #!/bin/sh
-      exec "#{libexec}/engine/botu" "$@"
-    SH
+    bin.install Dir["botu-*"].first => "botu"
   end
 
   test do
-    assert_match "botu", shell_output("#{bin}/botu --version")
-    assert_match "usage: botu", shell_output("#{bin}/botu --help")
+    assert_match version.to_s, shell_output("#{bin}/botu --version")
   end
 end

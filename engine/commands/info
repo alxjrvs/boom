@@ -1,5 +1,0 @@
-#!/usr/bin/env bash
-# info — a generic engine-shipped subcommand (discovered, not hardcoded).
-echo "info: engine-shipped tool"
-echo "  engine=$(cd "$(dirname "$0")/.." && pwd)"
-echo "  config=${BOTU_CONFIG:-<unset>}"

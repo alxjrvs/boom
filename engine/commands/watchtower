@@ -1,7 +1,0 @@
-#!/usr/bin/env bash
-# watchtower — local 1Password security audit (breached/reused/weak/unsecured).
-# PROTOTYPE STUB: the real audit (built on the op CLI, emitting only hashes/
-# metadata) ports from the dotfiles repo's ./watchtower. Foreground only.
-set -euo pipefail
-printf 'botu watchtower: [prototype stub] would run the op-based 1Password audit\n'
-printf '  port the real logic from the dotfiles repo ./watchtower\n'

@@ -1,118 +1,99 @@
-# botu — design spec & build brief
+# botu — design spec
 
-`botu` is an **installable dotfiles + workspace engine**, extracted from
-[`alxjrvs/dotFiles`](https://github.com/alxjrvs/dotFiles). It lives on `PATH`
-(brew / curl installer), and a user's dotfiles repo becomes *pure config* that
-`botu` reconciles. Named for Jack Kirby's **Boom Tube** (the Fourth World
-portal): `botu` opens portals — to your machine's ideal state, and to your code
-workspaces.
+`botu` is an **installable dotfiles + workspace engine**: a single self-contained
+binary, compiled from **TypeScript on Bun**, that reconciles a machine from a
+declarative `botufile.toml` and opens portals to code workspaces. Named for
+Kirby's **Boom Tube** — it opens portals to your machine's ideal state, and to
+your code.
 
-This repo was seeded with a **working prototype** (`engine/`) and a runnable
-example config (`examples/dotfiles/`). Your job: build it into the *proper*
-engine. The prototype is the proof the model works end-to-end — keep its shape,
-harden everything.
+It began as a bash prototype (extracted from `alxjrvs/dotFiles`) and was rewritten
+to TypeScript; this document is the design of record for that engine.
 
 ## The model (decided — don't relitigate)
 
-A `botu` command does one of two things:
+A `botu` invocation does one of two things:
 
-1. **Reconcile verbs** over a config repo's `botufile`:
-   - `botu apply`  — make it so (was `dot sync`)
-   - `botu verify` — check drift, exit 0/1/2 (was `dot doctor`)
-   - `botu fix`    — repair drift (was `dot doctor --fix`)
-   - `botu update` — `apply --upgrade`
-   These share ONE loop, parameterized by verb (`engine/run`). `apply`/`verify`/
-   `fix` are siblings, not separate scripts. This unification is the core win.
+1. **Reconcile verbs** over a config repo's `botufile.toml`:
+   - `botu apply`  — make it so
+   - `botu verify` — check drift, exit 0 ok / 2 warn / 1 fail (`--json` for a report)
+   - `botu fix`    — repair drift (apply, overwriting conflicts)
+   - `botu uninstall` / `botu update` (= apply with upgrades)
+   These share **one verb-parameterized loop** (`src/engine/reconcile.ts`) over a
+   resource-type registry — siblings, not separate scripts. `botu rollback` undoes
+   the most recent apply; `apply --resume` continues an interrupted one.
 
-2. **Discovered subcommands** — two tiers, no hardcoded dispatch table:
-   `engine/commands/<name>` (ships with botu) then `<config>/commands/<name>`
-   (user's own). Adding a tool never edits the dispatcher.
+2. **Discovered subcommands** — built-ins are the `@stricli` route map (`code`,
+   `mcp`, `watchtower`, `where`, `migrate`, `rollback`); user commands resolve at
+   runtime from `<config>/commands/<name>.ts`. Adding a tool never edits a
+   dispatch table.
 
-### Config is a bash DSL, NOT JSON/jq
+### Config is typed TOML, not code
 
-The `botufile` is a short bash program the engine sources once under a verb.
-Each line is a verb-aware primitive that acts immediately. **No JSON, no jq, no
-manifest parser** — this was tried (a `dot.json` + jq providers) and removed;
-do not bring it back. jq-as-config is a non-goal.
+`botufile.toml` is a TOML document validated against a schema (`src/config/schema.ts`,
+valibot). It is grouped into `[[section]]`s; within a section, resources run in a
+fixed phase order: `link → copy → glob → packages (brewfile/mise) → run → hook`.
+Resources:
 
-Primitives (defined in `engine/run`):
-`section`, `link [--mode M]`, `copy [--mode M]`, `glob PAT DIR`, `brewfile FILE`,
-`mise_install`, `osx_default DOMAIN KEY TYPE VALUE`, `hook NAME [k=v ...]`.
+- `link` / `copy` `{ src, dst, mode? }`, `glob { pattern, into }`
+- `brewfile = "FILE"`, `mise = true`
+- `run = [{ on = "apply"|"verify", cmd }]` — the inline imperative escape
+- `hook = [{ name, with? }]` — load `hooks/<name>.ts`, the TS resource-type extension
 
-Plus one always-on built-in verify: **MCP secret hygiene** (tracked
-`.mcp.json`/`.env` carry `op://` refs, never `${VAR}` placeholders or
-resolved-token literals — see dotFiles commit `b8067ab`).
+A section may carry `when = { os, host, profile }` to gate by machine; overlay
+files `botufile.<os|host|profile>.toml` are merged onto the base. `--profile`
+(repeatable) activates named profiles; os/host auto-match (overridable via
+`BOTU_OS`/`BOTU_HOST`).
 
-### Hooks vs commands
+### Hooks = the resource-type extension contract
 
-- **hooks/** (in the *config* repo) = the imperative residue the DSL can't
-  express. Each is `hooks/NAME.sh` exposing `_NAME_apply/_verify/_fix`, with
-  `hook NAME k=v` data arriving as `$BOTU_k`. Seeded examples: `op-agent`,
-  `claude`, `lefthook`, `ssh-perms`, `macos-finalize`.
-- **commands/** = standalone tools you *invoke*. Generic ones ship in the engine
-  (`code`, `mcp`, `watchtower`, `info`); truly personal ones live in the config
-  repo's `commands/`.
+`hooks/<name>.ts` default-exports (or names) `apply`/`verify`/`fix`/`uninstall`
+functions receiving a `HookApi`: `{ with, verb, dryRun, env, ok, warn, fail, note }`.
+Loaded by runtime `import()` (works inside the compiled binary). This replaces the
+bash `_NAME_<verb>` hooks and is the public extension point.
 
-### Two breadcrumbs, two inits
+### Transaction + state
 
-State lives under `${XDG_STATE_HOME:-~/.local/state}/botu/`:
-- `botu init [PATH]` → records the **dotfiles repo** (`…/botu/config`). Also
-  **generates `botuinit.sh`** in that repo — a one-command bootstrap (curl+install
-  botu, `botu init`, `botu apply`) for fresh-machine clones.
-- `botu code init [DIR]` → records the **code dir** (`…/botu/code`, default
-  `~/Code`). Independent of the dotfiles repo — `botu code` needs no config.
+Mutating runs open a journal under `${XDG_STATE_HOME:-~/.local/state}/botu/journal/`
+(NDJSON, intent/done + undo token, committed marker) and **back up** any displaced
+file under `…/backups/<run-id>/`. `botu rollback` replays the journal in reverse
+(remove created links, restore backups). A `manifest` of owned destinations drives
+orphan reaping (verify warns; apply/fix reap). Breadcrumbs (`config`, `code`) record
+the dotfiles repo and code dir.
 
-Resolution order (config): `$BOTU_CONFIG` → breadcrumb → `$PWD` → `~/dotFiles`,
-first dir containing a `botufile` wins.
+## Stack
 
-## What "proper engine" means — your build list
+| Concern | Choice |
+|---------|--------|
+| CLI | `@stricli/core` — the only framework that compiles cleanly under `bun build --compile` |
+| Config | TOML via `smol-toml`, validated by `valibot` |
+| Shell / process | `Bun.$` / `Bun.spawnSync`; `node:fs/promises` for symlink/copy/mode |
+| Output | `Bun.color` palette + a tally Reporter (drives exit codes) |
+| Quality gates | Biome (lint + format), `tsc --noEmit`, `bun test` |
+| Distribution | `bun build --compile` matrix (macOS arm64/x64, Linux x64) |
 
-Roughly priority order. Keep every step `shellcheck -x` + `shfmt -i 2 -ci -sr`
-clean; this is a senior-engineer showpiece (the dotFiles ethos: *small, native,
-legible, just bash + git*).
-
-1. **Robust launcher resolution.** The installed `botu` must find its own
-   `engine/` even when invoked via a PATH symlink. The original `dot` solved the
-   sibling problem with a copy-not-symlink + a breadcrumb; decide the right
-   mechanism (resolve symlinks, `libexec/`, or a wrapper) and make it bullet-proof.
-2. **`install.sh`** — curl-able installer that puts `botu` on `PATH` and the
-   engine somewhere stable; idempotent; uninstall path. Then a **brew formula/tap**.
-3. **Real `code` backends.** `code claude` / `code cmux` currently print a plan.
-   Port the actual logic from dotFiles `cmux/mirror` (`dot ws`): leaf-rule crawl
-   (done), claude backend = one idle `claude --bg` per repo with coverage via
-   `claude agents --json`; cmux backend = workspaces/groups/colors over the
-   control socket. Honor `--prompt`, `--headless`, `--dry-run`, etc.
-4. **Real `watchtower`** — port the op-based 1Password audit from dotFiles.
-5. **`mcp`** — already ported from dotFiles `mcp/mcp`; verify + add tests.
-6. **Tests** — `bats`, like dotFiles `test/`. Cover the DSL primitives
-   (link/copy/glob/mode), verb dispatch, breadcrumb resolution, `botuinit.sh`
-   generation, hook contract, command discovery. The sandbox pattern from the
-   prototype (fake `$HOME` + fake config repo) works well.
-7. **CI** — shellcheck + shfmt + bats on push/PR (mirror dotFiles `.github`).
-8. **README + man/usage**, `--version`, `botu --help` per subcommand.
-9. **Aliases** — consider `sync`→apply, `doctor`→verify for muscle memory
-   (the prototype dropped them; decide).
-
-## Downstream goal (not this repo, but the why)
-
-Once `botu` is solid, **carve the dotFiles repo down to just config**: a
-`botufile`, `hooks/`, payload (`.zshrc`, `zsh/`, `nvim/`, `dot-claude/`,
-`Brewfile`, `mise.toml`, …) — deleting `dot`, `sync`, `doctor`, `lib/common.sh`,
-`install/*.sh`, `watchtower`, `mcp/`, `cmux/`. That carve-out is the payoff;
-build botu so it cleanly absorbs every one of those.
-
-## Prototype map (your starting point)
+## Layout
 
 ```
-engine/botu            dispatcher: init (+botuinit.sh) · lazy config · verbs · discovery
-engine/run             reconcile core: sources botufile under a verb (the DSL host)
-engine/lib.sh          engine helpers: palette, os_kind, _symlink
-engine/commands/code   workspace mirror (init/claude/cmux) — was `dot ws`
-engine/commands/mcp    op-native MCP registrar — ported from dotFiles mcp/mcp
-engine/commands/watchtower  STUB — port the real audit
-engine/commands/info   example engine tool (delete or repurpose)
-examples/dotfiles/     a runnable sample config (botufile + the 5 hooks)
+src/
+  cli.ts · index.ts        @stricli app + entrypoint (dispatch: mcp, user cmds, built-ins)
+  commands/                init, apply/verify/fix/update/uninstall (reconcile.ts), where,
+                           migrate, rollback, code, watchtower, mcp
+  engine/
+    reconcile.ts           the one verb loop
+    registry.ts            per-section phase dispatch
+    resources/             link · copy · glob · packages · run · hook
+    journal.ts state.ts    transaction + on-disk state
+    rollback.ts code.ts discovery.ts
+  config/  schema.ts load.ts migrate.ts profile.ts
+  lib/     reporter.ts color.ts fs.ts proc.ts version.ts
+test/                       bun test (unit + sandboxed integration)
+examples/dotfiles/          a runnable botufile.toml example
+.github/workflows/          ci.yml (check + cross-compile smoke), release.yml (tag → matrix → attach)
 ```
 
-Run the prototype: `./engine/botu init examples/dotfiles && ./engine/botu verify`
-(use a throwaway `$HOME`/`$XDG_STATE_HOME` to avoid touching your real machine).
+## Distribution
+
+`install.sh` downloads the matching binary from the GitHub release; `Formula/botu.rb`
+installs it via Homebrew (the repo doubles as the tap). `release.yml` cross-compiles
+the matrix on a tag and attaches the binaries + checksums. macOS code-signing is a
+follow-up (the binaries run after a Gatekeeper prompt until then).

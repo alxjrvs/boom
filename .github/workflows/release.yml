@@ -1,0 +1,39 @@
+name: release
+
+# On a version tag, cross-compile the binary matrix (Bun builds every target from
+# one host) and attach them to the GitHub release. macOS code-signing is a follow-up
+# (needs a signing cert in secrets); unsigned binaries still run after a Gatekeeper
+# prompt / `xattr -d com.apple.quarantine`.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+
+      - name: Compile the target matrix
+        run: |
+          mkdir -p dist
+          for t in bun-darwin-arm64 bun-darwin-x64 bun-linux-x64; do
+            bun build src/index.ts --compile --bytecode --target="$t" --outfile "dist/botu-$t"
+          done
+
+      - name: Checksums
+        run: cd dist && sha256sum botu-* > SHA256SUMS
+
+      - name: Attach to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/botu-*
+            dist/SHA256SUMS
