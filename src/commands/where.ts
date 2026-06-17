@@ -6,6 +6,7 @@ import { dirname } from "node:path";
 import { buildCommand } from "@stricli/core";
 import { resolveConfigDir } from "../config/load.ts";
 import type { BotuContext } from "../context.ts";
+import { resolveCodeDir } from "../engine/code.ts";
 
 export const whereCommand = buildCommand<Record<never, never>, [string], BotuContext>({
   docs: { brief: "Print a resolved botu path: config | code | engine" },
@@ -26,8 +27,12 @@ export const whereCommand = buildCommand<Record<never, never>, [string], BotuCon
       case "engine":
         this.process.stdout.write(`${dirname(process.execPath)}\n`);
         return;
-      case "code":
-        return new Error("botu where code: not yet implemented (M5)");
+      case "code": {
+        const dir = await resolveCodeDir(this.env);
+        if (!dir) return new Error("no code dir — run `botu code init`");
+        this.process.stdout.write(`${dir}\n`);
+        return;
+      }
       default:
         return new Error(`unknown target: ${target} (expected config | code | engine)`);
     }

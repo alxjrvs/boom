@@ -2,7 +2,7 @@
 // without throw semantics; `sh -c` so botufile `run` strings expand ~ and globs.
 type Env = Record<string, string | undefined>;
 
-function cleanEnv(env: Env): Record<string, string> {
+export function cleanEnv(env: Env): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(env)) if (v !== undefined) out[k] = v;
   return out;
