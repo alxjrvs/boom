@@ -12,9 +12,9 @@ set -euo pipefail
 VERB="${1:?run: need a verb}"
 shift
 case "$VERB" in
-  apply | verify | fix) ;;
+  apply | verify | fix | uninstall) ;;
   *)
-    printf 'run: verb must be apply|verify|fix (got %s)\n' "$VERB" >&2
+    printf 'run: verb must be apply|verify|fix|uninstall (got %s)\n' "$VERB" >&2
     exit 2
     ;;
 esac
@@ -38,6 +38,24 @@ for _a in "$@"; do
   esac
 done
 export DRY_RUN LINK_MODE
+
+# Concurrency lock — two mutating reconciles racing would corrupt state. Skipped
+# for verify (read-only) and dry-run (mutates nothing). Stale lock (dead pid) is
+# reclaimed.
+if [[ "$VERB" != "verify" && "$DRY_RUN" != "1" ]]; then
+  _LOCK="${XDG_STATE_HOME:-$HOME/.local/state}/botu/run.lock"
+  mkdir -p "$(dirname "$_LOCK")"
+  if [[ -f "$_LOCK" ]]; then
+    _pid="$(cat "$_LOCK" 2> /dev/null || true)"
+    if [[ "$_pid" =~ ^[0-9]+$ ]] && kill -0 "$_pid" 2> /dev/null; then
+      printf 'botu: another run in progress (pid %s)\n' "$_pid" >&2
+      exit 1
+    fi
+  fi
+  printf '%s\n' "$$" > "$_LOCK"
+  # shellcheck disable=SC2064  # expand $_LOCK now, at trap-set time
+  trap "rm -f '$_LOCK'" EXIT
+fi
 
 # shellcheck source=engine/lib.sh
 source "$ENGINE_DIR/lib.sh" # palette, os_kind, _symlink
@@ -82,8 +100,9 @@ link() {
     shift 2
   }
   _match "$_SECTION" || return 0
-  local src="$1" dst
+  local src="$1" dst t
   dst="$(_abs "$2")"
+  _DECLARED+=("$dst") # record what botu owns (for orphan reaping + uninstall)
   case "$VERB" in
     apply | fix)
       [[ "$VERB" == "fix" ]] && LINK_MODE="overwrite"
@@ -91,7 +110,7 @@ link() {
       [[ -n "$mode" && "$DRY_RUN" != "1" ]] && chmod "$mode" "$dst" 2> /dev/null || true
       ;;
     verify)
-      local t perms
+      local perms
       t="$(readlink "$dst" 2> /dev/null || true)"
       if [[ "$t" == "$REPO/$src" ]]; then
         if [[ -n "$mode" ]]; then
@@ -104,6 +123,13 @@ link() {
         _fail "$(_disp "$dst") not linked (→ $src)"
       else
         _fail "$(_disp "$dst") → $t, expected $REPO/$src"
+      fi
+      ;;
+    uninstall)
+      t="$(readlink "$dst" 2> /dev/null || true)"
+      [[ "$t" == "$REPO/$src" ]] || return 0 # only remove OUR link
+      if [[ "$DRY_RUN" == "1" ]]; then _note "would remove $(_disp "$dst")"; else
+        rm -f "$dst" && _ok "$(_disp "$dst") removed"
       fi
       ;;
   esac
@@ -119,6 +145,7 @@ copy() {
   _match "$_SECTION" || return 0
   local src="$1" dst
   dst="$(_abs "$2")"
+  _DECLARED+=("$dst")
   case "$VERB" in
     apply | fix)
       if [[ "$DRY_RUN" == "1" ]]; then
@@ -131,6 +158,12 @@ copy() {
       ;;
     verify)
       if cmp -s "$REPO/$src" "$dst" 2> /dev/null; then _ok "$(_disp "$dst") (copy current)"; else _warn "$(_disp "$dst") copy missing/stale"; fi
+      ;;
+    uninstall)
+      cmp -s "$REPO/$src" "$dst" 2> /dev/null || return 0 # only remove OUR copy
+      if [[ "$DRY_RUN" == "1" ]]; then _note "would remove $(_disp "$dst")"; else
+        rm -f "$dst" && _ok "$(_disp "$dst") removed"
+      fi
       ;;
   esac
 }
@@ -186,7 +219,12 @@ osx_default() {
   local d="$1" k="$2" t="$3" v="$4" cur
   case "$VERB" in
     apply | fix)
-      if [[ "$DRY_RUN" == "1" ]]; then _note "would set $d $k -$t $v"; else defaults write "$d" "$k" "-$t" "$v" && _ok "$d $k = $v"; fi
+      if [[ "$DRY_RUN" == "1" ]]; then
+        _note "would set $d $k -$t $v"
+      elif defaults write "$d" "$k" "-$t" "$v"; then
+        _ok "$d $k = $v"
+        _OSX_APPLIED=1 # engine restarts the UI at end of apply (see finalize)
+      fi
       ;;
     verify)
       cur="$(defaults read "$d" "$k" 2> /dev/null || true)"
@@ -216,6 +254,32 @@ hook() {
   return 0
 }
 
+# on apply|verify CMD...    — run CMD inline for a verb. The botufile is bash, so
+# small imperative steps need no hook file: `on apply lefthook install`. `apply`
+# fires on apply AND fix (fix = repair = re-apply); `verify` fires on verify and
+# folds CMD's exit code into the pass/fail tally. Honors --only (via section) and
+# --dry-run. Use a hook file only for substantial logic, or when an external
+# program execs the script by path (e.g. op-agent, called by an MCP headersHelper).
+on() {
+  local want="$1"
+  shift
+  case "$VERB" in
+    apply | fix) [[ "$want" == "apply" ]] || return 0 ;;
+    verify) [[ "$want" == "verify" ]] || return 0 ;;
+    *) return 0 ;; # uninstall etc. — `on` is apply/verify only
+  esac
+  _match "$_SECTION" || return 0
+  if [[ "$want" == "apply" && "${DRY_RUN:-0}" == "1" ]]; then
+    _note "would run: $*"
+    return 0
+  fi
+  local rc=0
+  "$@" || rc=$?
+  # A failed step counts toward the tally on both verbs (apply exits nonzero too).
+  [[ "$rc" -ne 0 ]] && _fail "$* (exit $rc)"
+  return 0
+}
+
 # Built-in verify-only policy: tracked .mcp.json/.env carry op:// refs, never
 # ${VAR} placeholders (Claude Code #18692) or resolved-token literals (b8067ab).
 _builtin_hygiene() {
@@ -241,8 +305,7 @@ _builtin_hygiene() {
   [[ "$clean" -eq 1 ]] && _ok "tracked .mcp.json/.env carry references only"
   # Always succeed: a dirty result is reported via _warn/_fail (which drive the
   # exit code). Returning the falsy `[[ clean ]]` above would, under `set -e`,
-  # abort `… && _builtin_hygiene` before the verify summary — making a warn-only
-  # finding exit 1 instead of 2 and swallowing the summary line.
+  # abort `… && _builtin_hygiene` before the verify summary.
   return 0
 }
 
@@ -250,10 +313,70 @@ _builtin_hygiene() {
 [[ "$DRY_RUN" == "1" ]] && printf '\033[0;36m==> ~ dry run — no changes\033[0m\n'
 printf '\033[1m==> botu %s\033[0m\n' "$VERB"
 
+_OSX_APPLIED=0
+_DECLARED=() # every dest link/copy/glob declares — populated while sourcing
+_MANIFEST="${XDG_STATE_HOME:-$HOME/.local/state}/botu/manifest"
+
 # shellcheck source=/dev/null
 source "$REPO/botufile" # executes the DSL under $VERB
 [[ "$VERB" == "verify" ]] && _builtin_hygiene
 
+# Orphan reaping: a symlink botu made (recorded in the manifest last run) whose
+# `link` line was since deleted from the botufile dangles forever — apply adds,
+# nothing removed. Compare the prior manifest against what's declared NOW: an
+# entry no longer declared but still pointing into $REPO is an orphan. verify
+# warns; apply/fix reap. This is the missing half of the symlink contract.
+_is_declared() {
+  local d
+  for d in ${_DECLARED+"${_DECLARED[@]}"}; do [[ "$d" == "$1" ]] && return 0; done
+  return 1
+}
+_reap_orphans() {
+  [[ -f "$_MANIFEST" ]] || return 0
+  local d t shown=0
+  while IFS= read -r d; do
+    [[ -n "$d" ]] || continue
+    _is_declared "$d" && continue
+    t="$(readlink "$d" 2> /dev/null || true)"
+    [[ "$t" == "$REPO/"* ]] || continue # only links into our repo
+    [[ "$shown" -eq 0 ]] && {
+      _hdr "Orphans"
+      shown=1
+    }
+    if [[ "$VERB" == "verify" ]]; then
+      _warn "$(_disp "$d") → $t (no longer declared — botu fix to reap)"
+    elif [[ "$DRY_RUN" == "1" ]]; then
+      _note "would reap $(_disp "$d")"
+    else
+      rm -f "$d" && _ok "reaped orphan $(_disp "$d")"
+    fi
+  done < "$_MANIFEST"
+}
+_reap_orphans
+
+# Persist what botu owns now (mutating verbs, real runs only). uninstall removes
+# everything, so it clears the manifest.
+if [[ "$DRY_RUN" != "1" ]]; then
+  case "$VERB" in
+    apply | fix)
+      mkdir -p "$(dirname "$_MANIFEST")"
+      : > "$_MANIFEST"
+      [[ "${#_DECLARED[@]}" -gt 0 ]] && printf '%s\n' "${_DECLARED[@]}" > "$_MANIFEST"
+      ;;
+    uninstall) rm -f "$_MANIFEST" ;;
+  esac
+fi
+
+# Built-in finalize: applied macOS defaults don't take effect until the owning
+# apps restart — a universal consequence of osx_default, so the engine does it
+# (not the botufile). Only when defaults actually changed, on apply.
+if [[ "$VERB" != "verify" && "$_OSX_APPLIED" == "1" && "$(os_kind)" == "darwin" && "${DRY_RUN:-0}" != "1" ]]; then
+  _hdr "macOS finalize"
+  killall Dock Finder SystemUIServer 2> /dev/null || true
+  _ok "restarted Dock/Finder/SystemUIServer (defaults changed)"
+fi
+
+# ── Summary + exit code ───────────────────────────────────────────────────────
 if [[ "$VERB" == "verify" ]]; then
   printf '\n'
   if [[ "$_FAIL" -gt 0 ]]; then
@@ -266,4 +389,10 @@ if [[ "$VERB" == "verify" ]]; then
   _p_ok "verify: all checks passed"
   exit 0
 fi
-printf '\n\033[0;32m==> %s done\033[0m\n' "$VERB"
+# apply / fix / uninstall: any failure makes the run nonzero (CI/bootstrap care).
+printf '\n'
+if [[ "$_FAIL" -gt 0 ]]; then
+  _p_fail "$VERB: ${_FAIL} failure(s)"
+  exit 1
+fi
+printf '\033[0;32m==> %s done\033[0m\n' "$VERB"

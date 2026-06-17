@@ -28,8 +28,6 @@ link ghostty/config     ~/.config/ghostty/config
 link bat/config         ~/.config/bat/config
 link atuin/config.toml  ~/.config/atuin/config.toml
 link gh/config.yml      ~/.config/gh/config.yml
-link gh/gh-mcp-auth-header     ~/.local/bin/gh-mcp-auth-header
-link render/render-mcp-auth-header ~/.local/bin/render-mcp-auth-header
 link nvim/init.lua      ~/.config/nvim/init.lua
 link karabiner/karabiner.json ~/.config/karabiner/karabiner.json
 
@@ -48,9 +46,31 @@ glob 'zsh/[0-9]*.zsh' ~/.config/zsh/
 brewfile Brewfile
 mise_install
 
-# Imperative escape hatches — thin hooks + inline data (hooks/<name>.sh):
-hook ssh-perms
-hook op-agent vault=claude-agent keychain=op-claude-agent
-hook claude    repo=github.com/alxjrvs/claude-statusline
-hook lefthook
-hook macos-finalize
+# ── Imperative steps ──────────────────────────────────────────────────────────
+# Small steps inline with `on <verb> CMD`; the botufile is bash, so they need no
+# file. A hook file is only for substantial logic (claude, below) or a script an
+# external program execs by path (op-agent, called by an MCP headersHelper).
+
+section "SSH perms"
+on apply chmod 700 ~/.ssh
+on apply mkdir -p ~/.ssh/cm
+on apply chmod 700 ~/.ssh/cm
+
+section "lefthook"
+on apply lefthook install
+
+# (macOS defaults → restart Dock/Finder/SystemUIServer is built into botu now —
+#  the engine does it automatically when any osx_default changed. Not a botufile
+#  concern: it's the universal consequence of the osx_default primitive.)
+
+# op-agent: one script, two surfaces. Linked onto PATH so MCP headersHelpers can
+# call `op-agent header op://…` (replacing the gh/render shims), AND driven below
+# as reconcile steps. One file, parameterized by argument — no script-per-service.
+section "op-agent"
+link hooks/op-agent.sh ~/.local/bin/op-agent
+on apply  op-agent provision
+on verify op-agent status
+
+# claude_statusline stays a hook file — multi-step clone+install, file-worthy.
+section "claude_statusline"
+hook claude_statusline repo=github.com/alxjrvs/claude-statusline

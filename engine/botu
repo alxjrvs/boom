@@ -110,7 +110,7 @@ _need_config() {
 
 case "$cmd" in
   "" | -h | --help)
-    printf 'usage: botu <init|apply|verify|fix|update> | <command> [args]\n'
+    printf 'usage: botu <init|apply|verify|fix|uninstall|update> | <command> [args]\n'
     printf '  config: %s\n' "${BOTU_CONFIG:-<none — run: botu init>}"
     printf '  tools:  %s\n' "$(_list_commands)"
     ;;
@@ -120,13 +120,21 @@ case "$cmd" in
     v="$(cat "$ENGINE_DIR/../VERSION" 2> /dev/null || true)"
     printf 'botu %s\n' "${v:-0.0.0-unknown}"
     ;;
-  apply | verify | fix)
+  apply | verify | fix | uninstall)
     _need_config "$cmd"
     exec "$ENGINE_DIR/run" "$cmd" "$@"
     ;;
   update)
     _need_config update
     exec "$ENGINE_DIR/run" apply --upgrade "$@"
+    ;;
+  sync) # muscle-memory alias for apply (was `dot sync`)
+    _need_config sync
+    exec "$ENGINE_DIR/run" apply "$@"
+    ;;
+  doctor) # muscle-memory alias for verify (was `dot doctor`)
+    _need_config doctor
+    exec "$ENGINE_DIR/run" verify "$@"
     ;;
   *)
     # Tier 2: discovered subcommands (engine-shipped, then config-supplied).
