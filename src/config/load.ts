@@ -1,8 +1,8 @@
 // Resolve, parse, and validate a botufile.toml. Resolution order mirrors the bash
 // engine: $BOTU_CONFIG → breadcrumb (from `botu init`) → cwd; first dir with a
 // botufile.toml wins. Parsing is smol-toml; validation is the valibot schema.
-import { readFile, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import { parse as parseToml } from "smol-toml";
 import * as v from "valibot";
 import { type Env, stateHome } from "../engine/state.ts";
@@ -35,6 +35,23 @@ export async function resolveConfigDir(env: Env, cwd: string): Promise<string | 
     if (candidate && (await hasBotufile(candidate))) return candidate;
   }
   return undefined;
+}
+
+// Record a dotfiles repo as the active config — write the breadcrumb that
+// resolveConfigDir reads. This is the CWD-linking half of `botu init`: `botu link`
+// is exactly this, while `botu init` is this plus the botuinit.sh bootstrap. Returns
+// the resolved absolute path; throws BotuConfigError if the dir has no botufile.toml.
+export async function linkConfigRepo(env: Env, dir: string): Promise<string> {
+  const target = resolve(dir);
+  if (!(await hasBotufile(target))) {
+    throw new BotuConfigError(
+      `no ${CONFIG_FILE} at ${target} — point me at your dotfiles repo: botu link /path/to/repo`,
+    );
+  }
+  const crumb = configBreadcrumbPath(env);
+  await mkdir(dirname(crumb), { recursive: true });
+  await writeFile(crumb, `${target}\n`);
+  return target;
 }
 
 function validate(file: string, raw: unknown): Botufile {

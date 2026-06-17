@@ -31,6 +31,11 @@ export async function resolveCodeDir(env: Env): Promise<string | undefined> {
   return undefined;
 }
 
+// Grouping folders to never crawl into: `Legacy` archives retired projects (often
+// with stray `git init` shells), so its contents shouldn't surface in the agent
+// picker. Matched case-insensitively against a directory's basename.
+const SKIP_DIRS = new Set(["legacy"]);
+
 export async function findRepos(root: string): Promise<string[]> {
   const out: string[] = [];
   const walk = async (dir: string, depth: number): Promise<void> => {
@@ -45,17 +50,21 @@ export async function findRepos(root: string): Promise<string[]> {
       if (!dir.includes("/.claude/worktrees") && !dir.includes("/.worktrees/")) out.push(dir);
       return; // leaf rule: never descend into a repo
     }
-    for (const e of entries) if (e.isDirectory()) await walk(join(dir, e.name), depth + 1);
+    for (const e of entries) {
+      if (e.isDirectory() && !SKIP_DIRS.has(e.name.toLowerCase())) await walk(join(dir, e.name), depth + 1);
+    }
   };
   await walk(root, 1);
   return out.sort();
 }
 
-// The "agents farm": one flat dir of symlinks (basename → repo) under botu's state
-// dir. Claude Code's agent view (`claude agents`) builds its `@<repo>` picker from a
+// The "agents farm": one flat dir of symlinks (basename → repo) at ~/.local/code.
+// Claude Code's agent view (`claude agents`) builds its `@<repo>` picker from a
 // single non-recursive scan of the launch cwd's immediate children (symlinks are
 // followed), so flattening the org-nested ~/Code into this dir makes every repo
-// @-taggable for dispatch — independent of any running background agent.
+// @-taggable for dispatch — independent of any running background agent. It lives
+// outside botu's state dir (a short, memorable path you can cd into by hand) and is
+// rebuilt from scratch each run, so nothing else should be kept there.
 export interface FarmLink {
   readonly name: string;
   readonly target: string;
@@ -66,7 +75,7 @@ export interface FarmPlan {
 }
 
 export function agentsFarmDir(env: Env): string {
-  return join(botuStateDir(env), "agents");
+  return join(env.HOME ?? "", ".local", "code");
 }
 
 // Map each repo to its basename; the `@<repo>` key is the basename, so two repos

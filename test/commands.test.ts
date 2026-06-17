@@ -3,6 +3,7 @@ import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { BotuConfigError, linkConfigRepo, resolveConfigDir } from "../src/config/load.ts";
 import type { BotuContext } from "../src/context.ts";
 import { findRepos, materializeAgentsFarm, planAgentsFarm, resolveCodeDir } from "../src/engine/code.ts";
 import { runUserCommand } from "../src/engine/discovery.ts";
@@ -59,6 +60,18 @@ test("findRepos finds git repos by the leaf rule, skipping worktrees", async () 
   expect(repos.some((r) => r.includes(".claude/worktrees"))).toBe(false);
 });
 
+test("findRepos skips Legacy folders entirely", async () => {
+  const root = await base();
+  await mkdir(join(root, "Active/repo/.git"), { recursive: true });
+  // A stray `git init` shell at the grouping level plus the real repo nested beneath:
+  // skipping Legacy drops both, rather than linking the empty shell.
+  await mkdir(join(root, "Legacy/Navi/.git"), { recursive: true });
+  await mkdir(join(root, "Legacy/Navi/real-app/.git"), { recursive: true });
+  const repos = await findRepos(root);
+  expect(repos).toEqual([join(root, "Active/repo")]);
+  expect(repos.some((r) => r.includes("Legacy"))).toBe(false);
+});
+
 test("planAgentsFarm flattens nested repos to basenames and flags collisions", async () => {
   const root = await base();
   await mkdir(join(root, "OrgA/widget/.git"), { recursive: true });
@@ -71,12 +84,13 @@ test("planAgentsFarm flattens nested repos to basenames and flags collisions", a
   expect(collisions.map((c) => c.target)).toEqual([join(root, "OrgB/widget")]);
 });
 
-test("materializeAgentsFarm symlinks repos into one flat dir that resolves to .git", async () => {
+test("materializeAgentsFarm symlinks repos into ~/.local/code, resolving to .git", async () => {
   const root = await base();
   await mkdir(join(root, "OrgA/widget/.git"), { recursive: true });
-  const env = { XDG_STATE_HOME: await base() };
-  const { links } = await planAgentsFarm(root);
-  const farm = await materializeAgentsFarm(env, links);
+  const home = await base();
+  const farm = await materializeAgentsFarm({ HOME: home }, (await planAgentsFarm(root)).links);
+  // The farm is the short, memorable ~/.local/code (not buried in the state dir).
+  expect(farm).toBe(join(home, ".local", "code"));
   // stat (not lstat) follows the symlink, mirroring how `claude agents` detects repos.
   expect((await stat(join(farm, "widget", ".git"))).isDirectory()).toBe(true);
 });
@@ -93,6 +107,22 @@ test("runUserCommand dispatches a config-supplied command", async () => {
   const rc = await runUserCommand("hello", ["a", "b"], ctx);
   expect(rc).toBe(0);
   expect(out()).toBe("hi a,b");
+});
+
+test("linkConfigRepo records a breadcrumb resolveConfigDir then reads (the `botu link` core)", async () => {
+  const repo = await base();
+  await writeFile(join(repo, "botufile.toml"), `[[section]]\nname = "x"\n`);
+  const env = { XDG_STATE_HOME: await base() };
+  const target = await linkConfigRepo(env, repo);
+  expect(target).toBe(repo);
+  // The breadcrumb is the only resolution signal here (no BOTU_CONFIG, cwd elsewhere).
+  expect(await resolveConfigDir(env, await base())).toBe(repo);
+});
+
+test("linkConfigRepo rejects a dir with no botufile.toml", async () => {
+  const empty = await base();
+  const env = { XDG_STATE_HOME: await base() };
+  expect(linkConfigRepo(env, empty)).rejects.toBeInstanceOf(BotuConfigError);
 });
 
 test("runUserCommand returns undefined for an unknown command", async () => {

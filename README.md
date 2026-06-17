@@ -18,6 +18,7 @@ portals to your machine's ideal state, and to your code. You drive it with the
 
 ```sh
 botu init ~/dotfiles     # record your dotfiles repo (+ writes botuinit.sh there)
+botu link ~/dotfiles     # … record the repo only (init without the bootstrap)
 botu apply               # symlink/copy/install/run from its botufile.toml
 botu verify              # check for drift (exit 0 ok / 2 warn / 1 fail)
 botu verify --json       # … as a structured drift report

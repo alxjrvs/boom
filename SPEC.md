@@ -76,7 +76,7 @@ the dotfiles repo and code dir.
 ```
 src/
   cli.ts · index.ts        @stricli app + entrypoint (dispatch: mcp, user cmds, built-ins)
-  commands/                init, apply/verify/fix/update/uninstall (reconcile.ts), where,
+  commands/                init, link, apply/verify/fix/update/uninstall (reconcile.ts), where,
                            migrate, rollback, code, watchtower, mcp
   engine/
     reconcile.ts           the one verb loop

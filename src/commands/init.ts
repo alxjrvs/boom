@@ -1,10 +1,11 @@
-// `botu init [path]` — record the dotfiles repo (the config breadcrumb) and write a
-// self-contained botuinit.sh bootstrap into it (one-command fresh-machine setup).
+// `botu init [path]` — record the dotfiles repo (the config breadcrumb, via `botu
+// link`) and write a self-contained botuinit.sh bootstrap into it (one-command
+// fresh-machine setup).
 
-import { mkdir, stat, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { buildCommand } from "@stricli/core";
-import { CONFIG_FILE, configBreadcrumbPath } from "../config/load.ts";
+import { linkConfigRepo } from "../config/load.ts";
 import type { BotuContext } from "../context.ts";
 
 const BOOTSTRAP = `#!/usr/bin/env sh
@@ -37,17 +38,13 @@ export const initCommand = buildCommand<Record<never, never>, [string?], BotuCon
     },
   },
   async func(_flags, path) {
-    const target = resolve(path ?? this.cwd);
+    // The CWD-linking half is `botu link`; init layers the bootstrap on top.
+    let target: string;
     try {
-      await stat(join(target, CONFIG_FILE));
-    } catch {
-      return new Error(
-        `no ${CONFIG_FILE} at ${target} — point me at your dotfiles repo: botu init /path/to/repo`,
-      );
+      target = await linkConfigRepo(this.env, path ?? this.cwd);
+    } catch (e) {
+      return e as Error;
     }
-    const crumb = configBreadcrumbPath(this.env);
-    await mkdir(dirname(crumb), { recursive: true });
-    await writeFile(crumb, `${target}\n`);
     this.process.stdout.write(`botu: dotfiles repo recorded → ${target}\n`);
 
     const boot = join(target, "botuinit.sh");

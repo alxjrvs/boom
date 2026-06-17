@@ -4,6 +4,7 @@
 import { buildApplication, buildRouteMap } from "@stricli/core";
 import { codeRouteMap } from "./commands/code.ts";
 import { initCommand } from "./commands/init.ts";
+import { linkCommand } from "./commands/link.ts";
 import {
   applyCommand,
   fixCommand,
@@ -19,6 +20,7 @@ import { VERSION } from "./lib/version.ts";
 const routes = buildRouteMap({
   routes: {
     init: initCommand,
+    link: linkCommand,
     apply: applyCommand,
     verify: verifyCommand,
     fix: fixCommand,
