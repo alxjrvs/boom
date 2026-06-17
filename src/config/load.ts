@@ -37,13 +37,22 @@ export async function resolveConfigDir(env: Env, cwd: string): Promise<string | 
   return undefined;
 }
 
-export async function loadConfig(dir: string): Promise<Botufile> {
-  const file = join(dir, CONFIG_FILE);
+function validate(file: string, raw: unknown): Botufile {
+  const result = v.safeParse(BotufileSchema, raw);
+  if (!result.success) {
+    const lines = result.issues.map((i) => `  - ${v.getDotPath(i) ?? "(root)"}: ${i.message}`);
+    throw new BotuConfigError(`${file}: does not match the botufile schema:\n${lines.join("\n")}`);
+  }
+  return result.output;
+}
+
+// Load + validate a specific botufile.toml (base or overlay) by full path.
+export async function loadConfigFile(file: string): Promise<Botufile> {
   let text: string;
   try {
     text = await readFile(file, "utf8");
   } catch {
-    throw new BotuConfigError(`no ${CONFIG_FILE} at ${dir}`);
+    throw new BotuConfigError(`no config file at ${file}`);
   }
   let raw: unknown;
   try {
@@ -51,10 +60,19 @@ export async function loadConfig(dir: string): Promise<Botufile> {
   } catch (e) {
     throw new BotuConfigError(`${file}: invalid TOML — ${(e as Error).message}`);
   }
-  const result = v.safeParse(BotufileSchema, raw);
-  if (!result.success) {
-    const lines = result.issues.map((i) => `  - ${v.getDotPath(i) ?? "(root)"}: ${i.message}`);
-    throw new BotuConfigError(`${file}: does not match the botufile schema:\n${lines.join("\n")}`);
+  return validate(file, raw);
+}
+
+// Like loadConfigFile, but returns undefined when the file is absent (for overlays).
+export async function loadOptionalConfigFile(file: string): Promise<Botufile | undefined> {
+  try {
+    await stat(file);
+  } catch {
+    return undefined;
   }
-  return result.output;
+  return loadConfigFile(file);
+}
+
+export function loadConfig(dir: string): Promise<Botufile> {
+  return loadConfigFile(join(dir, CONFIG_FILE));
 }

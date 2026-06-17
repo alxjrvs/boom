@@ -25,8 +25,17 @@ export const HookSchema = v.object({
   with: v.optional(v.record(v.string(), v.string())),
 });
 
+// A section/overlay gate: runs only when every specified constraint matches the
+// host. `os`/`host` auto-match the machine; `profile` requires `--profile <name>`.
+export const WhenSchema = v.object({
+  os: v.optional(v.picklist(["darwin", "linux"])),
+  host: v.optional(v.string()),
+  profile: v.optional(v.string()),
+});
+
 export const SectionSchema = v.object({
   name: v.string(),
+  when: v.optional(WhenSchema),
   link: v.optional(v.array(LinkSchema)),
   copy: v.optional(v.array(LinkSchema)),
   glob: v.optional(v.array(GlobSchema)),
@@ -40,6 +49,7 @@ export const BotufileSchema = v.object({
   section: v.array(SectionSchema),
 });
 
+export type When = v.InferOutput<typeof WhenSchema>;
 export type Link = v.InferOutput<typeof LinkSchema>;
 export type Glob = v.InferOutput<typeof GlobSchema>;
 export type Run = v.InferOutput<typeof RunSchema>;

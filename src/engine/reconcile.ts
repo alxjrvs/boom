@@ -3,8 +3,9 @@
 // apply/fix it opens a transaction journal (+ backups) so the run is rollback-able and
 // resumable, and persists the manifest of owned destinations.
 import { join } from "node:path";
-import { loadConfig, resolveConfigDir } from "../config/load.ts";
-import type { Botufile } from "../config/schema.ts";
+import { loadConfig, loadOptionalConfigFile, resolveConfigDir } from "../config/load.ts";
+import { overlayFiles, profileContext, sectionApplies } from "../config/profile.ts";
+import type { Botufile, Section } from "../config/schema.ts";
 import type { BotuContext } from "../context.ts";
 import { colorEnabled } from "../lib/color.ts";
 import { displayPath, linkTarget, rm } from "../lib/fs.ts";
@@ -20,6 +21,7 @@ export interface ReconcileOptions {
   readonly linkMode?: LinkMode;
   readonly json?: boolean;
   readonly resume?: boolean;
+  readonly profiles?: string[];
 }
 
 async function reapOrphans(ctx: ReconcileCtx, prior: readonly string[]): Promise<void> {
@@ -118,9 +120,24 @@ export async function reconcile(verb: Verb, ctx: BotuContext, opts: ReconcileOpt
     resumeDone,
   };
 
+  // Merge overlay files (botufile.<os|host|profile>.toml) onto the base, then gate
+  // each section by its `when` (host/OS/profile) and the --only filter.
+  const pc = profileContext(ctx.env, opts.profiles ?? []);
+  const sections: Section[] = [...config.section];
+  try {
+    for (const name of overlayFiles(pc)) {
+      const overlay = await loadOptionalConfigFile(join(repo, name));
+      if (overlay) sections.push(...overlay.section);
+    }
+  } catch (e) {
+    report.fail((e as Error).message);
+    return finish();
+  }
+
   if (dryRun) report.header(`${verb} — dry run (no changes)`);
   const only = opts.only && opts.only.length > 0 ? new Set(opts.only) : undefined;
-  for (const section of config.section) {
+  for (const section of sections) {
+    if (!sectionApplies(section, pc)) continue;
     if (only && !only.has(section.name)) continue;
     report.header(section.name);
     await reconcileSection(section, rctx);

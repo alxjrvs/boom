@@ -13,10 +13,24 @@ const onlyFlag = {
   optional: true,
   brief: "Limit to these section names",
 } as const;
+const profileFlag = {
+  kind: "parsed",
+  parse: parseTag,
+  variadic: true,
+  optional: true,
+  brief: "Activate a profile (repeatable)",
+} as const;
 
-type OnlyFlags = { only?: string[] };
-type VerifyFlags = { only?: string[]; json?: boolean };
-type ApplyFlags = { dryRun?: boolean; force?: boolean; skip?: boolean; resume?: boolean; only?: string[] };
+type OnlyFlags = { only?: string[]; profile?: string[] };
+type VerifyFlags = { only?: string[]; json?: boolean; profile?: string[] };
+type ApplyFlags = {
+  dryRun?: boolean;
+  force?: boolean;
+  skip?: boolean;
+  resume?: boolean;
+  only?: string[];
+  profile?: string[];
+};
 
 function linkModeOf(flags: { force?: boolean; skip?: boolean }): LinkMode {
   if (flags.force) return "overwrite";
@@ -33,6 +47,7 @@ export const applyCommand = buildCommand<ApplyFlags, [], BotuContext>({
       skip: { kind: "boolean", optional: true, brief: "Skip conflicting targets" },
       resume: { kind: "boolean", optional: true, brief: "Continue an interrupted apply (skip done steps)" },
       only: onlyFlag,
+      profile: profileFlag,
     },
     aliases: { f: "force", s: "skip" },
   },
@@ -41,6 +56,7 @@ export const applyCommand = buildCommand<ApplyFlags, [], BotuContext>({
       only: flags.only,
       dryRun: flags.dryRun,
       resume: flags.resume,
+      profiles: flags.profile,
       linkMode: linkModeOf(flags),
     });
   },
@@ -51,27 +67,32 @@ export const verifyCommand = buildCommand<VerifyFlags, [], BotuContext>({
   parameters: {
     flags: {
       only: onlyFlag,
+      profile: profileFlag,
       json: { kind: "boolean", optional: true, brief: "Emit a structured JSON drift report" },
     },
   },
   async func(flags) {
-    this.process.exitCode = await reconcile("verify", this, { only: flags.only, json: flags.json });
+    this.process.exitCode = await reconcile("verify", this, {
+      only: flags.only,
+      json: flags.json,
+      profiles: flags.profile,
+    });
   },
 });
 
 export const fixCommand = buildCommand<OnlyFlags, [], BotuContext>({
   docs: { brief: "Repair drift (apply, overwriting conflicts)" },
-  parameters: { flags: { only: onlyFlag } },
+  parameters: { flags: { only: onlyFlag, profile: profileFlag } },
   async func(flags) {
-    this.process.exitCode = await reconcile("fix", this, { only: flags.only });
+    this.process.exitCode = await reconcile("fix", this, { only: flags.only, profiles: flags.profile });
   },
 });
 
 export const updateCommand = buildCommand<OnlyFlags, [], BotuContext>({
   docs: { brief: "Apply with upgrades (apply --upgrade)" },
-  parameters: { flags: { only: onlyFlag } },
+  parameters: { flags: { only: onlyFlag, profile: profileFlag } },
   async func(flags) {
-    this.process.exitCode = await reconcile("apply", this, { only: flags.only });
+    this.process.exitCode = await reconcile("apply", this, { only: flags.only, profiles: flags.profile });
   },
 });
 
