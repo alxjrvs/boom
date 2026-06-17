@@ -1,12 +1,9 @@
-// The reconcile verbs. In the bash engine these were ONE verb-parameterized loop
-// (engine/run); the TS engine keeps that shape — M2 routes all of these through a
-// single reconcile(verb, config) over the resource-type registry. For M0 they are
-// stubs so the CLI wiring, help text, version, and aliases are exercisable.
-//
-// Stricli marks `parameters` as NoInfer and infers awkwardly through the `this`-typed
-// command function, so we pass explicit type arguments to buildCommand<FLAGS>.
+// The reconcile verbs — thin wrappers over the one engine loop (engine/reconcile.ts),
+// parameterized by verb. Exit code comes from the engine (verify: 0/2/1).
 import { buildCommand } from "@stricli/core";
 import type { BotuContext } from "../context.ts";
+import { reconcile } from "../engine/reconcile.ts";
+import type { LinkMode } from "../engine/types.ts";
 
 const parseTag = (s: string): string => s;
 const onlyFlag = {
@@ -14,11 +11,17 @@ const onlyFlag = {
   parse: parseTag,
   variadic: true,
   optional: true,
-  brief: "Limit to these section tags",
+  brief: "Limit to these section names",
 } as const;
 
 type OnlyFlags = { only?: string[] };
 type ApplyFlags = { dryRun?: boolean; force?: boolean; skip?: boolean; only?: string[] };
+
+function linkModeOf(flags: { force?: boolean; skip?: boolean }): LinkMode {
+  if (flags.force) return "overwrite";
+  if (flags.skip) return "skip";
+  return "interactive";
+}
 
 export const applyCommand = buildCommand<ApplyFlags, [], BotuContext>({
   docs: { brief: "Reconcile your machine from the botufile — make it so" },
@@ -31,32 +34,36 @@ export const applyCommand = buildCommand<ApplyFlags, [], BotuContext>({
     },
     aliases: { f: "force", s: "skip" },
   },
-  func(flags) {
-    this.process.stdout.write(`botu apply: not yet implemented (M2)${flags.dryRun ? " [dry-run]" : ""}\n`);
+  async func(flags) {
+    this.process.exitCode = await reconcile("apply", this, {
+      only: flags.only,
+      dryRun: flags.dryRun,
+      linkMode: linkModeOf(flags),
+    });
   },
 });
 
 export const verifyCommand = buildCommand<OnlyFlags, [], BotuContext>({
   docs: { brief: "Check for drift — exit 0 ok / 2 warn / 1 fail" },
   parameters: { flags: { only: onlyFlag } },
-  func(_flags) {
-    this.process.stdout.write("botu verify: not yet implemented (M2)\n");
+  async func(flags) {
+    this.process.exitCode = await reconcile("verify", this, { only: flags.only });
   },
 });
 
 export const fixCommand = buildCommand<OnlyFlags, [], BotuContext>({
   docs: { brief: "Repair drift (apply, overwriting conflicts)" },
   parameters: { flags: { only: onlyFlag } },
-  func(_flags) {
-    this.process.stdout.write("botu fix: not yet implemented (M2)\n");
+  async func(flags) {
+    this.process.exitCode = await reconcile("fix", this, { only: flags.only });
   },
 });
 
 export const updateCommand = buildCommand<OnlyFlags, [], BotuContext>({
   docs: { brief: "Apply with upgrades (apply --upgrade)" },
   parameters: { flags: { only: onlyFlag } },
-  func(_flags) {
-    this.process.stdout.write("botu update: not yet implemented (M2)\n");
+  async func(flags) {
+    this.process.exitCode = await reconcile("apply", this, { only: flags.only });
   },
 });
 
@@ -67,9 +74,7 @@ export const uninstallCommand = buildCommand<{ dryRun?: boolean }, [], BotuConte
       dryRun: { kind: "boolean", optional: true, brief: "Show what would be removed; remove nothing" },
     },
   },
-  func(flags) {
-    this.process.stdout.write(
-      `botu uninstall: not yet implemented (M2)${flags.dryRun ? " [dry-run]" : ""}\n`,
-    );
+  async func(flags) {
+    this.process.exitCode = await reconcile("uninstall", this, { dryRun: flags.dryRun });
   },
 });

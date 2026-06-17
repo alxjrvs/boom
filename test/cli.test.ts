@@ -22,8 +22,9 @@ function fakeContext() {
     env: {} as Record<string, string>,
     exitCode: 0 as number,
   };
-  // The fake satisfies Stricli's StricliProcess (stdout/stderr/env/exitCode).
-  return { buf, proc, ctx: { process: proc } as never };
+  // The fake satisfies BotuContext (process/env/cwd); cwd points nowhere so the
+  // reconcile verbs resolve no config and report the expected error.
+  return { buf, proc, ctx: { process: proc, env: proc.env, cwd: "/nonexistent-botu" } as never };
 }
 
 test("--version prints the package version", async () => {
@@ -40,11 +41,10 @@ test("--help lists the core verbs", async () => {
   expect(text).toContain("verify");
 });
 
-test("a known verb dispatches to its stub", async () => {
+test("a known verb routes to the engine", async () => {
   const { buf, ctx } = fakeContext();
-  await run(app, ["apply", "--dry-run"], ctx);
-  expect(buf.out).toContain("botu apply");
-  expect(buf.out).toContain("[dry-run]");
+  await run(app, ["apply"], ctx);
+  expect(buf.err).toContain("no dotfiles repo");
 });
 
 test("an unknown command reports an error", async () => {
