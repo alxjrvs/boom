@@ -1,10 +1,10 @@
 // M5: code-dir resolution + repo crawl, and discovered user commands.
 import { expect, test } from "bun:test";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BotuContext } from "../src/context.ts";
-import { findRepos, resolveCodeDir } from "../src/engine/code.ts";
+import { findRepos, materializeAgentsFarm, planAgentsFarm, resolveCodeDir } from "../src/engine/code.ts";
 import { runUserCommand } from "../src/engine/discovery.ts";
 
 async function base(): Promise<string> {
@@ -35,6 +35,16 @@ test("resolveCodeDir honors BOTU_CODE", async () => {
   expect(await resolveCodeDir({ BOTU_CODE: dir })).toBe(dir);
 });
 
+test("resolveCodeDir reads the breadcrumb `botu code init` writes", async () => {
+  const stateHome = await base();
+  const codeDir = await base();
+  const env = { XDG_STATE_HOME: stateHome };
+  // Mirror what `botu code init <codeDir>` records.
+  await mkdir(join(stateHome, "botu"), { recursive: true });
+  await writeFile(join(stateHome, "botu", "code"), `${codeDir}\n`);
+  expect(await resolveCodeDir(env)).toBe(codeDir);
+});
+
 test("findRepos finds git repos by the leaf rule, skipping worktrees", async () => {
   const root = await base();
   await mkdir(join(root, "alpha/.git"), { recursive: true });
@@ -47,6 +57,28 @@ test("findRepos finds git repos by the leaf rule, skipping worktrees", async () 
   expect(repos).toContain(join(root, "gamma"));
   // the worktree under gamma is never descended into (gamma is a leaf)
   expect(repos.some((r) => r.includes(".claude/worktrees"))).toBe(false);
+});
+
+test("planAgentsFarm flattens nested repos to basenames and flags collisions", async () => {
+  const root = await base();
+  await mkdir(join(root, "OrgA/widget/.git"), { recursive: true });
+  await mkdir(join(root, "OrgA/gadget/.git"), { recursive: true });
+  await mkdir(join(root, "OrgB/widget/.git"), { recursive: true }); // basename collides with OrgA/widget
+  const { links, collisions } = await planAgentsFarm(root);
+  // OrgA sorts before OrgB, so OrgA/widget wins the name; OrgB/widget is the collision.
+  expect(links.map((l) => l.name).sort()).toEqual(["gadget", "widget"]);
+  expect(links.find((l) => l.name === "widget")?.target).toBe(join(root, "OrgA/widget"));
+  expect(collisions.map((c) => c.target)).toEqual([join(root, "OrgB/widget")]);
+});
+
+test("materializeAgentsFarm symlinks repos into one flat dir that resolves to .git", async () => {
+  const root = await base();
+  await mkdir(join(root, "OrgA/widget/.git"), { recursive: true });
+  const env = { XDG_STATE_HOME: await base() };
+  const { links } = await planAgentsFarm(root);
+  const farm = await materializeAgentsFarm(env, links);
+  // stat (not lstat) follows the symlink, mirroring how `claude agents` detects repos.
+  expect((await stat(join(farm, "widget", ".git"))).isDirectory()).toBe(true);
 });
 
 test("runUserCommand dispatches a config-supplied command", async () => {

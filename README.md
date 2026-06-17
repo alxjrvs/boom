@@ -25,7 +25,7 @@ botu fix                 # repair drift
 botu rollback            # undo the last apply (restores backed-up files)
 
 botu code init ~/Code    # record your code dir
-botu code claude         # one idle `claude --bg` agent per repo
+botu code claude         # symlink every repo into one dir, open `claude agents` there
 botu code cmux           # one cmux workspace per repo
 ```
 

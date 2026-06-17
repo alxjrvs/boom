@@ -2,8 +2,8 @@
 // and crawl it for git repos using the leaf rule (a repo is a leaf; don't descend
 // into it or into worktrees). Ports engine/commands/code's _resolve_code + _repos.
 import type { Dirent } from "node:fs";
-import { readdir, readFile, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readdir, readFile, rm, stat, symlink } from "node:fs/promises";
+import { basename, join } from "node:path";
 import { botuStateDir, type Env } from "./state.ts";
 
 export function codeBreadcrumbPath(env: Env): string {
@@ -49,4 +49,51 @@ export async function findRepos(root: string): Promise<string[]> {
   };
   await walk(root, 1);
   return out.sort();
+}
+
+// The "agents farm": one flat dir of symlinks (basename → repo) under botu's state
+// dir. Claude Code's agent view (`claude agents`) builds its `@<repo>` picker from a
+// single non-recursive scan of the launch cwd's immediate children (symlinks are
+// followed), so flattening the org-nested ~/Code into this dir makes every repo
+// @-taggable for dispatch — independent of any running background agent.
+export interface FarmLink {
+  readonly name: string;
+  readonly target: string;
+}
+export interface FarmPlan {
+  readonly links: FarmLink[];
+  readonly collisions: FarmLink[];
+}
+
+export function agentsFarmDir(env: Env): string {
+  return join(botuStateDir(env), "agents");
+}
+
+// Map each repo to its basename; the `@<repo>` key is the basename, so two repos
+// that share one (across orgs) collide. findRepos() returns sorted paths, so
+// first-wins is deterministic; the loser is reported, not silently dropped.
+export async function planAgentsFarm(root: string): Promise<FarmPlan> {
+  const repos = await findRepos(root);
+  const links: FarmLink[] = [];
+  const collisions: FarmLink[] = [];
+  const taken = new Set<string>();
+  for (const target of repos) {
+    const name = basename(target);
+    if (taken.has(name)) collisions.push({ name, target });
+    else {
+      taken.add(name);
+      links.push({ name, target });
+    }
+  }
+  return { links, collisions };
+}
+
+// Rebuild the farm from scratch (so removed repos don't leave orphan links) and
+// symlink each repo in. Returns the farm path to launch `claude agents` from.
+export async function materializeAgentsFarm(env: Env, links: readonly FarmLink[]): Promise<string> {
+  const farm = agentsFarmDir(env);
+  await rm(farm, { recursive: true, force: true });
+  await mkdir(farm, { recursive: true });
+  for (const { name, target } of links) await symlink(target, join(farm, name));
+  return farm;
 }
