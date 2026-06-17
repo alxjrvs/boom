@@ -3,6 +3,7 @@
 import { basename, dirname, join } from "node:path";
 import type { Glob, Link } from "../../config/schema.ts";
 import {
+  backupTo,
   chmod,
   copyFile,
   displayPath,
@@ -15,6 +16,7 @@ import {
   rm,
   stat,
 } from "../../lib/fs.ts";
+import type { UndoToken } from "../journal.ts";
 import type { LinkMode, ReconcileCtx } from "../types.ts";
 
 async function applyLink(
@@ -33,14 +35,25 @@ async function applyLink(
     report.plan(`${disp} would be linked`);
     return;
   }
+  if (ctx.resumeDone?.has(dst)) {
+    report.skip(`${disp} (resumed — already applied)`);
+    return;
+  }
   if (!(await pathExists(dst))) {
+    await ctx.journal?.intent("link", dst);
     await ensureSymlink(src, dst);
+    await ctx.journal?.done("link", dst, { kind: "remove" });
     report.ok(`${disp} linked`);
     return;
   }
   if (mode === "overwrite") {
-    await rm(dst, { recursive: true, force: true });
+    await ctx.journal?.intent("link", dst);
+    const undo: UndoToken = ctx.backupRoot
+      ? { kind: "restore", from: await backupTo(dst, ctx.backupRoot) }
+      : { kind: "remove" };
+    if (!ctx.backupRoot) await rm(dst, { recursive: true, force: true });
     await ensureSymlink(src, dst);
+    await ctx.journal?.done("link", dst, undo);
     report.ok(`${disp} overwritten`);
     return;
   }
@@ -115,9 +128,19 @@ export async function reconcileCopy(entry: Link, ctx: ReconcileCtx): Promise<voi
         report.plan(`${disp} would be copied`);
         return;
       }
+      if (ctx.resumeDone?.has(dst)) {
+        report.skip(`${disp} (resumed — already applied)`);
+        return;
+      }
+      await ctx.journal?.intent("copy", dst);
+      let undo: UndoToken = { kind: "remove" };
+      if ((await pathExists(dst)) && ctx.backupRoot) {
+        undo = { kind: "restore", from: await backupTo(dst, ctx.backupRoot) };
+      }
       await mkdir(dirname(dst), { recursive: true });
       await copyFile(src, dst);
       await chmod(dst, mode);
+      await ctx.journal?.done("copy", dst, undo);
       report.ok(`${disp} copied`);
       return;
     }

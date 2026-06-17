@@ -5,17 +5,12 @@ import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { parse as parseToml } from "smol-toml";
 import * as v from "valibot";
+import { type Env, stateHome } from "../engine/state.ts";
 import { type Botufile, BotufileSchema } from "./schema.ts";
 
 export const CONFIG_FILE = "botufile.toml";
 
 export class BotuConfigError extends Error {}
-
-type Env = Record<string, string | undefined>;
-
-function stateHome(env: Env): string {
-  return env.XDG_STATE_HOME ?? join(env.HOME ?? "", ".local", "state");
-}
 
 export function configBreadcrumbPath(env: Env): string {
   return join(stateHome(env), "botu", "config");

@@ -1,4 +1,5 @@
 import type { Reporter } from "../lib/reporter.ts";
+import type { Journal } from "./journal.ts";
 
 export type Verb = "apply" | "verify" | "fix" | "uninstall";
 export type LinkMode = "interactive" | "overwrite" | "skip";
@@ -11,7 +12,11 @@ export interface ReconcileCtx {
   readonly linkMode: LinkMode;
   readonly env: Record<string, string | undefined>;
   readonly report: Reporter;
-  // Destinations botu owns this run — populated as handlers run (orphan reaping +
-  // the uninstall manifest build on this in M3).
+  // Destinations botu owns this run — populated as handlers run (drives orphan
+  // reaping + the persisted manifest).
   readonly declared: string[];
+  // Transaction state (present for mutating apply/fix runs):
+  readonly journal?: Journal;
+  readonly backupRoot?: string;
+  readonly resumeDone?: ReadonlySet<string>;
 }

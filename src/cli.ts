@@ -10,6 +10,7 @@ import {
   updateCommand,
   verifyCommand,
 } from "./commands/reconcile.ts";
+import { rollbackCommand } from "./commands/rollback.ts";
 import { whereCommand } from "./commands/where.ts";
 import { VERSION } from "./lib/version.ts";
 
@@ -22,6 +23,7 @@ const routes = buildRouteMap({
     uninstall: uninstallCommand,
     where: whereCommand,
     migrate: migrateCommand,
+    rollback: rollbackCommand,
   },
   // Muscle-memory aliases carried from the bash era (was `dot sync` / `dot doctor`).
   aliases: { sync: "apply", doctor: "verify" },

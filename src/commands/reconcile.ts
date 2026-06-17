@@ -15,7 +15,8 @@ const onlyFlag = {
 } as const;
 
 type OnlyFlags = { only?: string[] };
-type ApplyFlags = { dryRun?: boolean; force?: boolean; skip?: boolean; only?: string[] };
+type VerifyFlags = { only?: string[]; json?: boolean };
+type ApplyFlags = { dryRun?: boolean; force?: boolean; skip?: boolean; resume?: boolean; only?: string[] };
 
 function linkModeOf(flags: { force?: boolean; skip?: boolean }): LinkMode {
   if (flags.force) return "overwrite";
@@ -30,6 +31,7 @@ export const applyCommand = buildCommand<ApplyFlags, [], BotuContext>({
       dryRun: { kind: "boolean", optional: true, brief: "Show what would change; change nothing" },
       force: { kind: "boolean", optional: true, brief: "Overwrite conflicting targets" },
       skip: { kind: "boolean", optional: true, brief: "Skip conflicting targets" },
+      resume: { kind: "boolean", optional: true, brief: "Continue an interrupted apply (skip done steps)" },
       only: onlyFlag,
     },
     aliases: { f: "force", s: "skip" },
@@ -38,16 +40,22 @@ export const applyCommand = buildCommand<ApplyFlags, [], BotuContext>({
     this.process.exitCode = await reconcile("apply", this, {
       only: flags.only,
       dryRun: flags.dryRun,
+      resume: flags.resume,
       linkMode: linkModeOf(flags),
     });
   },
 });
 
-export const verifyCommand = buildCommand<OnlyFlags, [], BotuContext>({
+export const verifyCommand = buildCommand<VerifyFlags, [], BotuContext>({
   docs: { brief: "Check for drift — exit 0 ok / 2 warn / 1 fail" },
-  parameters: { flags: { only: onlyFlag } },
+  parameters: {
+    flags: {
+      only: onlyFlag,
+      json: { kind: "boolean", optional: true, brief: "Emit a structured JSON drift report" },
+    },
+  },
   async func(flags) {
-    this.process.exitCode = await reconcile("verify", this, { only: flags.only });
+    this.process.exitCode = await reconcile("verify", this, { only: flags.only, json: flags.json });
   },
 });
 
