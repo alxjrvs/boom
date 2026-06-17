@@ -4,7 +4,6 @@
 import { buildApplication, buildRouteMap } from "@stricli/core";
 import { codeRouteMap } from "./commands/code.ts";
 import { initCommand } from "./commands/init.ts";
-import { migrateCommand } from "./commands/migrate.ts";
 import {
   applyCommand,
   fixCommand,
@@ -26,7 +25,6 @@ const routes = buildRouteMap({
     update: updateCommand,
     uninstall: uninstallCommand,
     where: whereCommand,
-    migrate: migrateCommand,
     rollback: rollbackCommand,
     code: codeRouteMap,
     watchtower: watchtowerCommand,

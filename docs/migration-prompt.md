@@ -2,13 +2,12 @@
 
 Hand this prompt to an agent (Claude Code) pointed at a dotfiles repo that still
 uses the legacy bash `botufile`. It produces a `botufile.toml` matching botu's
-TypeScript schema, and converts bash hooks to TypeScript resource modules — the
-parts `botu migrate` (the mechanical converter) can't fully handle.
+TypeScript schema, and converts bash hooks to TypeScript resource modules.
 
-> Run `botu migrate <repo>` first for the mechanical 1:1 conversion (links,
-> copies, globs, brewfile, mise, `on` steps, hook references). Then use this
-> prompt to (a) review the result, (b) port hook **files**, and (c) add host/OS
-> profiles. The prompt assumes the mechanical pass already produced a draft.
+> Work through it in two passes: (a) translate the bash `botufile` to a
+> `botufile.toml` using the mapping below, then (b) port hook **files** to
+> `hooks/<name>.ts` and add host/OS profiles. Verify against the live engine with
+> `botu verify --json`.
 
 ---
 

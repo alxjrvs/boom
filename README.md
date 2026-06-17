@@ -62,8 +62,9 @@ extension point for anything the declarative resources can't express.
 Multi-machine setups gate sections with `when`, or layer overlay files
 (`botufile.<os|host|profile>.toml`).
 
-Migrating from the old bash `botufile`? Run `botu migrate <repo>` for the
-mechanical conversion, then see [`docs/migration-prompt.md`](docs/migration-prompt.md).
+Coming from the old bash `botufile`? See
+[`docs/migration-prompt.md`](docs/migration-prompt.md) — a prompt that converts it
+to `botufile.toml` and ports bash hooks to TypeScript.
 
 ## Install
 
