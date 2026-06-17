@@ -1,9 +1,13 @@
-// `botu where <config|code|engine>` — the single source of truth for resolving
-// botu's paths, so other commands never re-derive breadcrumb logic (this kills the
-// triplication the audit flagged). Real resolution lands in M1 (config) / M5 (code).
-import { buildCommand } from "@stricli/core";
+// `botu where <config|code|engine>` — single source of truth for resolving botu's
+// paths, so commands never re-derive breadcrumb logic. config resolves now (M1);
+// code lands in M5; engine reports the running binary's directory.
 
-export const whereCommand = buildCommand<Record<never, never>, [string]>({
+import { dirname } from "node:path";
+import { buildCommand } from "@stricli/core";
+import { resolveConfigDir } from "../config/load.ts";
+import type { BotuContext } from "../context.ts";
+
+export const whereCommand = buildCommand<Record<never, never>, [string], BotuContext>({
   docs: { brief: "Print a resolved botu path: config | code | engine" },
   parameters: {
     positional: {
@@ -11,7 +15,21 @@ export const whereCommand = buildCommand<Record<never, never>, [string]>({
       parameters: [{ parse: (s: string) => s, placeholder: "target", brief: "config | code | engine" }],
     },
   },
-  func(_flags, target) {
-    this.process.stdout.write(`botu where ${target}: not yet implemented (M5)\n`);
+  async func(_flags, target) {
+    switch (target) {
+      case "config": {
+        const dir = await resolveConfigDir(this.env, this.cwd);
+        if (!dir) return new Error("no dotfiles repo found — run `botu init`");
+        this.process.stdout.write(`${dir}\n`);
+        return;
+      }
+      case "engine":
+        this.process.stdout.write(`${dirname(process.execPath)}\n`);
+        return;
+      case "code":
+        return new Error("botu where code: not yet implemented (M5)");
+      default:
+        return new Error(`unknown target: ${target} (expected config | code | engine)`);
+    }
   },
 });

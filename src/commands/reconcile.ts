@@ -6,6 +6,7 @@
 // Stricli marks `parameters` as NoInfer and infers awkwardly through the `this`-typed
 // command function, so we pass explicit type arguments to buildCommand<FLAGS>.
 import { buildCommand } from "@stricli/core";
+import type { BotuContext } from "../context.ts";
 
 const parseTag = (s: string): string => s;
 const onlyFlag = {
@@ -19,7 +20,7 @@ const onlyFlag = {
 type OnlyFlags = { only?: string[] };
 type ApplyFlags = { dryRun?: boolean; force?: boolean; skip?: boolean; only?: string[] };
 
-export const applyCommand = buildCommand<ApplyFlags>({
+export const applyCommand = buildCommand<ApplyFlags, [], BotuContext>({
   docs: { brief: "Reconcile your machine from the botufile — make it so" },
   parameters: {
     flags: {
@@ -35,7 +36,7 @@ export const applyCommand = buildCommand<ApplyFlags>({
   },
 });
 
-export const verifyCommand = buildCommand<OnlyFlags>({
+export const verifyCommand = buildCommand<OnlyFlags, [], BotuContext>({
   docs: { brief: "Check for drift — exit 0 ok / 2 warn / 1 fail" },
   parameters: { flags: { only: onlyFlag } },
   func(_flags) {
@@ -43,7 +44,7 @@ export const verifyCommand = buildCommand<OnlyFlags>({
   },
 });
 
-export const fixCommand = buildCommand<OnlyFlags>({
+export const fixCommand = buildCommand<OnlyFlags, [], BotuContext>({
   docs: { brief: "Repair drift (apply, overwriting conflicts)" },
   parameters: { flags: { only: onlyFlag } },
   func(_flags) {
@@ -51,7 +52,7 @@ export const fixCommand = buildCommand<OnlyFlags>({
   },
 });
 
-export const updateCommand = buildCommand<OnlyFlags>({
+export const updateCommand = buildCommand<OnlyFlags, [], BotuContext>({
   docs: { brief: "Apply with upgrades (apply --upgrade)" },
   parameters: { flags: { only: onlyFlag } },
   func(_flags) {
@@ -59,7 +60,7 @@ export const updateCommand = buildCommand<OnlyFlags>({
   },
 });
 
-export const uninstallCommand = buildCommand<{ dryRun?: boolean }>({
+export const uninstallCommand = buildCommand<{ dryRun?: boolean }, [], BotuContext>({
   docs: { brief: "Remove everything botu installed" },
   parameters: {
     flags: {

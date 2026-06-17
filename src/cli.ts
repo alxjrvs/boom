@@ -2,6 +2,7 @@
 // (code/mcp/watchtower) — built-ins via a build-time route map, user commands via
 // runtime import() of <config>/commands/*.ts.
 import { buildApplication, buildRouteMap } from "@stricli/core";
+import { migrateCommand } from "./commands/migrate.ts";
 import {
   applyCommand,
   fixCommand,
@@ -20,6 +21,7 @@ const routes = buildRouteMap({
     update: updateCommand,
     uninstall: uninstallCommand,
     where: whereCommand,
+    migrate: migrateCommand,
   },
   // Muscle-memory aliases carried from the bash era (was `dot sync` / `dot doctor`).
   aliases: { sync: "apply", doctor: "verify" },
