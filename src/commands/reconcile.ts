@@ -20,14 +20,16 @@ const profileFlag = {
   optional: true,
   brief: "Activate a profile (repeatable)",
 } as const;
+const jsonFlag = { kind: "boolean", optional: true, brief: "Emit a structured JSON report" } as const;
 
-type OnlyFlags = { only?: string[]; profile?: string[] };
+type OnlyFlags = { only?: string[]; json?: boolean; profile?: string[] };
 type VerifyFlags = { only?: string[]; json?: boolean; profile?: string[] };
 type ApplyFlags = {
   dryRun?: boolean;
   force?: boolean;
   skip?: boolean;
   resume?: boolean;
+  json?: boolean;
   only?: string[];
   profile?: string[];
 };
@@ -48,6 +50,7 @@ export const applyCommand = buildCommand<ApplyFlags, [], BotuContext>({
       resume: { kind: "boolean", optional: true, brief: "Continue an interrupted apply (skip done steps)" },
       only: onlyFlag,
       profile: profileFlag,
+      json: jsonFlag,
     },
     aliases: { f: "force", s: "skip" },
   },
@@ -56,6 +59,7 @@ export const applyCommand = buildCommand<ApplyFlags, [], BotuContext>({
       only: flags.only,
       dryRun: flags.dryRun,
       resume: flags.resume,
+      json: flags.json,
       profiles: flags.profile,
       linkMode: linkModeOf(flags),
     });
@@ -82,28 +86,37 @@ export const verifyCommand = buildCommand<VerifyFlags, [], BotuContext>({
 
 export const fixCommand = buildCommand<OnlyFlags, [], BotuContext>({
   docs: { brief: "Repair drift (apply, overwriting conflicts)" },
-  parameters: { flags: { only: onlyFlag, profile: profileFlag } },
+  parameters: { flags: { only: onlyFlag, profile: profileFlag, json: jsonFlag } },
   async func(flags) {
-    this.process.exitCode = await reconcile("fix", this, { only: flags.only, profiles: flags.profile });
+    this.process.exitCode = await reconcile("fix", this, {
+      only: flags.only,
+      json: flags.json,
+      profiles: flags.profile,
+    });
   },
 });
 
 export const updateCommand = buildCommand<OnlyFlags, [], BotuContext>({
   docs: { brief: "Apply with upgrades (apply --upgrade)" },
-  parameters: { flags: { only: onlyFlag, profile: profileFlag } },
+  parameters: { flags: { only: onlyFlag, profile: profileFlag, json: jsonFlag } },
   async func(flags) {
-    this.process.exitCode = await reconcile("apply", this, { only: flags.only, profiles: flags.profile });
+    this.process.exitCode = await reconcile("apply", this, {
+      only: flags.only,
+      json: flags.json,
+      profiles: flags.profile,
+    });
   },
 });
 
-export const uninstallCommand = buildCommand<{ dryRun?: boolean }, [], BotuContext>({
+export const uninstallCommand = buildCommand<{ dryRun?: boolean; json?: boolean }, [], BotuContext>({
   docs: { brief: "Remove everything botu installed" },
   parameters: {
     flags: {
       dryRun: { kind: "boolean", optional: true, brief: "Show what would be removed; remove nothing" },
+      json: jsonFlag,
     },
   },
   async func(flags) {
-    this.process.exitCode = await reconcile("uninstall", this, { dryRun: flags.dryRun });
+    this.process.exitCode = await reconcile("uninstall", this, { dryRun: flags.dryRun, json: flags.json });
   },
 });

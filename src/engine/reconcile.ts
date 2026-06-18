@@ -8,11 +8,11 @@ import { overlayFiles, profileContext, sectionApplies } from "../config/profile.
 import type { Botufile, Section } from "../config/schema.ts";
 import type { BotuContext } from "../context.ts";
 import { colorEnabled } from "../lib/color.ts";
-import { displayPath, linkTarget, rm } from "../lib/fs.ts";
+import { displayPath, filesEqual, linkTarget, pathExists, rm } from "../lib/fs.ts";
 import { Reporter } from "../lib/reporter.ts";
-import { Journal, newRunId, readRun } from "./journal.ts";
+import { Journal, newRunId, pruneRuns, readRun } from "./journal.ts";
 import { reconcileSection } from "./registry.ts";
-import { backupsDir, readManifest, writeManifest } from "./state.ts";
+import { backupsDir, type ManifestEntry, readManifest, writeManifest } from "./state.ts";
 import type { LinkMode, ReconcileCtx, Verb } from "./types.ts";
 
 export interface ReconcileOptions {
@@ -24,24 +24,54 @@ export interface ReconcileOptions {
   readonly profiles?: string[];
 }
 
-async function reapOrphans(ctx: ReconcileCtx, prior: readonly string[]): Promise<void> {
-  const declared = new Set(ctx.declared);
+// Merge a partial run's declared set into the prior manifest (union by dst, declared
+// wins). Used when --only scoped the run: only the named sections re-declared, so the
+// other sections' ownership must be preserved rather than dropped.
+function mergeManifest(prior: readonly ManifestEntry[], declared: readonly ManifestEntry[]): ManifestEntry[] {
+  const byDst = new Map<string, ManifestEntry>();
+  for (const e of prior) byDst.set(e.dst, e);
+  for (const e of declared) byDst.set(e.dst, e);
+  return [...byDst.values()];
+}
+
+async function reapOrphans(ctx: ReconcileCtx, prior: readonly ManifestEntry[]): Promise<void> {
+  const declared = new Set(ctx.declared.map((e) => e.dst));
   let shown = false;
-  for (const dst of prior) {
-    if (declared.has(dst)) continue;
-    const target = await linkTarget(dst);
-    if (!target?.startsWith(`${ctx.repo}/`)) continue; // only links into our repo
+  const head = (): void => {
     if (!shown) {
       ctx.report.header("Orphans");
       shown = true;
     }
-    const disp = displayPath(dst, ctx.env);
-    if (ctx.verb === "verify") ctx.report.warn(`${disp} → ${target} (no longer declared — botu fix to reap)`);
+  };
+  const reap = async (dst: string, disp: string, why: string): Promise<void> => {
+    head();
+    if (ctx.verb === "verify") ctx.report.warn(`${disp} ${why} — botu fix to reap`);
     else if (ctx.dryRun) ctx.report.note(`would reap ${disp}`);
     else {
       await rm(dst, { force: true });
       ctx.report.ok(`reaped orphan ${disp}`);
     }
+  };
+
+  for (const entry of prior) {
+    if (declared.has(entry.dst)) continue;
+    const disp = displayPath(entry.dst, ctx.env);
+    if (entry.kind === "copy") {
+      // A copy is a regular file with no link target; only reap it when it still
+      // byte-matches the source botu wrote, so a file the user has since edited (or
+      // whose source is gone) is left in place rather than silently deleted.
+      if (!(await pathExists(entry.dst))) continue;
+      if (entry.src && (await filesEqual(entry.dst, entry.src))) {
+        await reap(entry.dst, disp, "(copy no longer declared)");
+      } else {
+        head();
+        ctx.report.warn(`${disp} (copy no longer declared but modified/source gone — left in place)`);
+      }
+      continue;
+    }
+    const target = await linkTarget(entry.dst);
+    if (!target?.startsWith(`${ctx.repo}/`)) continue; // only links into our repo
+    await reap(entry.dst, disp, `→ ${target} (no longer declared)`);
   }
 }
 
@@ -68,6 +98,19 @@ export async function reconcile(verb: Verb, ctx: BotuContext, opts: ReconcileOpt
         else report.ok("verify: all checks passed");
       }
       return report.failures > 0 ? 1 : report.warnings > 0 ? 2 : 0;
+    }
+    // Mutating verbs (apply/fix/update/uninstall): same structured envelope as verify,
+    // so every reconcile verb is scriptable, not just the read-only one.
+    if (json) {
+      ctx.process.stdout.write(
+        `${JSON.stringify({
+          ok: report.failures === 0,
+          warnings: report.warnings,
+          failures: report.failures,
+          records: report.records,
+        })}\n`,
+      );
+      return report.failures > 0 ? 1 : 0;
     }
     ctx.process.stdout.write("\n");
     if (report.failures > 0) {
@@ -144,11 +187,17 @@ export async function reconcile(verb: Verb, ctx: BotuContext, opts: ReconcileOpt
     await reconcileSection(section, rctx);
   }
 
-  if (verb !== "uninstall") await reapOrphans(rctx, priorManifest);
+  // Reaping compares the *whole* prior manifest against what this run declared. Under
+  // --only just the named sections re-declared, so every other section would look
+  // orphaned — skip reaping entirely for a scoped run.
+  if (verb !== "uninstall" && !only) await reapOrphans(rctx, priorManifest);
 
   if (mutating) {
     await journal?.commit();
-    await writeManifest(ctx.env, rctx.declared);
+    await pruneRuns(ctx.env);
+    // A scoped run only knows about the sections it ran, so merge into the prior
+    // manifest rather than replacing it (which would drop — and later reap — the rest).
+    await writeManifest(ctx.env, only ? mergeManifest(priorManifest, rctx.declared) : rctx.declared);
   } else if (verb === "uninstall" && !dryRun) {
     await writeManifest(ctx.env, []); // uninstall clears the manifest
   }

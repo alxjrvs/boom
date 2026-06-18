@@ -21,6 +21,15 @@ export function runShell(cmd: string, env: Env): ShellResult {
   return { code: p.exitCode };
 }
 
+// Run a tool by argv (no shell). Preferred for the engine's own invocations
+// (brew/mise/defaults) — passing a path as an argument needs no quoting and can't be
+// re-parsed by sh, unlike interpolating it into a `runShell` string. `runShell` stays
+// for user `run` strings, which deliberately want shell ~/glob expansion.
+export function runArgv(args: string[], env: Env): ShellResult {
+  const p = Bun.spawnSync(args, { env: cleanEnv(env), stdout: "inherit", stderr: "inherit" });
+  return { code: p.exitCode };
+}
+
 export function hasCommand(name: string, env: Env): boolean {
   const p = Bun.spawnSync(["sh", "-c", `command -v ${name}`], {
     env: cleanEnv(env),

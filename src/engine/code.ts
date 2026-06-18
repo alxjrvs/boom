@@ -100,6 +100,9 @@ export async function planAgentsFarm(root: string): Promise<FarmPlan> {
 // Rebuild the farm from scratch (so removed repos don't leave orphan links) and
 // symlink each repo in. Returns the farm path to launch `claude agents` from.
 export async function materializeAgentsFarm(env: Env, links: readonly FarmLink[]): Promise<string> {
+  // Without HOME, agentsFarmDir resolves to a *relative* `.local/code`, and the
+  // rm -rf below would blow away whatever sits at that path under the cwd. Refuse.
+  if (!env.HOME) throw new Error("HOME is not set — refusing to (re)build the agents farm");
   const farm = agentsFarmDir(env);
   await rm(farm, { recursive: true, force: true });
   await mkdir(farm, { recursive: true });

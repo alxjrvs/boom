@@ -45,6 +45,11 @@ export async function reconcileHook(entry: Hook, ctx: ReconcileCtx): Promise<voi
   const fn = ctx.verb === "fix" ? (mod.fix ?? mod.apply) : mod[ctx.verb];
   if (!fn) return;
 
+  // A hook can do anything; journal it as a non-reversible side effect (mutating runs
+  // only) so rollback can warn that replaying it can't be undone.
+  if (!ctx.dryRun && (ctx.verb === "apply" || ctx.verb === "fix"))
+    await ctx.journal?.side("hook", entry.name);
+
   const api: HookApi = {
     with: entry.with ?? {},
     verb: ctx.verb,

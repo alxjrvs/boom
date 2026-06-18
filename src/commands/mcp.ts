@@ -7,7 +7,10 @@ import type { BotuContext } from "../context.ts";
 import { hasCommand } from "../lib/proc.ts";
 
 const KEYCHAIN_ITEM = "op-claude-agent";
-const OP_BIN = "/opt/homebrew/bin/op";
+// Resolve `op` from PATH rather than hardcoding /opt/homebrew (Apple-Silicon-only):
+// Intel macs install it under /usr/local/bin and Linux elsewhere, and botu ships a
+// Linux binary. The agent wrapper runs under `sh -c`, so a bare name resolves there.
+const OP_BIN = "op";
 
 export function runMcp(args: string[], ctx: BotuContext): number {
   const die = (s: string): number => {
