@@ -20,13 +20,15 @@ export function reconcileBrewfile(file: string, ctx: ReconcileCtx): void {
         report.plan(`would run: brew bundle --file=${path}`);
         return;
       }
-      if (runArgv(["brew", "bundle", `--file=${path}`], ctx.env).code === 0)
+      if (runArgv(["brew", "bundle", `--file=${path}`], ctx.env, { quietStdout: ctx.json }).code === 0)
         report.ok("brew bundle satisfied");
       else report.fail("brew bundle failed");
       return;
     }
     case "verify": {
-      if (runArgv(["brew", "bundle", "check", `--file=${path}`], ctx.env).code === 0)
+      if (
+        runArgv(["brew", "bundle", "check", `--file=${path}`], ctx.env, { quietStdout: ctx.json }).code === 0
+      )
         report.ok("brew bundle satisfied");
       else report.warn("brew bundle missing deps — run: botu apply");
       return;
@@ -46,7 +48,8 @@ export function reconcileMise(ctx: ReconcileCtx): void {
         report.plan("would run: mise install");
         return;
       }
-      if (runArgv(["mise", "install"], ctx.env).code === 0) report.ok("mise tools installed");
+      if (runArgv(["mise", "install"], ctx.env, { quietStdout: ctx.json }).code === 0)
+        report.ok("mise tools installed");
       else report.fail("mise install failed");
       return;
     }

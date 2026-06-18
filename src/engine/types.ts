@@ -10,6 +10,9 @@ export interface ReconcileCtx {
   readonly repo: string;
   readonly verb: Verb;
   readonly dryRun: boolean;
+  // JSON output mode: resources keep their child-process stdout off the parent's
+  // stdout so the only thing there is the structured envelope.
+  readonly json: boolean;
   readonly linkMode: LinkMode;
   readonly env: Record<string, string | undefined>;
   readonly report: Reporter;

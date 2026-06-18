@@ -154,6 +154,7 @@ export async function reconcile(verb: Verb, ctx: BotuContext, opts: ReconcileOpt
     repo,
     verb,
     dryRun,
+    json,
     linkMode: opts.linkMode ?? "interactive",
     env: ctx.env,
     report,

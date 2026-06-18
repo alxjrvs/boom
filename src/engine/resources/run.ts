@@ -19,6 +19,6 @@ export async function reconcileRun(entry: Run, ctx: ReconcileCtx): Promise<void>
   // Journal the shell step as a non-reversible side effect so rollback can warn that
   // re-applying it won't be undone. Only mutating apply/fix carry a journal.
   if (ctx.verb === "apply" || ctx.verb === "fix") await ctx.journal?.side("run", entry.cmd);
-  const { code } = runShell(entry.cmd, ctx.env);
+  const { code } = runShell(entry.cmd, ctx.env, { quietStdout: ctx.json });
   if (code !== 0) ctx.report.fail(`${entry.cmd} (exit ${code})`);
 }
