@@ -31,6 +31,13 @@ export async function rollback(ctx: BotuContext, runId?: string): Promise<number
     }
   }
 
+  // Links/copies are reversed above; `run`/`hook` side effects can't be, so surface
+  // them so the operator knows what state rollback did NOT restore.
+  if (run.sides.length > 0) {
+    report.header("Not reversible (ran during apply)");
+    for (const s of run.sides) report.warn(`${s.op}: ${s.label}`);
+  }
+
   ctx.process.stdout.write("\n");
   if (report.failures > 0) {
     report.fail(`rollback: ${report.failures} failure(s)`);

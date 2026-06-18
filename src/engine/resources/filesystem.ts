@@ -64,7 +64,7 @@ async function applyLink(
 export async function reconcileLink(entry: Link, ctx: ReconcileCtx): Promise<void> {
   const src = join(ctx.repo, entry.src);
   const dst = expandTilde(entry.dst, ctx.env);
-  ctx.declared.push(dst);
+  ctx.declared.push({ kind: "link", dst, src });
   const disp = displayPath(dst, ctx.env);
   const { report } = ctx;
 
@@ -73,7 +73,11 @@ export async function reconcileLink(entry: Link, ctx: ReconcileCtx): Promise<voi
     case "fix": {
       const mode: LinkMode = ctx.verb === "fix" ? "overwrite" : ctx.linkMode;
       await applyLink(src, dst, disp, mode, ctx);
-      if (entry.mode && !ctx.dryRun && (await pathExists(dst))) {
+      // `mode` on a link sets the *target's* mode (chmod follows the symlink to the
+      // repo file) — which is exactly what tools reading through the link, e.g. ssh on
+      // ~/.ssh/config, check. Only do it once the link is ours: if applyLink skipped a
+      // foreign file, chmod-ing it would mutate a file botu doesn't own.
+      if (entry.mode && !ctx.dryRun && (await linkTarget(dst)) === src) {
         try {
           await chmod(dst, Number.parseInt(entry.mode, 8));
         } catch {
@@ -116,7 +120,7 @@ export async function reconcileLink(entry: Link, ctx: ReconcileCtx): Promise<voi
 export async function reconcileCopy(entry: Link, ctx: ReconcileCtx): Promise<void> {
   const src = join(ctx.repo, entry.src);
   const dst = expandTilde(entry.dst, ctx.env);
-  ctx.declared.push(dst);
+  ctx.declared.push({ kind: "copy", dst, src });
   const disp = displayPath(dst, ctx.env);
   const { report } = ctx;
   const mode = entry.mode ? Number.parseInt(entry.mode, 8) : 0o755;

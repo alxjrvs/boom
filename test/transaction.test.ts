@@ -89,6 +89,98 @@ test("verify --json emits a parseable structured report", async () => {
   expect(Array.isArray(parsed.records)).toBe(true);
 });
 
+test("--only does NOT reap links owned by other sections", async () => {
+  // Regression: a scoped apply only re-declares its named section, so reaping must be
+  // skipped and the manifest merged — otherwise every other section looks orphaned.
+  const sb = await sandbox(
+    `[[section]]\nname = "a"\nlink = [{ src = ".a", dst = "~/.a" }]\n[[section]]\nname = "b"\nlink = [{ src = ".b", dst = "~/.b" }]\n`,
+  );
+  await sb.write(".a", "a");
+  await sb.write(".b", "b");
+  expect(await reconcile("apply", sb.ctx, {})).toBe(0);
+  expect(await pathExists(join(sb.home, ".b"))).toBe(true);
+
+  // Re-apply scoped to "a" only. "b" must survive untouched.
+  expect(await reconcile("apply", sb.ctx, { only: ["a"] })).toBe(0);
+  expect(await linkTarget(join(sb.home, ".a"))).toBe(join(sb.repo, ".a"));
+  expect(await linkTarget(join(sb.home, ".b"))).toBe(join(sb.repo, ".b"));
+
+  // And a later full apply still knows it owns "b" (merged manifest), so dropping "b"
+  // from the config reaps it as expected — proving the manifest wasn't narrowed.
+  await sb.write("botufile.toml", `[[section]]\nname = "a"\nlink = [{ src = ".a", dst = "~/.a" }]\n`);
+  expect(await reconcile("apply", sb.ctx, {})).toBe(0);
+  expect(await pathExists(join(sb.home, ".b"))).toBe(false);
+});
+
+test("orphan reaping reaps an unmodified copy but leaves a modified one", async () => {
+  const sb = await sandbox(
+    `[[section]]\nname = "S"\ncopy = [{ src = "u", dst = "~/u" }, { src = "m", dst = "~/m" }]\n`,
+  );
+  await sb.write("u", "u");
+  await sb.write("m", "m");
+  expect(await reconcile("apply", sb.ctx, {})).toBe(0);
+  await writeFile(join(sb.home, "m"), "edited by user"); // diverge from source
+
+  await sb.write("botufile.toml", `[[section]]\nname = "S"\n`); // drop both copies
+  expect(await reconcile("apply", sb.ctx, {})).toBe(0);
+  expect(await pathExists(join(sb.home, "u"))).toBe(false); // unmodified → reaped
+  expect(await pathExists(join(sb.home, "m"))).toBe(true); // modified → left in place
+});
+
+test("rollback warns about run side effects it cannot reverse", async () => {
+  const sb = await sandbox(
+    `[[section]]\nname = "S"\nlink = [{ src = ".z", dst = "~/.z" }]\nrun = [{ on = "apply", cmd = 'touch "$HOME/marker"' }]\n`,
+  );
+  await sb.write(".z", "z");
+  expect(await reconcile("apply", sb.ctx, {})).toBe(0);
+  sb.clear();
+  expect(await rollback(sb.ctx)).toBe(0);
+  expect(await pathExists(join(sb.home, ".z"))).toBe(false); // link reversed
+  expect(sb.out()).toContain("Not reversible");
+  expect(sb.out()).toContain('touch "$HOME/marker"'); // the run is surfaced
+});
+
+test("apply --json emits a parseable structured report", async () => {
+  const sb = await sandbox(`[[section]]\nname = "S"\nlink = [{ src = ".z", dst = "~/.z" }]\n`);
+  await sb.write(".z", "z");
+  expect(await reconcile("apply", sb.ctx, { json: true })).toBe(0);
+  const parsed = JSON.parse(sb.out());
+  expect(parsed.ok).toBe(true);
+  expect(parsed.failures).toBe(0);
+  expect(Array.isArray(parsed.records)).toBe(true);
+});
+
+// Subprocess (not in-process): a `run` step's stdout uses real OS fds, so only a real
+// child can prove --json keeps stdout pure. Must be Bun.spawnSync (oven-sh/bun#24690).
+test("apply --json keeps run-step output off stdout (routes it to stderr)", async () => {
+  const base = await mkdtemp(join(tmpdir(), "botu-json-"));
+  const home = join(base, "home");
+  const repo = join(base, "repo");
+  await mkdir(home, { recursive: true });
+  await mkdir(repo, { recursive: true });
+  await writeFile(
+    join(repo, "botufile.toml"),
+    `[[section]]\nname = "S"\nrun = [{ on = "apply", cmd = "echo POLLUTION_ON_STDOUT" }]\n`,
+  );
+  const index = join(import.meta.dir, "../src/index.ts");
+  const env = {
+    HOME: home,
+    XDG_STATE_HOME: join(base, "state"),
+    BOTU_CONFIG: repo,
+    NO_COLOR: "1",
+    PATH: process.env.PATH ?? "",
+  };
+  const p = Bun.spawnSync(["bun", index, "apply", "--json"], { cwd: repo, env });
+  const stdout = p.stdout.toString();
+  const stderr = p.stderr.toString();
+  // stdout is exactly the JSON envelope — no leaked child output.
+  expect(stdout).not.toContain("POLLUTION_ON_STDOUT");
+  const parsed = JSON.parse(stdout.trim());
+  expect(parsed.ok).toBe(true);
+  // the run output isn't lost — it's diverted to stderr.
+  expect(stderr).toContain("POLLUTION_ON_STDOUT");
+});
+
 test("orphan reaping removes a link dropped from the config", async () => {
   const sb = await sandbox(
     `[[section]]\nname = "S"\nlink = [{ src = ".a", dst = "~/.a" }, { src = ".b", dst = "~/.b" }]\n`,

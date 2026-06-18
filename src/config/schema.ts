@@ -16,7 +16,7 @@ export const GlobSchema = v.object({
 });
 
 export const RunSchema = v.object({
-  on: v.picklist(["apply", "verify"]),
+  on: v.picklist(["apply", "verify", "uninstall"]),
   cmd: v.string(),
 });
 

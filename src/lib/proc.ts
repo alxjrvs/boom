@@ -12,12 +12,31 @@ export interface ShellResult {
   readonly code: number;
 }
 
-export function runShell(cmd: string, env: Env): ShellResult {
+export interface RunOptions {
+  // Keep the parent's stdout clean for a `--json` envelope by routing the child's
+  // stdout to fd 2 (the parent's stderr) — diagnostics stay visible, off the JSON
+  // channel. Default: inherit the parent's stdout.
+  readonly quietStdout?: boolean;
+}
+
+// fd 2 = the parent's stderr; Bun.spawn routes a child stream to a parent fd by number.
+const childStdout = (opts?: RunOptions): "inherit" | 2 => (opts?.quietStdout ? 2 : "inherit");
+
+export function runShell(cmd: string, env: Env, opts?: RunOptions): ShellResult {
   const p = Bun.spawnSync(["sh", "-c", cmd], {
     env: cleanEnv(env),
-    stdout: "inherit",
+    stdout: childStdout(opts),
     stderr: "inherit",
   });
+  return { code: p.exitCode };
+}
+
+// Run a tool by argv (no shell). Preferred for the engine's own invocations
+// (brew/mise/defaults) — passing a path as an argument needs no quoting and can't be
+// re-parsed by sh, unlike interpolating it into a `runShell` string. `runShell` stays
+// for user `run` strings, which deliberately want shell ~/glob expansion.
+export function runArgv(args: string[], env: Env, opts?: RunOptions): ShellResult {
+  const p = Bun.spawnSync(args, { env: cleanEnv(env), stdout: childStdout(opts), stderr: "inherit" });
   return { code: p.exitCode };
 }
 

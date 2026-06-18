@@ -4,6 +4,7 @@
 // bun test has a piped-stdout bug, oven-sh/bun#24690.)
 import { expect, test } from "bun:test";
 import { run } from "@stricli/core";
+import pkg from "../package.json" with { type: "json" };
 import { app } from "../src/cli.ts";
 
 function fakeContext() {
@@ -30,7 +31,7 @@ function fakeContext() {
 test("--version prints the package version", async () => {
   const { buf, ctx } = fakeContext();
   await run(app, ["--version"], ctx);
-  expect(buf.out).toContain("0.0.1");
+  expect(buf.out.trim()).toBe(pkg.version);
 });
 
 test("--help lists the core verbs", async () => {

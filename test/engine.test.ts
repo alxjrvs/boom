@@ -101,6 +101,16 @@ test("run step fires on apply", async () => {
   expect(await pathExists(join(sb.home, "marker"))).toBe(true);
 });
 
+test("run step with on = uninstall fires on uninstall, not apply", async () => {
+  const sb = await sandbox(
+    `[[section]]\nname = "S"\nrun = [{ on = "uninstall", cmd = 'touch "$HOME/torn-down"' }]\n`,
+  );
+  expect(await reconcile("apply", sb.ctx, {})).toBe(0);
+  expect(await pathExists(join(sb.home, "torn-down"))).toBe(false); // not on apply
+  expect(await reconcile("uninstall", sb.ctx, {})).toBe(0);
+  expect(await pathExists(join(sb.home, "torn-down"))).toBe(true); // fires on uninstall
+});
+
 test("hook runs a TS resource module with its inputs", async () => {
   const sb = await sandbox(
     `[[section]]\nname = "H"\nhook = [{ name = "greet", with = { who = "world" } }]\n`,

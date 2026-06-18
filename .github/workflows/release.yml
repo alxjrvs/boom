@@ -1,12 +1,16 @@
 name: release
 
-# On a version tag, cross-compile the binary matrix (Bun builds every target from
-# one host) and attach them to the GitHub release. macOS code-signing is a follow-up
-# (needs a signing cert in secrets); unsigned binaries still run after a Gatekeeper
-# prompt / `xattr -d com.apple.quarantine`.
+# Version-driven continuous release. A push to main that changes package.json cuts a
+# GitHub release for that version — the cross-compiled binary matrix + checksums are
+# attached and the tag is created — unless that version already shipped. So the flow is
+# just: bump the version in a PR, merge, and the binary install.sh / the Formula pull
+# is built here by CI. Bun compiles every target from one Linux host. macOS
+# code-signing is a follow-up (needs a signing cert in secrets); unsigned binaries run
+# after a Gatekeeper prompt / `xattr -d com.apple.quarantine`.
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
+    paths: ["package.json"]
 
 permissions:
   contents: write
@@ -16,12 +20,30 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # need the tags to tell whether this version already shipped
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.14
       - run: bun install --frozen-lockfile
 
+      # The version in package.json is the single control: release it only if its tag
+      # doesn't yet exist, so a package.json edit that doesn't bump the version (e.g. a
+      # dependency change) is a no-op rather than a duplicate release.
+      - name: Resolve version + novelty
+        id: v
+        run: |
+          version="$(jq -r .version package.json)"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          if git rev-parse "v$version" > /dev/null 2>&1; then
+            echo "new=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::v$version already released — skipping"
+          else
+            echo "new=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Compile the target matrix
+        if: steps.v.outputs.new == 'true'
         run: |
           mkdir -p dist
           for t in bun-darwin-arm64 bun-darwin-x64 bun-linux-x64; do
@@ -29,11 +51,15 @@ jobs:
           done
 
       - name: Checksums
+        if: steps.v.outputs.new == 'true'
         run: cd dist && sha256sum botu-* > SHA256SUMS
 
-      - name: Attach to the release
+      - name: Tag + release with the binaries attached
+        if: steps.v.outputs.new == 'true'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.v.outputs.tag }}
+          name: ${{ steps.v.outputs.tag }}
           files: |
             dist/botu-*
             dist/SHA256SUMS

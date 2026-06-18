@@ -1,5 +1,6 @@
 import type { Reporter } from "../lib/reporter.ts";
 import type { Journal } from "./journal.ts";
+import type { ManifestEntry } from "./state.ts";
 
 export type Verb = "apply" | "verify" | "fix" | "uninstall";
 export type LinkMode = "interactive" | "overwrite" | "skip";
@@ -9,12 +10,15 @@ export interface ReconcileCtx {
   readonly repo: string;
   readonly verb: Verb;
   readonly dryRun: boolean;
+  // JSON output mode: resources keep their child-process stdout off the parent's
+  // stdout so the only thing there is the structured envelope.
+  readonly json: boolean;
   readonly linkMode: LinkMode;
   readonly env: Record<string, string | undefined>;
   readonly report: Reporter;
   // Destinations botu owns this run — populated as handlers run (drives orphan
   // reaping + the persisted manifest).
-  readonly declared: string[];
+  readonly declared: ManifestEntry[];
   // Transaction state (present for mutating apply/fix runs):
   readonly journal?: Journal;
   readonly backupRoot?: string;
