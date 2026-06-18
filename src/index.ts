@@ -17,6 +17,7 @@ const BUILTINS = new Set([
   "uninstall",
   "where",
   "rollback",
+  "upgrade",
   "code",
   "watchtower",
   "sync",

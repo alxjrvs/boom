@@ -23,7 +23,7 @@ A `botu` invocation does one of two things:
    the most recent apply; `apply --resume` continues an interrupted one.
 
 2. **Discovered subcommands** — built-ins are the `@stricli` route map (`code`,
-   `mcp`, `watchtower`, `where`, `migrate`, `rollback`); user commands resolve at
+   `mcp`, `watchtower`, `where`, `migrate`, `rollback`, `upgrade`); user commands resolve at
    runtime from `<config>/commands/<name>.ts`. Adding a tool never edits a
    dispatch table.
 

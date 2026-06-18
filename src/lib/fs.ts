@@ -68,4 +68,4 @@ export async function filesEqual(a: string, b: string): Promise<boolean> {
   }
 }
 
-export { chmod, copyFile, lstat, mkdir, rm, stat };
+export { chmod, copyFile, lstat, mkdir, rename, rm, stat };

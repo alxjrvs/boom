@@ -13,6 +13,7 @@ import {
   verifyCommand,
 } from "./commands/reconcile.ts";
 import { rollbackCommand } from "./commands/rollback.ts";
+import { upgradeCommand } from "./commands/upgrade.ts";
 import { watchtowerCommand } from "./commands/watchtower.ts";
 import { whereCommand } from "./commands/where.ts";
 import { VERSION } from "./lib/version.ts";
@@ -28,6 +29,7 @@ const routes = buildRouteMap({
     uninstall: uninstallCommand,
     where: whereCommand,
     rollback: rollbackCommand,
+    upgrade: upgradeCommand,
     code: codeRouteMap,
     watchtower: watchtowerCommand,
   },
