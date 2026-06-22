@@ -1,7 +1,7 @@
 // Package resources: brewfile, mise. Shell out to the stock tools (the "native over
 // special" principle); absent tools are reported, not fatal — matching engine/run.
 import { join } from "node:path";
-import { hasCommand, runArgv } from "../../lib/proc.ts";
+import { cleanEnv, hasCommand, runArgv } from "../../lib/proc.ts";
 import type { ReconcileCtx } from "../types.ts";
 
 export function reconcileBrewfile(file: string, ctx: ReconcileCtx): void {
@@ -53,9 +53,20 @@ export function reconcileMise(ctx: ReconcileCtx): void {
       else report.fail("mise install failed");
       return;
     }
-    case "verify":
-      report.ok("mise present");
+    case "verify": {
+      // `mise install` is idempotent, so "present" told us nothing about drift. Ask
+      // mise what's declared-but-not-installed: `mise ls --missing` lists those tools
+      // and still exits 0, so the missing-tool signal is its stdout, not its code.
+      const p = Bun.spawnSync(["mise", "ls", "--missing"], {
+        env: cleanEnv(ctx.env),
+        stdout: "pipe",
+        stderr: "ignore",
+      });
+      const missing = new TextDecoder().decode(p.stdout).trim();
+      if (p.exitCode === 0 && missing === "") report.ok("mise tools installed");
+      else report.warn("mise tools missing — run: botu apply");
       return;
+    }
     case "uninstall":
       return;
   }

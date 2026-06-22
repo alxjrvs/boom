@@ -84,6 +84,7 @@ test("verify --json emits a parseable structured report", async () => {
   sb.clear();
   expect(await reconcile("verify", sb.ctx, { json: true })).toBe(0);
   const parsed = JSON.parse(sb.out());
+  expect(parsed.schemaVersion).toBe(1);
   expect(parsed.ok).toBe(true);
   expect(parsed.failures).toBe(0);
   expect(Array.isArray(parsed.records)).toBe(true);
@@ -145,6 +146,7 @@ test("apply --json emits a parseable structured report", async () => {
   await sb.write(".z", "z");
   expect(await reconcile("apply", sb.ctx, { json: true })).toBe(0);
   const parsed = JSON.parse(sb.out());
+  expect(parsed.schemaVersion).toBe(1);
   expect(parsed.ok).toBe(true);
   expect(parsed.failures).toBe(0);
   expect(Array.isArray(parsed.records)).toBe(true);

@@ -3,11 +3,22 @@ name: release
 # Version-driven continuous release. A push to main that changes package.json cuts a
 # GitHub release for that version — the cross-compiled binary matrix + checksums are
 # attached and the tag is created — unless that version already shipped. So the flow is
-# just: bump the version in a PR, merge, and the binary install.sh / the Formula pull
-# is built here by CI. The release is gated on the same checks ci runs, so a red tree
-# never ships. Bun compiles every target from one Linux host. macOS code-signing is a
-# follow-up (needs a signing cert in secrets); unsigned binaries run after a Gatekeeper
-# prompt / `xattr -d com.apple.quarantine`.
+# just: bump the version in a PR, merge, and the binary install.sh / the Formula pull is
+# built here by CI. The release is gated on the same checks ci runs, so a red tree never
+# ships. Bun compiles every target from one Linux host (job: build); the macOS binaries
+# are then signed + notarized on a real macOS host (job: sign-macos) before the release
+# is assembled and the checksums computed over the *final* binaries (job: release).
+#
+# macOS code-signing is opt-in via repo secrets — until they exist, the macOS binaries
+# are ad-hoc signed on the macOS runner (valid for Apple Silicon; Gatekeeper still
+# prompts for browser-downloaded copies, but curl/Homebrew installs run clean). Add all
+# of these secrets to switch on real Developer ID signing + notarization:
+#   MACOS_CERT_P12        base64 of a "Developer ID Application" .p12
+#   MACOS_CERT_PASSWORD   the .p12 export password
+#   MACOS_SIGN_IDENTITY   e.g. "Developer ID Application: Your Name (TEAMID)"
+#   APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD   notarytool credentials (app-specific pw)
+# (A bare Mach-O binary can't be stapled, so notarization registers the hash with Apple's
+# service; Gatekeeper verifies online on first launch.)
 on:
   push:
     branches: [main]
@@ -18,8 +29,11 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+      new: ${{ steps.v.outputs.new }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -62,16 +76,102 @@ jobs:
             bun build src/index.ts --compile --target="$t" --outfile "dist/botu-$t"
           done
 
-      - name: Checksums
+      - name: Upload unsigned binaries
         if: steps.v.outputs.new == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: botu-unsigned
+          path: dist/botu-*
+
+  # Sign (+ notarize, when secrets are present) the macOS binaries on a real macOS host.
+  # Cross-compiled-on-Linux Mach-O binaries carry an ad-hoc signature Apple Silicon's
+  # kernel rejects; re-signing here with native `codesign` produces a valid one.
+  sign-macos:
+    needs: build
+    if: needs.build.outputs.new == 'true'
+    runs-on: macos-latest
+    env:
+      # Evaluates to the string "true"/"false" without ever exposing the secret value.
+      HAS_SIGNING: ${{ secrets.MACOS_CERT_P12 != '' }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: botu-unsigned
+          path: dist
+
+      - name: Developer ID sign + notarize
+        if: env.HAS_SIGNING == 'true'
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          # Import the signing cert into a throwaway keychain unlocked for this job only.
+          KEYCHAIN="$RUNNER_TEMP/botu-signing.keychain-db"
+          KP="$(uuidgen)"
+          security create-keychain -p "$KP" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KP" "$KEYCHAIN"
+          echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$MACOS_CERT_PASSWORD" \
+            -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KP" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" "$(security default-keychain | tr -d ' "')"
+
+          for b in dist/botu-bun-darwin-arm64 dist/botu-bun-darwin-x64; do
+            codesign --force --options runtime --timestamp --keychain "$KEYCHAIN" \
+              --sign "$MACOS_SIGN_IDENTITY" "$b"
+            # A bare binary can't be stapled; notarize a zip so the hash is registered.
+            ditto -c -k "$b" "$b.zip"
+            xcrun notarytool submit "$b.zip" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
+              --password "$APPLE_APP_PASSWORD" --wait
+            rm -f "$b.zip"
+          done
+
+      - name: Ad-hoc sign (no signing secrets configured)
+        if: env.HAS_SIGNING != 'true'
+        run: |
+          set -euo pipefail
+          for b in dist/botu-bun-darwin-arm64 dist/botu-bun-darwin-x64; do
+            codesign --force --sign - "$b"
+          done
+
+      - name: Upload signed macOS binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: botu-darwin-signed
+          path: dist/botu-bun-darwin-*
+
+  release:
+    needs: [build, sign-macos]
+    if: needs.build.outputs.new == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      # Linux binary from the build job; the signed macOS binaries override their unsigned
+      # counterparts. download-artifact merges into the same dir, signed copies last.
+      - uses: actions/download-artifact@v4
+        with:
+          name: botu-unsigned
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: botu-darwin-signed
+          path: dist
+
+      # Checksums must cover the *final* (signed) binaries — `botu upgrade` and install.sh
+      # verify against this manifest, so it has to match exactly what ships.
+      - name: Checksums
         run: cd dist && sha256sum botu-* > SHA256SUMS
 
       - name: Tag + release with the binaries attached
-        if: steps.v.outputs.new == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.v.outputs.tag }}
-          name: ${{ steps.v.outputs.tag }}
+          tag_name: ${{ needs.build.outputs.tag }}
+          name: ${{ needs.build.outputs.tag }}
           files: |
             dist/botu-*
             dist/SHA256SUMS

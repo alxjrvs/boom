@@ -24,6 +24,8 @@ botu verify              # check for drift (exit 0 ok / 2 warn / 1 fail)
 botu verify --json       # … as a structured drift report
 botu fix                 # repair drift
 botu rollback            # undo the last apply (restores backed-up files)
+botu validate            # parse + schema-check the botufile; change nothing
+botu doctor              # check botu's own preconditions (tools, keychain, state)
 
 botu code init ~/Code    # record your code dir
 botu code claude         # symlink every repo into one dir, open `claude agents` there

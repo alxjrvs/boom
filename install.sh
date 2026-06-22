@@ -33,12 +33,15 @@ echo "botu: downloading ${target} (${ver})…"
 curl -fsSL -o "$BIN/botu" "$url"
 chmod +x "$BIN/botu"
 
-# Bun cross-compiles the macOS binaries on Linux, and the ad-hoc signature it applies
-# there is rejected by Apple Silicon — the kernel SIGKILLs an invalidly-signed binary
-# on first run. Re-sign ad-hoc with the native tool so it runs (real Developer ID
-# signing is a follow-up). No-op on Linux.
+# macOS release binaries are signed on a real macOS host (Developer ID when configured,
+# else ad-hoc), so a downloaded binary should already carry a valid signature. Only
+# re-sign ad-hoc as a fallback when verification fails — re-signing a Developer-ID
+# binary would replace its signature with an ad-hoc one and undo notarization. No-op on
+# Linux. (Verification failure here usually means an old, Linux-cross-compiled asset.)
 if [ "$os" = "Darwin" ]; then
-  if command -v codesign > /dev/null 2>&1; then
+  if codesign --verify --strict "$BIN/botu" > /dev/null 2>&1; then
+    : # already validly signed — leave it alone
+  elif command -v codesign > /dev/null 2>&1; then
     codesign --force --sign - "$BIN/botu" > /dev/null 2>&1 ||
       echo "botu: warning — re-sign failed; if botu is killed, run: codesign --force --sign - $BIN/botu" >&2
   else

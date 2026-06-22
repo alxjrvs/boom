@@ -1,10 +1,14 @@
-// The @stricli application: the built-in route map. M5 adds discovered commands
-// (code/mcp/watchtower) — built-ins via a build-time route map, user commands via
-// runtime import() of <config>/commands/*.ts.
+// The @stricli application: the built-in route map. Built-ins are this build-time
+// route map; user commands resolve at runtime via import() of <config>/commands/*.ts
+// (engine/discovery.ts). The command catalog (commands/catalog.ts) mirrors these
+// names for the dispatch guard, completions, and the man page.
 import { buildApplication, buildRouteMap } from "@stricli/core";
 import { codeRouteMap } from "./commands/code.ts";
+import { completionsCommand } from "./commands/completions.ts";
+import { doctorCommand } from "./commands/doctor.ts";
 import { initCommand } from "./commands/init.ts";
 import { linkCommand } from "./commands/link.ts";
+import { manCommand } from "./commands/man.ts";
 import {
   applyCommand,
   fixCommand,
@@ -14,7 +18,7 @@ import {
 } from "./commands/reconcile.ts";
 import { rollbackCommand } from "./commands/rollback.ts";
 import { upgradeCommand } from "./commands/upgrade.ts";
-import { watchtowerCommand } from "./commands/watchtower.ts";
+import { validateCommand } from "./commands/validate.ts";
 import { whereCommand } from "./commands/where.ts";
 import { VERSION } from "./lib/version.ts";
 
@@ -30,11 +34,15 @@ const routes = buildRouteMap({
     where: whereCommand,
     rollback: rollbackCommand,
     upgrade: upgradeCommand,
+    validate: validateCommand,
+    doctor: doctorCommand,
     code: codeRouteMap,
-    watchtower: watchtowerCommand,
+    completions: completionsCommand,
+    man: manCommand,
   },
-  // Muscle-memory aliases carried from the bash era (was `dot sync` / `dot doctor`).
-  aliases: { sync: "apply", doctor: "verify" },
+  // Keep this literal in sync with ALIASES in commands/catalog.ts (the dispatch guard
+  // reads that copy; Stricli needs a literal here to type-check the alias targets).
+  aliases: { sync: "apply" },
   docs: { brief: "botu — a dotfiles + workspace engine. Reconcile your machine from a botufile.toml." },
 });
 

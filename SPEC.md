@@ -23,9 +23,10 @@ A `botu` invocation does one of two things:
    the most recent apply; `apply --resume` continues an interrupted one.
 
 2. **Discovered subcommands** — built-ins are the `@stricli` route map (`code`,
-   `mcp`, `watchtower`, `where`, `migrate`, `rollback`, `upgrade`); user commands resolve at
-   runtime from `<config>/commands/<name>.ts`. Adding a tool never edits a
-   dispatch table.
+   `mcp`, `where`, `rollback`, `upgrade`, `validate`, `doctor`, `completions`, `man`);
+   user commands resolve at runtime from `<config>/commands/<name>.ts`. Adding a tool
+   never edits a dispatch table. The command names live once in `src/commands/catalog.ts`,
+   which also drives the dispatch guard, shell completions, and the man page.
 
 ### Config is typed TOML, not code
 
@@ -77,7 +78,8 @@ the dotfiles repo and code dir.
 src/
   cli.ts · index.ts        @stricli app + entrypoint (dispatch: mcp, user cmds, built-ins)
   commands/                init, link, apply/verify/fix/update/uninstall (reconcile.ts), where,
-                           migrate, rollback, code, watchtower, mcp
+                           rollback, upgrade, validate, doctor, code, mcp, completions, man
+                           catalog.ts (command names: dispatch guard + completions + man)
   engine/
     reconcile.ts           the one verb loop
     registry.ts            per-section phase dispatch
@@ -94,6 +96,10 @@ examples/dotfiles/          a runnable botufile.toml example
 ## Distribution
 
 `install.sh` downloads the matching binary from the GitHub release; `Formula/botu.rb`
-installs it via Homebrew (the repo doubles as the tap). `release.yml` cross-compiles
-the matrix on a tag and attaches the binaries + checksums. macOS code-signing is a
-follow-up (the binaries run after a Gatekeeper prompt until then).
+installs it via Homebrew (the repo doubles as the tap). `release.yml` cross-compiles the
+matrix on Linux, then **signs the macOS binaries on a real macOS runner** before
+assembling the release and computing checksums over the final binaries. Signing is
+ad-hoc by default (valid on Apple Silicon); add the `MACOS_*`/`APPLE_*` repo secrets to
+switch on Developer ID signing + notarization (see the header of `release.yml`).
+`install.sh`/`botu upgrade` only re-sign ad-hoc when a download fails verification, so a
+notarized binary is never clobbered.

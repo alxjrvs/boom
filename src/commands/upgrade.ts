@@ -13,11 +13,15 @@ import { VERSION } from "../lib/version.ts";
 
 const REPO = "alxjrvs/botu";
 
-// process.platform/arch → the release-asset suffix install.sh maps `uname` to. Keep the
-// two in lockstep: these are exactly the targets release.yml cross-compiles.
-function releaseTarget(): string | undefined {
-  const key = `${process.platform}/${process.arch}`;
-  switch (key) {
+// The Bun `--target` suffixes botu ships. These are exactly the targets release.yml
+// cross-compiles and ci.yml smoke-builds; the lockstep is guarded by a test that greps
+// both workflows (test/upgrade.test.ts), so a renamed asset can't silently break
+// `botu upgrade` / install.sh.
+export const RELEASE_TARGETS = ["bun-darwin-arm64", "bun-darwin-x64", "bun-linux-x64"] as const;
+
+// process.platform/arch → the release-asset suffix install.sh maps `uname` to.
+export function releaseTargetFor(platform: string, arch: string): string | undefined {
+  switch (`${platform}/${arch}`) {
     case "darwin/arm64":
       return "bun-darwin-arm64";
     case "darwin/x64":
@@ -27,6 +31,10 @@ function releaseTarget(): string | undefined {
     default:
       return undefined;
   }
+}
+
+function releaseTarget(): string | undefined {
+  return releaseTargetFor(process.platform, process.arch);
 }
 
 interface Release {
@@ -52,13 +60,13 @@ async function fetchBytes(url: string): Promise<Uint8Array> {
   return new Uint8Array(await res.arrayBuffer());
 }
 
-function sha256(bytes: Uint8Array): string {
+export function sha256(bytes: Uint8Array): string {
   return new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
 }
 
 // Pull the expected hash for `asset` out of a `sha256sum`-format manifest
 // (`<hex>  <name>` per line). Undefined if the asset isn't listed.
-function expectedHash(sums: string, asset: string): string | undefined {
+export function expectedHash(sums: string, asset: string): string | undefined {
   for (const line of sums.split("\n")) {
     const [hash, ...rest] = line.trim().split(/\s+/);
     if (rest.join(" ") === asset && hash) return hash;
@@ -154,17 +162,22 @@ export const upgradeCommand = buildCommand<UpgradeFlags, [], BotuContext>({
       await Bun.write(staged, bin);
       await chmod(staged, 0o755);
 
-      // Bun cross-compiles the macOS binaries on Linux; the ad-hoc signature it embeds
-      // there is rejected by Apple Silicon (the kernel SIGKILLs it on first run). Re-sign
-      // ad-hoc with the native tool before it goes live. No-op on Linux. (Mirrors install.sh.)
+      // macOS release binaries are signed on a real macOS host, so the download should
+      // already verify. Only re-sign ad-hoc as a fallback when it doesn't — re-signing a
+      // Developer-ID binary would clobber its signature and undo notarization. No-op on
+      // Linux. (Mirrors install.sh.)
       if (process.platform === "darwin") {
-        const { code } = runArgv(["codesign", "--force", "--sign", "-", staged], this.env, {
-          quietStdout: true,
-        });
-        if (code !== 0)
-          report.warn(
-            "ad-hoc re-sign failed — if botu is killed on launch, re-run after `xcode-select --install`",
-          );
+        const verified =
+          runArgv(["codesign", "--verify", "--strict", staged], this.env, { quietStdout: true }).code === 0;
+        if (!verified) {
+          const { code } = runArgv(["codesign", "--force", "--sign", "-", staged], this.env, {
+            quietStdout: true,
+          });
+          if (code !== 0)
+            report.warn(
+              "ad-hoc re-sign failed — if botu is killed on launch, re-run after `xcode-select --install`",
+            );
+        }
       }
 
       await rename(staged, self);
