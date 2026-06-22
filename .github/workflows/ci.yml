@@ -36,6 +36,14 @@ jobs:
       - name: Smoke — binary boots
         run: ./build/botu --version
 
+      # Smoke the config-free generators so a broken catalog/route fails CI, not a user.
+      - name: Smoke — completions + man
+        run: |
+          ./build/botu completions bash > /dev/null
+          ./build/botu completions zsh > /dev/null
+          ./build/botu completions fish > /dev/null
+          ./build/botu man > /dev/null
+
   cross-compile:
     # Bun cross-compiles every target from one host; prove the release matrix builds.
     runs-on: ubuntu-latest

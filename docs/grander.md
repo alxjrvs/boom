@@ -17,12 +17,13 @@ The old "config is bash / no JSON manifest" north star was retired accordingly.
 ## The four directions — and where they shipped
 
 ### 1. Fate of the orchestrator half → **M5**
-`code` / `watchtower` are no longer "unfinished bash." Command discovery is now
-explicit: built-ins are the `@stricli` route map; user commands resolve at runtime
-from `<config>/commands/<name>.ts` (`src/engine/discovery.ts`). `code` does a
-leaf-rule repo crawl and dispatches per repo; `where config|code|engine` is the
-single resolver (killing the old breadcrumb triplication). `mcp` was ported; the
-op-based `watchtower` audit remains a follow-up.
+`code` is no longer "unfinished bash." Command discovery is now explicit: built-ins
+are the `@stricli` route map; user commands resolve at runtime from
+`<config>/commands/<name>.ts` (`src/engine/discovery.ts`). `code` does a leaf-rule
+repo crawl and dispatches per repo; `where config|code|engine` is the single resolver
+(killing the old breadcrumb triplication). `mcp` was ported. The placeholder
+`watchtower` was dropped (the op-based audit never materialized); `doctor` now covers
+the precondition-check role it gestured at.
 
 ### 2. Apply transaction / journal → **M3**
 Mutating runs journal to `…/botu/journal/<run-id>.ndjson` (intent/done + undo

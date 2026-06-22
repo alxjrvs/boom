@@ -15,6 +15,10 @@ import { reconcileSection } from "./registry.ts";
 import { backupsDir, type ManifestEntry, readManifest, writeManifest } from "./state.ts";
 import type { LinkMode, ReconcileCtx, Verb } from "./types.ts";
 
+// Version of the `--json` report envelope. Bump when its shape changes so a script
+// consuming `verify --json` / `apply --json` can detect (and refuse) an unknown shape.
+export const REPORT_SCHEMA_VERSION = 1;
+
 export interface ReconcileOptions {
   readonly only?: string[];
   readonly dryRun?: boolean;
@@ -84,6 +88,7 @@ export async function reconcile(verb: Verb, ctx: BotuContext, opts: ReconcileOpt
       if (json) {
         ctx.process.stdout.write(
           `${JSON.stringify({
+            schemaVersion: REPORT_SCHEMA_VERSION,
             ok: report.failures === 0,
             warnings: report.warnings,
             failures: report.failures,
@@ -104,6 +109,7 @@ export async function reconcile(verb: Verb, ctx: BotuContext, opts: ReconcileOpt
     if (json) {
       ctx.process.stdout.write(
         `${JSON.stringify({
+          schemaVersion: REPORT_SCHEMA_VERSION,
           ok: report.failures === 0,
           warnings: report.warnings,
           failures: report.failures,
