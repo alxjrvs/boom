@@ -3,6 +3,7 @@
 // can restart the owning UI processes at the end of the run.
 import { detectOs } from "../../config/profile.ts";
 import type { OsxDefault } from "../../config/schema.ts";
+import { expandHome } from "../../lib/fs.ts";
 import { cleanEnv } from "../../lib/proc.ts";
 import type { ReconcileCtx } from "../types.ts";
 
@@ -39,15 +40,33 @@ export function osxMatches(type: OsxType, current: string, value: OsxValue): boo
 export function reconcileOsxDefault(entry: OsxDefault, ctx: ReconcileCtx): void {
   if (detectOs(ctx.env) !== "darwin") return;
   const { report } = ctx;
-  const { domain, key, type, value } = entry;
+  const { domain, key, type } = entry;
   const disp = `${domain} ${key}`;
   const env = cleanEnv(ctx.env);
+  // String values are written verbatim by `defaults write` (no shell to expand
+  // them), so resolve ~/$HOME here; non-string values pass through unchanged.
+  const value: OsxValue = type === "string" ? expandHome(String(entry.value), ctx.env) : entry.value;
+  const want = osxWanted(type, value);
+
+  const readCurrent = (): { ok: boolean; cur: string } => {
+    const p = Bun.spawnSync(["defaults", "read", domain, key], { env, stdout: "pipe", stderr: "ignore" });
+    return { ok: p.exitCode === 0, cur: p.exitCode === 0 ? new TextDecoder().decode(p.stdout).trim() : "" };
+  };
 
   switch (ctx.verb) {
     case "apply":
     case "fix": {
       if (ctx.dryRun) {
-        report.plan(`would set ${disp} -${type} ${value}`);
+        report.plan(`would set ${disp} -${type} ${want}`);
+        return;
+      }
+      // Idempotent: skip the write when the stored value already matches. This is
+      // what gates the UI restart — `defaults write` always exits 0, so writing
+      // unconditionally would flag every apply as "changed" and needlessly restart
+      // Dock/Finder/SystemUIServer even when nothing changed.
+      const { ok, cur } = readCurrent();
+      if (ok && osxMatches(type, cur, value)) {
+        report.ok(`${disp} = ${want} (unchanged)`);
         return;
       }
       const p = Bun.spawnSync(["defaults", "write", domain, key, `-${type}`, String(value)], {
@@ -56,7 +75,7 @@ export function reconcileOsxDefault(entry: OsxDefault, ctx: ReconcileCtx): void 
         stderr: "ignore",
       });
       if (p.exitCode === 0) {
-        report.ok(`${disp} = ${value}`);
+        report.ok(`${disp} = ${want}`);
         ctx.osx.changed = true;
       } else {
         report.fail(`${disp} (defaults write failed)`);
@@ -64,10 +83,8 @@ export function reconcileOsxDefault(entry: OsxDefault, ctx: ReconcileCtx): void 
       return;
     }
     case "verify": {
-      const p = Bun.spawnSync(["defaults", "read", domain, key], { env, stdout: "pipe", stderr: "ignore" });
-      const cur = p.exitCode === 0 ? new TextDecoder().decode(p.stdout).trim() : "";
-      const want = osxWanted(type, value);
-      if (p.exitCode === 0 && osxMatches(type, cur, value)) report.ok(`${disp} = ${want}`);
+      const { ok, cur } = readCurrent();
+      if (ok && osxMatches(type, cur, value)) report.ok(`${disp} = ${want}`);
       else report.warn(`${disp} = ${cur || "<unset>"}, expected ${want}`);
       return;
     }

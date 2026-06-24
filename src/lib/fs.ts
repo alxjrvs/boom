@@ -12,6 +12,17 @@ export function expandTilde(p: string, env: Env): string {
   return p;
 }
 
+// Like expandTilde, but also expands $HOME / ${HOME} anywhere in the string.
+// osx_default string values (e.g. `screencapture location`) are written verbatim
+// by `defaults write` — there is no shell to expand them — so a config value of
+// "$HOME/Screenshots" or "~/Screenshots" must be expanded here, or it lands on
+// disk literally.
+export function expandHome(p: string, env: Env): string {
+  const home = env.HOME ?? "";
+  if (!home) return p;
+  return expandTilde(p, env).replace(/\$\{HOME\}|\$HOME/g, () => home);
+}
+
 export function displayPath(p: string, env: Env): string {
   const home = env.HOME;
   return home && (p === home || p.startsWith(`${home}/`)) ? `~${p.slice(home.length)}` : p;
