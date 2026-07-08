@@ -59,6 +59,32 @@ test("link: apply → verify ok → uninstall removes", async () => {
   expect(await pathExists(join(sb.home, ".zshrc"))).toBe(false);
 });
 
+test("link: default (interactive, non-tty) leaves a foreign file at dst untouched", async () => {
+  const sb = await sandbox(`[[section]]\nname = "Shell"\nlink = [{ src = ".zshrc", dst = "~/.zshrc" }]\n`);
+  await writeFile(join(sb.repo, ".zshrc"), "z\n");
+  await writeFile(join(sb.home, ".zshrc"), "pre-existing, not ours\n");
+  expect(await reconcile("apply", sb.ctx, {})).toBe(0);
+  expect(await linkTarget(join(sb.home, ".zshrc"))).toBeUndefined();
+  expect(await readFile(join(sb.home, ".zshrc"), "utf8")).toBe("pre-existing, not ours\n");
+  expect(sb.out()).toContain("exists but is not our symlink — skipped");
+});
+
+test("link: linkMode overwrite replaces a foreign file at dst", async () => {
+  const sb = await sandbox(`[[section]]\nname = "Shell"\nlink = [{ src = ".zshrc", dst = "~/.zshrc" }]\n`);
+  await writeFile(join(sb.repo, ".zshrc"), "z\n");
+  await writeFile(join(sb.home, ".zshrc"), "pre-existing, not ours\n");
+  expect(await reconcile("apply", sb.ctx, { linkMode: "overwrite" })).toBe(0);
+  expect(await linkTarget(join(sb.home, ".zshrc"))).toBe(join(sb.repo, ".zshrc"));
+});
+
+test("link: fix always overwrites a foreign file regardless of linkMode", async () => {
+  const sb = await sandbox(`[[section]]\nname = "Shell"\nlink = [{ src = ".zshrc", dst = "~/.zshrc" }]\n`);
+  await writeFile(join(sb.repo, ".zshrc"), "z\n");
+  await writeFile(join(sb.home, ".zshrc"), "pre-existing, not ours\n");
+  expect(await reconcile("fix", sb.ctx, {})).toBe(0);
+  expect(await linkTarget(join(sb.home, ".zshrc"))).toBe(join(sb.repo, ".zshrc"));
+});
+
 test("verify fails (exit 1) when a link is missing", async () => {
   const sb = await sandbox(`[[section]]\nname = "S"\nlink = [{ src = ".x", dst = "~/.x" }]\n`);
   await writeFile(join(sb.repo, ".x"), "x");

@@ -16,6 +16,7 @@ import {
   rm,
   stat,
 } from "../../lib/fs.ts";
+import { confirmOverwrite } from "../../lib/prompt.ts";
 import type { UndoToken } from "../journal.ts";
 import type { LinkMode, ReconcileCtx } from "../types.ts";
 
@@ -46,7 +47,15 @@ async function applyLink(
     report.ok(`${disp} linked`);
     return;
   }
-  if (mode === "overwrite") {
+  // interactive on a real terminal asks per-conflict, mirroring the legacy bash
+  // `[[ -t 0 ]] && read -rp ... || choice="s"`; anything else (json, non-tty) never
+  // clobbers a file botu doesn't own without being told to.
+  const overwrite =
+    mode === "overwrite" ||
+    (mode === "interactive" &&
+      !ctx.json &&
+      (await confirmOverwrite(`       ${disp} exists but is not our symlink — overwrite? [o/s]: `)));
+  if (overwrite) {
     await ctx.journal?.intent("link", dst);
     const undo: UndoToken = ctx.backupRoot
       ? { kind: "restore", from: await backupTo(dst, ctx.backupRoot) }
@@ -57,7 +66,6 @@ async function applyLink(
     report.ok(`${disp} overwritten`);
     return;
   }
-  // skip / interactive(non-tty): never clobber a file botu doesn't own.
   report.skip(`${disp} exists but is not our symlink — skipped`);
 }
 
