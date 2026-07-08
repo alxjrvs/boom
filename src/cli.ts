@@ -9,6 +9,7 @@ import { doctorCommand } from "./commands/doctor.ts";
 import { initCommand } from "./commands/init.ts";
 import { linkCommand } from "./commands/link.ts";
 import { manCommand } from "./commands/man.ts";
+import { pushCommand } from "./commands/push.ts";
 import {
   applyCommand,
   fixCommand,
@@ -31,6 +32,7 @@ const routes = buildRouteMap({
     fix: fixCommand,
     update: updateCommand,
     uninstall: uninstallCommand,
+    push: pushCommand,
     where: whereCommand,
     rollback: rollbackCommand,
     upgrade: upgradeCommand,

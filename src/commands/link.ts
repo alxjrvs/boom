@@ -1,32 +1,31 @@
-// `botu link [path]` — record your dotfiles repo as the active config (the config
-// breadcrumb). The CWD-linking half of `botu init`, without the botuinit.sh bootstrap.
-
+// `botu link <owner/repo[@ref]>` — clone (or re-clone) a remote dotfiles repo into
+// botu's managed cache dir and record it as the active config. Repo-only: config is
+// always git-remote-backed, never an arbitrary local folder.
 import { buildCommand } from "@stricli/core";
-import { linkConfigRepo } from "../config/load.ts";
+import { linkRemoteConfigRepo } from "../config/remote.ts";
 import type { BotuContext } from "../context.ts";
 
-export const linkCommand = buildCommand<Record<never, never>, [string?], BotuContext>({
-  docs: { brief: "Record your dotfiles repo as the active config" },
+export const linkCommand = buildCommand<Record<never, never>, [string], BotuContext>({
+  docs: { brief: "Clone a remote dotfiles repo and record it as the active config" },
   parameters: {
     positional: {
       kind: "tuple",
       parameters: [
         {
           parse: (s: string) => s,
-          optional: true,
-          placeholder: "path",
-          brief: "dotfiles repo (default: cwd)",
+          placeholder: "owner/repo[@ref]",
+          brief: "remote dotfiles repo: owner/repo, github:owner/repo, or a git URL",
         },
       ],
     },
   },
-  async func(_flags, path) {
+  async func(_flags, ref) {
     let target: string;
     try {
-      target = await linkConfigRepo(this.env, path ?? this.cwd);
+      target = await linkRemoteConfigRepo(this.env, ref);
     } catch (e) {
       return e as Error;
     }
-    this.process.stdout.write(`botu: dotfiles repo recorded → ${target}\n`);
+    this.process.stdout.write(`botu: dotfiles repo cloned → ${target}\n`);
   },
 });

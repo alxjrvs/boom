@@ -13,6 +13,7 @@ import { Reporter } from "../lib/reporter.ts";
 import { Journal, newRunId, pruneRuns, readRun } from "./journal.ts";
 import { reconcileSection } from "./registry.ts";
 import { backupsDir, type ManifestEntry, readManifest, writeManifest } from "./state.ts";
+import { syncConfigRepo } from "./sync.ts";
 import type { LinkMode, ReconcileCtx, Verb } from "./types.ts";
 
 // Version of the `--json` report envelope. Bump when its shape changes so a script
@@ -132,6 +133,8 @@ export async function reconcile(verb: Verb, ctx: BotuContext, opts: ReconcileOpt
     report.fail("no dotfiles repo found — run `botu init`");
     return finish();
   }
+  const dryRun = opts.dryRun ?? false;
+  await syncConfigRepo(repo, ctx.env, report, verb, dryRun);
   let config: Botufile;
   try {
     config = await loadConfig(repo);
@@ -140,7 +143,6 @@ export async function reconcile(verb: Verb, ctx: BotuContext, opts: ReconcileOpt
     return finish();
   }
 
-  const dryRun = opts.dryRun ?? false;
   const mutating = (verb === "apply" || verb === "fix") && !dryRun;
   let journal: Journal | undefined;
   let backupRoot: string | undefined;

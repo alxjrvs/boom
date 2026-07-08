@@ -23,10 +23,30 @@ A `botu` invocation does one of two things:
    the most recent apply; `apply --resume` continues an interrupted one.
 
 2. **Discovered subcommands** — built-ins are the `@stricli` route map (`code`,
-   `mcp`, `where`, `rollback`, `upgrade`, `validate`, `doctor`, `completions`, `man`);
-   user commands resolve at runtime from `<config>/commands/<name>.ts`. Adding a tool
-   never edits a dispatch table. The command names live once in `src/commands/catalog.ts`,
-   which also drives the dispatch guard, shell completions, and the man page.
+   `mcp`, `push`, `where`, `rollback`, `upgrade`, `validate`, `doctor`, `completions`,
+   `man`); user commands resolve at runtime from `<config>/commands/<name>.ts`. Adding
+   a tool never edits a dispatch table. The command names live once in
+   `src/commands/catalog.ts`, which also drives the dispatch guard, shell
+   completions, and the man page.
+
+### Config source is a git remote (repo-only)
+
+`botu link`/`botu init` take a remote reference — `owner/repo`, `github:owner/repo`,
+a full git URL, optionally `@ref` — never an arbitrary local path. Botu clones it into
+a managed cache dir (`configRepoCacheDir`, under the state dir) and records the
+breadcrumb (`{ path, remote: { url, ref? } }`). `botu init` clones and immediately
+applies — the one-command fresh-machine bootstrap is `curl install.sh | sh && botu
+init owner/repo`, no repo-relative bootstrap script needed.
+
+Sync is a pre-reconcile step (`src/engine/sync.ts`), not a resource: `verify` fetches
+and reports "N commits behind origin" as drift without touching the working tree;
+`apply`/`fix` fast-forward-pull first and report what moved, then reconcile proceeds
+against whatever's on disk either way — a failed pull is reported but never blocks
+reconciling from the last-known-good local clone. Non-fast-forward divergence fails
+loudly rather than attempting a merge; a pinned `@ref` (tag/sha, detached HEAD) is
+reported as static rather than checked for drift. Auth is whatever git/SSH already
+works in the user's shell — no botu-side credential handling. `botu push` pushes the
+managed clone's local commits upstream (no auto-commit).
 
 ### Config is typed TOML, not code
 
@@ -59,7 +79,7 @@ Mutating runs open a journal under `${XDG_STATE_HOME:-~/.local/state}/botu/journ
 file under `…/backups/<run-id>/`. `botu rollback` replays the journal in reverse
 (remove created links, restore backups). A `manifest` of owned destinations drives
 orphan reaping (verify warns; apply/fix reap). Breadcrumbs (`config`, `code`) record
-the dotfiles repo and code dir.
+the dotfiles repo (path + remote) and code dir.
 
 ## Stack
 
@@ -77,17 +97,18 @@ the dotfiles repo and code dir.
 ```
 src/
   cli.ts · index.ts        @stricli app + entrypoint (dispatch: mcp, user cmds, built-ins)
-  commands/                init, link, apply/verify/fix/update/uninstall (reconcile.ts), where,
+  commands/                init, link, apply/verify/fix/update/uninstall (reconcile.ts), push, where,
                            rollback, upgrade, validate, doctor, code, mcp, completions, man
                            catalog.ts (command names: dispatch guard + completions + man)
   engine/
     reconcile.ts           the one verb loop
+    sync.ts                pre-reconcile config-repo fetch/pull-and-report
     registry.ts            per-section phase dispatch
     resources/             link · copy · glob · packages · run · hook
     journal.ts state.ts    transaction + on-disk state
     rollback.ts code.ts discovery.ts
-  config/  schema.ts load.ts migrate.ts profile.ts
-  lib/     reporter.ts color.ts fs.ts proc.ts version.ts
+  config/  schema.ts load.ts remote.ts migrate.ts profile.ts
+  lib/     reporter.ts color.ts fs.ts proc.ts git.ts version.ts
 test/                       bun test (unit + sandboxed integration)
 examples/dotfiles/          a runnable botufile.toml example
 .github/workflows/          ci.yml (check + cross-compile smoke), release.yml (tag → matrix → attach)
