@@ -29,6 +29,15 @@ function commitAll(dir: string, msg: string): void {
   git(dir, "-c", "user.email=t@t.com", "-c", "user.name=t", "commit", "-q", "-m", msg);
 }
 
+// The engine's own commit path (engine/commit.ts) shells `git commit` with no `-c`
+// override, unlike commitAll above — it relies on the machine's ambient git identity
+// at runtime, which a CI runner may not have. Tests exercising it configure the
+// managed clone's local identity explicitly so they don't depend on that fallback.
+function configureIdentity(dir: string): void {
+  git(dir, "config", "user.email", "t@t.com");
+  git(dir, "config", "user.name", "t");
+}
+
 async function originFixture(): Promise<string> {
   const dir = await base();
   await writeFile(join(dir, "botufile.toml"), `[[section]]\nname = "x"\n`);
@@ -224,6 +233,7 @@ test("apply --commit commits local edits first, then rebases them onto the pulle
   const origin = await originFixture();
   const env = { XDG_STATE_HOME: await base(), NO_COLOR: "1" };
   const repo = await linkRemoteConfigRepo(env, origin);
+  configureIdentity(repo);
 
   await writeFile(join(origin, "botufile.toml"), `[[section]]\nname = "x"\n[[section]]\nname = "y"\n`);
   commitAll(origin, "add y");
@@ -259,6 +269,7 @@ test("apply --commit commits local edits even when already up to date with origi
   const origin = await originFixture();
   const env = { XDG_STATE_HOME: await base(), NO_COLOR: "1" };
   const repo = await linkRemoteConfigRepo(env, origin);
+  configureIdentity(repo);
   // origin hasn't moved — there's nothing to pull, but --commit should still commit.
   await writeFile(join(repo, "scratch.txt"), "local addition\n");
 
@@ -369,6 +380,7 @@ test("commit commits local changes in the managed clone", async () => {
   const origin = await originFixture();
   const env = { XDG_STATE_HOME: await base(), NO_COLOR: "1" };
   const repo = await linkRemoteConfigRepo(env, origin);
+  configureIdentity(repo);
   await writeFile(join(repo, "scratch.txt"), "local addition\n");
 
   const { ctx, out } = ctxFor(env, repo);
