@@ -99,6 +99,26 @@ test("parseRemoteRef pins a ref that itself contains a slash", () => {
   });
 });
 
+test("parseRemoteRef doesn't mistake an ssh:// URL's userinfo @ for a ref pin", () => {
+  expect(parseRemoteRef("ssh://git@github.com/alxjrvs/dotfiles.git")).toEqual({
+    url: "ssh://git@github.com/alxjrvs/dotfiles.git",
+  });
+});
+
+test("parseRemoteRef pins an ssh:// URL past its userinfo @", () => {
+  expect(parseRemoteRef("ssh://git@github.com/alxjrvs/dotfiles.git@v1.0")).toEqual({
+    url: "ssh://git@github.com/alxjrvs/dotfiles.git",
+    ref: "v1.0",
+  });
+});
+
+test("parseRemoteRef can pin an SSH scp-shorthand too, past its host @", () => {
+  expect(parseRemoteRef("git@github.com:alxjrvs/dotfiles.git@v1.0")).toEqual({
+    url: "git@github.com:alxjrvs/dotfiles.git",
+    ref: "v1.0",
+  });
+});
+
 // ---- sync: verify reports drift, apply pulls -------------------------------
 
 test("verify reports 0 drift right after linking", async () => {

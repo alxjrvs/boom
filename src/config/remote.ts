@@ -22,18 +22,25 @@ export interface ParsedRemoteRef {
   readonly ref?: string;
 }
 
-// An SSH shorthand (`git@github.com:owner/repo`) has an `@` with no `/` before it,
-// immediately followed by a bare host and `:` — that's the one shape whose `@` isn't
-// a ref pin. Everything else (owner/repo, github:owner/repo, https://, ssh://, and
-// crucially a ref that itself contains a slash, e.g. `owner/repo@feature/foo`) splits
-// on the last `@` unconditionally; a slash-position heuristic gets those wrong.
-const SSH_SHORTHAND_RE = /^[^/\s@]+@[^/\s@:]+:/;
+// A userinfo `@` — `user@host` in `ssh://user@host/...`, or the bare `user@host:path`
+// scp-like shorthand — always sits before the "authority boundary": the first `/`
+// that follows any `scheme://` prefix (or the very start, for the bare scp shorthand,
+// since it has no scheme). A ref pin's `@`, if any, always comes after that boundary —
+// so find the boundary first, then look for a pin only past it. This is what lets both
+// `ssh://user@host/...` (no pin) and a ref that itself contains a slash (`owner/repo@
+// feature/foo`, common in git-flow branch names) resolve correctly at once; comparing
+// raw @/slash positions in the whole string can't get both.
+function authorityBoundary(input: string): number {
+  const scheme = /^[a-zA-Z][\w+.-]*:\/\//.exec(input);
+  const start = scheme ? scheme[0].length : 0;
+  const slash = input.indexOf("/", start);
+  return slash === -1 ? input.length : slash;
+}
 
 function splitRef(input: string): { base: string; ref?: string } {
-  if (SSH_SHORTHAND_RE.test(input)) return { base: input };
-  const at = input.lastIndexOf("@");
-  if (at === -1) return { base: input };
-  return { base: input.slice(0, at), ref: input.slice(at + 1) };
+  const pinAt = input.indexOf("@", authorityBoundary(input));
+  if (pinAt === -1) return { base: input };
+  return { base: input.slice(0, pinAt), ref: input.slice(pinAt + 1) };
 }
 
 const GITHUB_SHORTHAND_RE = /^[\w.-]+\/[\w.-]+$/;
