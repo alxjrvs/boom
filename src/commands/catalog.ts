@@ -16,6 +16,7 @@ export const COMMANDS: readonly CommandInfo[] = [
   { name: "fix", brief: "Repair drift (apply, overwriting conflicts)" },
   { name: "update", brief: "Apply with upgrades" },
   { name: "uninstall", brief: "Remove everything botu installed" },
+  { name: "commit", brief: "Commit local changes in the config repo" },
   { name: "push", brief: "Push the config repo's local commits upstream" },
   { name: "reset", brief: "Discard local changes in the config repo and reset it to origin" },
   { name: "where", brief: "Print a resolved botu path: config | code | engine" },

@@ -31,15 +31,18 @@ async function applyLink(
     report.skip(`${disp} already linked`);
     return;
   }
+  const conflict = await pathExists(dst);
   if (ctx.dryRun) {
-    report.plan(`${disp} would be linked`);
+    if (conflict && mode === "overwrite") report.plan(`${disp} would overwrite an existing file`);
+    else if (conflict) report.plan(`${disp} exists but is not our symlink — would be skipped`);
+    else report.plan(`${disp} would be linked`);
     return;
   }
   if (ctx.resumeDone?.has(dst)) {
     report.skip(`${disp} (resumed — already applied)`);
     return;
   }
-  if (!(await pathExists(dst))) {
+  if (!conflict) {
     await ctx.journal?.intent("link", dst);
     await ensureSymlink(src, dst);
     await ctx.journal?.done("link", dst, { kind: "remove" });
@@ -57,7 +60,7 @@ async function applyLink(
     report.ok(`${disp} overwritten`);
     return;
   }
-  // skip / interactive(non-tty): never clobber a file botu doesn't own.
+  // skip: never clobber a file botu doesn't own.
   report.skip(`${disp} exists but is not our symlink — skipped`);
 }
 

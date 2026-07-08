@@ -17,6 +17,32 @@ export function ffPull(dir: string, env: Env): CaptureResult {
   return captureArgv(["git", "pull", "--ff-only"], env, { cwd: dir });
 }
 
+// --autostash: git itself stashes any dirty tracked changes before rebasing and
+// restores them after — including automatically on `rebaseAbort`, so a conflict
+// never strands local edits. Untracked files are never touched by a rebase, so they
+// don't need stashing for this to be safe.
+export function pullRebaseAutostash(dir: string, env: Env): CaptureResult {
+  return captureArgv(["git", "pull", "--rebase", "--autostash"], env, { cwd: dir });
+}
+
+export function rebaseOnto(dir: string, ref: string, env: Env): CaptureResult {
+  return captureArgv(["git", "rebase", ref], env, { cwd: dir });
+}
+
+// Harmless (git errors, callers ignore the result) when no rebase is in progress —
+// callers can call this unconditionally as cleanup after any rebase attempt.
+export function rebaseAbort(dir: string, env: Env): CaptureResult {
+  return captureArgv(["git", "rebase", "--abort"], env, { cwd: dir });
+}
+
+export function addAll(dir: string, env: Env): CaptureResult {
+  return captureArgv(["git", "add", "-A"], env, { cwd: dir });
+}
+
+export function commitStaged(dir: string, message: string, env: Env): CaptureResult {
+  return captureArgv(["git", "commit", "-m", message], env, { cwd: dir });
+}
+
 export function checkoutRef(dir: string, ref: string, env: Env): CaptureResult {
   return captureArgv(["git", "checkout", ref], env, { cwd: dir });
 }

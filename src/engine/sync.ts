@@ -1,14 +1,31 @@
 // Config-repo sync: the pre-reconcile step that keeps a repo-only config fresh.
 // `verify` (and any dry-run) fetches and reports drift without touching the working
-// tree; `apply`/`fix` fast-forward-pull and report what moved, then reconcile
+// tree; `apply`/`fix` pull (rebasing local changes on top via --autostash, or
+// committing them first with --commit) and report what moved, then reconcile
 // proceeds against whatever's on disk regardless — a failed pull is reported but
-// never blocks reconciling from the last-known-good local state (fast-forward-only
-// means a failure can't have left the clone half-merged).
+// never blocks reconciling from the last-known-good local state (a rebase conflict
+// is aborted before returning, so "local state" is never left mid-rebase).
 import { readConfigBreadcrumb } from "../config/load.ts";
-import { diffNameOnly, fetchOrigin, ffPull, hasUpstream, headSha, revListCount } from "../lib/git.ts";
+import {
+  diffNameOnly,
+  fetchOrigin,
+  hasUpstream,
+  headSha,
+  pullRebaseAutostash,
+  rebaseAbort,
+  revListCount,
+} from "../lib/git.ts";
 import type { Env } from "../lib/proc.ts";
 import type { Reporter } from "../lib/reporter.ts";
+import { commitLocalChanges } from "./commit.ts";
 import type { Verb } from "./types.ts";
+
+export interface SyncOptions {
+  // Commit local changes before pulling instead of the default autostash — so they
+  // land as a real commit, replayed on top of the rebase rather than left uncommitted.
+  readonly commit?: boolean;
+  readonly commitMessage?: string;
+}
 
 export async function syncConfigRepo(
   repo: string,
@@ -16,6 +33,7 @@ export async function syncConfigRepo(
   report: Reporter,
   verb: Verb,
   dryRun: boolean,
+  opts?: SyncOptions,
 ): Promise<void> {
   if (verb === "uninstall") return;
   const breadcrumb = await readConfigBreadcrumb(env);
@@ -31,21 +49,36 @@ export async function syncConfigRepo(
     report.ok(`pinned to ${breadcrumb.remote.ref ?? "a fixed ref"} — not tracking a moving branch`);
     return;
   }
+
+  if (verb === "verify" || dryRun) {
+    const behind = revListCount(repo, "HEAD..@{u}", env);
+    if (behind === 0) report.ok("up to date with origin");
+    else report.warn(`${behind} commit(s) behind origin`);
+    return;
+  }
+
+  // --commit's job is to commit local edits, independent of whether origin has moved —
+  // do it before the behind-check below, so it isn't skipped just because there's
+  // nothing to pull.
+  if (opts?.commit) {
+    const outcome = commitLocalChanges(repo, env, opts.commitMessage);
+    if (outcome.kind === "failed") {
+      report.fail(`git commit failed: ${outcome.stderr}`);
+      return;
+    }
+    if (outcome.kind === "committed") report.ok(`committed local changes (${outcome.message})`);
+  }
+
   const behind = revListCount(repo, "HEAD..@{u}", env);
   if (behind === 0) {
     report.ok("up to date with origin");
     return;
   }
-  if (verb === "verify" || dryRun) {
-    report.warn(`${behind} commit(s) behind origin`);
-    return;
-  }
   const before = headSha(repo, env);
-  const pull = ffPull(repo, env);
+  const pull = pullRebaseAutostash(repo, env);
   if (pull.code !== 0) {
-    report.fail(
-      `fast-forward pull failed — resolve manually in ${repo} (${pull.stderr || "not a fast-forward"})`,
-    );
+    rebaseAbort(repo, env); // no-op if nothing was left mid-rebase; restores any autostash
+    report.fail(`pull --rebase failed — resolve manually in ${repo} (${pull.stderr || "conflict"})`);
     return;
   }
   const changed = before ? diffNameOnly(repo, `${before}..HEAD`, env) : [];

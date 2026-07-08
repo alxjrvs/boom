@@ -32,12 +32,14 @@ type ApplyFlags = {
   json?: boolean;
   only?: string[];
   profile?: string[];
+  commit?: boolean;
+  message?: string;
 };
 
-function linkModeOf(flags: { force?: boolean; skip?: boolean }): LinkMode {
-  if (flags.force) return "overwrite";
-  if (flags.skip) return "skip";
-  return "interactive";
+// overwrite is the default (and what --force explicitly asks for too) — --skip is
+// the one way to opt out of clobbering a conflicting target.
+function linkModeOf(flags: { skip?: boolean }): LinkMode {
+  return flags.skip ? "skip" : "overwrite";
 }
 
 export const applyCommand = buildCommand<ApplyFlags, [], BotuContext>({
@@ -45,14 +47,25 @@ export const applyCommand = buildCommand<ApplyFlags, [], BotuContext>({
   parameters: {
     flags: {
       dryRun: { kind: "boolean", optional: true, brief: "Show what would change; change nothing" },
-      force: { kind: "boolean", optional: true, brief: "Overwrite conflicting targets" },
-      skip: { kind: "boolean", optional: true, brief: "Skip conflicting targets" },
+      force: { kind: "boolean", optional: true, brief: "Overwrite conflicting targets (default)" },
+      skip: { kind: "boolean", optional: true, brief: "Skip conflicting targets instead of overwriting" },
       resume: { kind: "boolean", optional: true, brief: "Continue an interrupted apply (skip done steps)" },
+      commit: {
+        kind: "boolean",
+        optional: true,
+        brief: "Commit local config-repo changes before pulling, instead of autostashing them",
+      },
+      message: {
+        kind: "parsed",
+        parse: parseTag,
+        optional: true,
+        brief: 'Commit message for --commit (default: "botu: local changes")',
+      },
       only: onlyFlag,
       profile: profileFlag,
       json: jsonFlag,
     },
-    aliases: { f: "force", s: "skip" },
+    aliases: { f: "force", s: "skip", m: "message" },
   },
   async func(flags) {
     this.process.exitCode = await reconcile("apply", this, {
@@ -62,6 +75,8 @@ export const applyCommand = buildCommand<ApplyFlags, [], BotuContext>({
       json: flags.json,
       profiles: flags.profile,
       linkMode: linkModeOf(flags),
+      commit: flags.commit,
+      commitMessage: flags.message,
     });
   },
 });

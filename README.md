@@ -20,6 +20,10 @@ portals to your machine's ideal state, and to your code. You drive it with the
 botu init alxjrvs/dotfiles   # clone your remote dotfiles repo and apply it — bootstrap
 botu link alxjrvs/dotfiles   # … clone + record only (init without the apply)
 botu apply                   # symlink/copy/install/run from its botufile.toml
+botu apply --dry-run         # preview what apply would change; change nothing
+botu apply --skip            # skip conflicting targets instead of overwriting them
+botu apply --commit          # commit local config-repo changes before pulling
+botu commit                  # commit local changes in the config repo directly
 botu verify                  # check for drift (exit 0 ok / 2 warn / 1 fail)
 botu verify --json           # … as a structured drift report
 botu fix                     # repair drift
@@ -36,9 +40,13 @@ botu code cmux           # one cmux workspace per repo
 
 Config is repo-only: `link`/`init` always clone a remote (`owner/repo`,
 `github:owner/repo`, a git URL, optionally `@ref`) into a botu-managed cache dir —
-never an arbitrary local folder. `apply`/`fix` fast-forward-pull the config repo
-first and report what moved; `verify` reports "N commits behind" as drift without
-pulling. Auth is whatever git/SSH already works in your shell.
+never an arbitrary local folder. `apply`/`fix` pull the config repo first (rebasing
+any local edits on top via `--autostash`, or committing them first with
+`--commit`) and report what moved; `verify` reports "N commits behind" as drift
+without pulling. A rebase conflict is reported but never blocks reconciling from
+the local clone as-is. Auth is whatever git/SSH already works in your shell. A
+conflicting (non-botu-owned) file at a link's destination is **overwritten by
+default** — pass `--skip` to leave it alone instead.
 
 ## The `botufile.toml`
 

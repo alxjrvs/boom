@@ -20,7 +20,17 @@ A `botu` invocation does one of two things:
    - `botu uninstall` / `botu update` (= apply with upgrades)
    These share **one verb-parameterized loop** (`src/engine/reconcile.ts`) over a
    resource-type registry — siblings, not separate scripts. `botu rollback` undoes
-   the most recent apply; `apply --resume` continues an interrupted one.
+   the most recent apply; `apply --resume` continues an interrupted one. A
+   conflicting (non-botu-owned) file at a `link` destination is **overwritten by
+   default**; `apply --skip` opts out instead.
+
+   `apply`/`fix` (never `verify`/`uninstall`) also sync the config repo's own git
+   state against its remote first (`src/engine/sync.ts`): by default `pull --rebase
+   --autostash`s, so any uncommitted local edits ride along and land back on top;
+   `apply --commit` commits local edits first instead of autostashing them, so
+   they replay as a real commit on the rebase. `botu commit` commits local config-repo
+   changes standalone (`src/engine/commit.ts`), sharing its commit logic with
+   `apply --commit` so the default message/behavior can't drift between the two.
 
 2. **Discovered subcommands** — built-ins are the `@stricli` route map (`code`,
    `mcp`, `push`, `where`, `rollback`, `upgrade`, `validate`, `doctor`, `completions`,
@@ -40,19 +50,24 @@ init owner/repo`, no repo-relative bootstrap script needed.
 
 Sync is a pre-reconcile step (`src/engine/sync.ts`), not a resource: `verify` fetches
 and reports "N commits behind origin" as drift without touching the working tree;
-`apply`/`fix` fast-forward-pull first and report what moved, then reconcile proceeds
-against whatever's on disk either way — a failed pull is reported but never blocks
-reconciling from the last-known-good local clone. Non-fast-forward divergence fails
-loudly rather than attempting a merge; a pinned `@ref` (tag/sha, detached HEAD) is
-reported as static rather than checked for drift. Auth is whatever git/SSH already
-works in the user's shell — no botu-side credential handling. `botu push` pushes the
-managed clone's local commits upstream (no auto-commit); `botu reset` is the other
-direction — fetches, then hard-resets to the upstream tip (or the pinned `@ref` for a
-detached clone) and clears untracked files, discarding local changes back to what a
-fresh re-clone would leave. `linkRemoteConfigRepo` refuses to wipe a managed clone
-that has either uncommitted changes or commits not yet pushed (checked separately —
-`git status --porcelain` never reports ahead-of-upstream) — `botu push` or `botu
-reset` first, then re-link.
+`apply`/`fix` pull first and report what moved, then reconcile proceeds against
+whatever's on disk either way — a failed pull is reported but never blocks
+reconciling from the last-known-good local clone. The pull is `git pull --rebase
+--autostash` (git stashes any dirty tracked changes before rebasing and restores
+them after, including automatically on an aborted rebase); `apply --commit` commits
+local edits first instead of autostashing them (`src/engine/commit.ts`, shared with
+`botu commit`). A rebase conflict aborts cleanly (`git rebase --abort`, which also
+restores the autostash) and is reported as a failure, but reconcile still proceeds
+from the local state as it was before the rebase attempt. A pinned `@ref` (tag/sha,
+detached HEAD) is reported as static rather than checked for drift. Auth is whatever
+git/SSH already works in the user's shell — no botu-side credential handling. `botu
+push` pushes the managed clone's local commits upstream (no auto-commit); `botu
+reset` is the other direction — fetches, then hard-resets to the upstream tip (or
+the pinned `@ref` for a detached clone) and clears untracked files, discarding local
+changes back to what a fresh re-clone would leave. `linkRemoteConfigRepo` refuses to
+wipe a managed clone that has either uncommitted changes or commits not yet pushed
+(checked separately — `git status --porcelain` never reports ahead-of-upstream) —
+`botu push` or `botu reset` first, then re-link.
 
 ### Config is typed TOML, not code
 
@@ -103,12 +118,15 @@ the dotfiles repo (path + remote) and code dir.
 ```
 src/
   cli.ts · index.ts        @stricli app + entrypoint (dispatch: mcp, user cmds, built-ins)
-  commands/                init, link, apply/verify/fix/update/uninstall (reconcile.ts), push, reset,
-                           where, rollback, upgrade, validate, doctor, code, mcp, completions, man
+  commands/                init, link, apply/verify/fix/update/uninstall (reconcile.ts), commit,
+                           push, reset, where, rollback, upgrade, validate, doctor, code, mcp,
+                           completions, man
                            catalog.ts (command names: dispatch guard + completions + man)
   engine/
     reconcile.ts           the one verb loop
-    sync.ts                pre-reconcile config-repo fetch/pull-and-report
+    sync.ts                pre-reconcile config-repo fetch/pull(--rebase --autostash)-and-report
+    commit.ts              commit local config-repo changes (shared by `botu commit` + apply --commit)
+    push.ts reset.ts       botu push / botu reset
     registry.ts            per-section phase dispatch
     resources/             link · copy · glob · packages · run · hook
     journal.ts state.ts    transaction + on-disk state

@@ -27,6 +27,10 @@ export interface ReconcileOptions {
   readonly json?: boolean;
   readonly resume?: boolean;
   readonly profiles?: string[];
+  // Only consulted for verb "apply"/"fix" (sync/update alias to apply too): commit
+  // local config-repo changes before pulling, instead of the default autostash.
+  readonly commit?: boolean;
+  readonly commitMessage?: string;
 }
 
 // Merge a partial run's declared set into the prior manifest (union by dst, declared
@@ -134,7 +138,10 @@ export async function reconcile(verb: Verb, ctx: BotuContext, opts: ReconcileOpt
     return finish();
   }
   const dryRun = opts.dryRun ?? false;
-  await syncConfigRepo(repo, ctx.env, report, verb, dryRun);
+  await syncConfigRepo(repo, ctx.env, report, verb, dryRun, {
+    commit: opts.commit,
+    commitMessage: opts.commitMessage,
+  });
   let config: Botufile;
   try {
     config = await loadConfig(repo);
@@ -163,7 +170,7 @@ export async function reconcile(verb: Verb, ctx: BotuContext, opts: ReconcileOpt
     verb,
     dryRun,
     json,
-    linkMode: opts.linkMode ?? "interactive",
+    linkMode: opts.linkMode ?? "overwrite",
     env: ctx.env,
     report,
     declared: [],

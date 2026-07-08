@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { readConfigBreadcrumb } from "../src/config/load.ts";
 import { linkRemoteConfigRepo, parseRemoteRef } from "../src/config/remote.ts";
 import type { BotuContext } from "../src/context.ts";
+import { commitConfigRepo } from "../src/engine/commit.ts";
 import { doctor } from "../src/engine/doctor.ts";
 import { pushConfigRepo } from "../src/engine/push.ts";
 import { reconcile } from "../src/engine/reconcile.ts";
@@ -26,6 +27,15 @@ function git(dir: string, ...args: string[]) {
 function commitAll(dir: string, msg: string): void {
   git(dir, "add", "-A");
   git(dir, "-c", "user.email=t@t.com", "-c", "user.name=t", "commit", "-q", "-m", msg);
+}
+
+// The engine's own commit path (engine/commit.ts) shells `git commit` with no `-c`
+// override, unlike commitAll above — it relies on the machine's ambient git identity
+// at runtime, which a CI runner may not have. Tests exercising it configure the
+// managed clone's local identity explicitly so they don't depend on that fallback.
+function configureIdentity(dir: string): void {
+  git(dir, "config", "user.email", "t@t.com");
+  git(dir, "config", "user.name", "t");
 }
 
 async function originFixture(): Promise<string> {
@@ -150,7 +160,7 @@ test("verify reports commits-behind as drift without pulling", async () => {
   expect(await readFile(join(repo, "botufile.toml"), "utf8")).toBe(before);
 });
 
-test("apply fast-forward-pulls and reports what changed", async () => {
+test("apply pulls and reports what changed", async () => {
   const origin = await originFixture();
   const env = { XDG_STATE_HOME: await base(), NO_COLOR: "1" };
   const repo = await linkRemoteConfigRepo(env, origin);
@@ -178,7 +188,7 @@ test("apply reports an unreachable origin but still reconciles from the local cl
   expect(rc).toBe(0);
 });
 
-test("apply reports a failed fast-forward but still reconciles from the local clone", async () => {
+test("apply reports a genuine rebase conflict, aborts cleanly, but still reconciles from local state", async () => {
   const origin = await originFixture();
   const env = { XDG_STATE_HOME: await base(), NO_COLOR: "1" };
   const repo = await linkRemoteConfigRepo(env, origin);
@@ -186,17 +196,89 @@ test("apply reports a failed fast-forward but still reconciles from the local cl
   // Diverge: a local-only commit in the managed clone...
   await writeFile(join(repo, "botufile.toml"), `[[section]]\nname = "x"\n[[section]]\nname = "local"\n`);
   commitAll(repo, "local edit");
-  // ...and an incompatible commit on origin's main, off the same base — no longer a
-  // fast-forward either way.
+  // ...and an incompatible commit on origin's main, off the same base — replaying the
+  // local commit on top of it via rebase conflicts.
   await writeFile(join(origin, "botufile.toml"), `[[section]]\nname = "x"\n[[section]]\nname = "remote"\n`);
   commitAll(origin, "remote edit");
 
   const { ctx, out } = ctxFor(env, repo);
   const rc = await reconcile("apply", ctx, {});
-  expect(out()).toContain("fast-forward pull failed");
+  expect(out()).toContain("pull --rebase failed");
   // never blocks reconciling from the last-known-good (here: locally-committed) state
   expect(await readFile(join(repo, "botufile.toml"), "utf8")).toContain('name = "local"');
+  // rebase --abort must have restored a clean, non-conflicted working tree.
+  expect(git(repo, "status", "--porcelain").stdout.trim()).toBe("");
   expect(rc).toBe(1);
+});
+
+test("apply pulls a remote change while preserving an uncommitted local edit (autostash)", async () => {
+  const origin = await originFixture();
+  const env = { XDG_STATE_HOME: await base(), NO_COLOR: "1" };
+  const repo = await linkRemoteConfigRepo(env, origin);
+
+  await writeFile(join(origin, "botufile.toml"), `[[section]]\nname = "x"\n[[section]]\nname = "y"\n`);
+  commitAll(origin, "add y");
+  // uncommitted, dirty tree — the default pull must autostash this and restore it.
+  await writeFile(join(repo, "scratch.txt"), "uncommitted local edit\n");
+
+  const { ctx, out } = ctxFor(env, repo);
+  const rc = await reconcile("apply", ctx, {});
+  expect(rc).toBe(0);
+  expect(out()).toContain("pulled 1 commit(s)");
+  expect(await readFile(join(repo, "botufile.toml"), "utf8")).toContain('name = "y"');
+  expect(await readFile(join(repo, "scratch.txt"), "utf8")).toBe("uncommitted local edit\n");
+});
+
+test("apply --commit commits local edits first, then rebases them onto the pulled remote", async () => {
+  const origin = await originFixture();
+  const env = { XDG_STATE_HOME: await base(), NO_COLOR: "1" };
+  const repo = await linkRemoteConfigRepo(env, origin);
+  configureIdentity(repo);
+
+  await writeFile(join(origin, "botufile.toml"), `[[section]]\nname = "x"\n[[section]]\nname = "y"\n`);
+  commitAll(origin, "add y");
+  await writeFile(join(repo, "scratch.txt"), "local addition\n");
+
+  const { ctx, out } = ctxFor(env, repo);
+  const rc = await reconcile("apply", ctx, { commit: true, commitMessage: "test commit" });
+  expect(rc).toBe(0);
+  expect(out()).toContain("committed local changes (test commit)");
+  expect(await readFile(join(repo, "botufile.toml"), "utf8")).toContain('name = "y"');
+  expect(await readFile(join(repo, "scratch.txt"), "utf8")).toBe("local addition\n");
+  expect(git(repo, "log", "-1", "--format=%s").stdout.trim()).toBe("test commit");
+  // the commit replayed on top of the pull, not left behind as a stray unpushed tip.
+  expect(git(repo, "status", "--porcelain").stdout.trim()).toBe("");
+});
+
+test("apply --commit with a clean tree pulls normally, without an empty commit", async () => {
+  const origin = await originFixture();
+  const env = { XDG_STATE_HOME: await base(), NO_COLOR: "1" };
+  const repo = await linkRemoteConfigRepo(env, origin);
+
+  await writeFile(join(origin, "botufile.toml"), `[[section]]\nname = "x"\n[[section]]\nname = "y"\n`);
+  commitAll(origin, "add y");
+
+  const { ctx, out } = ctxFor(env, repo);
+  const rc = await reconcile("apply", ctx, { commit: true });
+  expect(rc).toBe(0);
+  expect(out()).not.toContain("committed local changes");
+  expect(await readFile(join(repo, "botufile.toml"), "utf8")).toContain('name = "y"');
+});
+
+test("apply --commit commits local edits even when already up to date with origin", async () => {
+  const origin = await originFixture();
+  const env = { XDG_STATE_HOME: await base(), NO_COLOR: "1" };
+  const repo = await linkRemoteConfigRepo(env, origin);
+  configureIdentity(repo);
+  // origin hasn't moved — there's nothing to pull, but --commit should still commit.
+  await writeFile(join(repo, "scratch.txt"), "local addition\n");
+
+  const { ctx, out } = ctxFor(env, repo);
+  const rc = await reconcile("apply", ctx, { commit: true, commitMessage: "test commit" });
+  expect(rc).toBe(0);
+  expect(out()).toContain("committed local changes (test commit)");
+  expect(git(repo, "log", "-1", "--format=%s").stdout.trim()).toBe("test commit");
+  expect(git(repo, "status", "--porcelain").stdout.trim()).toBe("");
 });
 
 test("a pinned ref is reported as static, not checked for drift", async () => {
@@ -289,6 +371,41 @@ test("doctor warns when no remote config is linked", async () => {
     await base(),
   );
   await doctor(ctx);
+  expect(out()).toContain("no remote config linked");
+});
+
+// ---- commit -----------------------------------------------------------------
+
+test("commit commits local changes in the managed clone", async () => {
+  const origin = await originFixture();
+  const env = { XDG_STATE_HOME: await base(), NO_COLOR: "1" };
+  const repo = await linkRemoteConfigRepo(env, origin);
+  configureIdentity(repo);
+  await writeFile(join(repo, "scratch.txt"), "local addition\n");
+
+  const { ctx, out } = ctxFor(env, repo);
+  const rc = await commitConfigRepo(ctx, "my message");
+  expect(rc).toBe(0);
+  expect(out()).toContain("committed (my message)");
+  expect(git(repo, "status", "--porcelain").stdout.trim()).toBe("");
+  expect(git(repo, "log", "-1", "--format=%s").stdout.trim()).toBe("my message");
+});
+
+test("commit reports nothing to commit on a clean tree", async () => {
+  const origin = await originFixture();
+  const env = { XDG_STATE_HOME: await base(), NO_COLOR: "1" };
+  const repo = await linkRemoteConfigRepo(env, origin);
+
+  const { ctx, out } = ctxFor(env, repo);
+  const rc = await commitConfigRepo(ctx);
+  expect(rc).toBe(0);
+  expect(out()).toContain("nothing to commit");
+});
+
+test("commit fails cleanly when no remote config is linked", async () => {
+  const { ctx, out } = ctxFor({ XDG_STATE_HOME: await base(), NO_COLOR: "1" }, await base());
+  const rc = await commitConfigRepo(ctx);
+  expect(rc).toBe(1);
   expect(out()).toContain("no remote config linked");
 });
 

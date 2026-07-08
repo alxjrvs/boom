@@ -3,7 +3,7 @@ import type { Journal } from "./journal.ts";
 import type { ManifestEntry } from "./state.ts";
 
 export type Verb = "apply" | "verify" | "fix" | "uninstall";
-export type LinkMode = "interactive" | "overwrite" | "skip";
+export type LinkMode = "overwrite" | "skip";
 
 // Shared state threaded through every resource handler for one reconcile run.
 export interface ReconcileCtx {
