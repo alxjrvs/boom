@@ -1,6 +1,6 @@
 // Process helpers. Bun.spawnSync (not Bun.$) so the engine controls exit codes
 // without throw semantics; `sh -c` so botufile `run` strings expand ~ and globs.
-type Env = Record<string, string | undefined>;
+export type Env = Record<string, string | undefined>;
 
 export function cleanEnv(env: Env): Record<string, string> {
   const out: Record<string, string> = {};
@@ -57,4 +57,25 @@ export function hasCommand(name: string, env: Env): boolean {
     stderr: "ignore",
   });
   return p.exitCode === 0;
+}
+
+export interface CaptureResult extends ShellResult {
+  readonly stdout: string;
+  readonly stderr: string;
+}
+
+// Like runArgv, but captures output instead of streaming it — for callers that need
+// the text (git plumbing: remote URLs, commit counts, changed-file lists), not just a
+// pass/fail exit code.
+export function captureArgv(args: string[], env: Env, opts?: RunOptions): CaptureResult {
+  // Bun.spawnSync throws (missing executable, nonexistent cwd) rather than returning
+  // a failed result. Callers treat the tool as a black box with exit codes — sync
+  // must degrade to "reconcile from the local clone", push/reset to a clean exit 1 —
+  // so map the throw onto that contract instead of crashing them.
+  try {
+    const p = Bun.spawnSync(args, { env: cleanEnv(env), cwd: opts?.cwd, stdout: "pipe", stderr: "pipe" });
+    return { code: p.exitCode, stdout: p.stdout.toString().trim(), stderr: p.stderr.toString().trim() };
+  } catch (e) {
+    return { code: -1, stdout: "", stderr: e instanceof Error ? e.message : String(e) };
+  }
 }

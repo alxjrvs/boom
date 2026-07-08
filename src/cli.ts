@@ -9,6 +9,7 @@ import { doctorCommand } from "./commands/doctor.ts";
 import { initCommand } from "./commands/init.ts";
 import { linkCommand } from "./commands/link.ts";
 import { manCommand } from "./commands/man.ts";
+import { pushCommand } from "./commands/push.ts";
 import {
   applyCommand,
   fixCommand,
@@ -16,6 +17,7 @@ import {
   updateCommand,
   verifyCommand,
 } from "./commands/reconcile.ts";
+import { resetCommand } from "./commands/reset.ts";
 import { rollbackCommand } from "./commands/rollback.ts";
 import { upgradeCommand } from "./commands/upgrade.ts";
 import { validateCommand } from "./commands/validate.ts";
@@ -31,6 +33,8 @@ const routes = buildRouteMap({
     fix: fixCommand,
     update: updateCommand,
     uninstall: uninstallCommand,
+    push: pushCommand,
+    reset: resetCommand,
     where: whereCommand,
     rollback: rollbackCommand,
     upgrade: upgradeCommand,

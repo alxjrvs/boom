@@ -17,20 +17,28 @@ portals to your machine's ideal state, and to your code. You drive it with the
 ## Quickstart
 
 ```sh
-botu init ~/dotfiles     # record your dotfiles repo (+ writes botuinit.sh there)
-botu link ~/dotfiles     # … record the repo only (init without the bootstrap)
-botu apply               # symlink/copy/install/run from its botufile.toml
-botu verify              # check for drift (exit 0 ok / 2 warn / 1 fail)
-botu verify --json       # … as a structured drift report
-botu fix                 # repair drift
-botu rollback            # undo the last apply (restores backed-up files)
-botu validate            # parse + schema-check the botufile; change nothing
-botu doctor              # check botu's own preconditions (tools, keychain, state)
+botu init alxjrvs/dotfiles   # clone your remote dotfiles repo and apply it — bootstrap
+botu link alxjrvs/dotfiles   # … clone + record only (init without the apply)
+botu apply                   # symlink/copy/install/run from its botufile.toml
+botu verify                  # check for drift (exit 0 ok / 2 warn / 1 fail)
+botu verify --json           # … as a structured drift report
+botu fix                     # repair drift
+botu push                    # push the config repo's local commits upstream
+botu reset                   # discard local changes in the config repo, reset to origin
+botu rollback                # undo the last apply (restores backed-up files)
+botu validate                # parse + schema-check the botufile; change nothing
+botu doctor                  # check botu's own preconditions (tools, keychain, state)
 
 botu code init ~/Code    # record your code dir
 botu code claude         # symlink every repo into one dir, open `claude agents` there
 botu code cmux           # one cmux workspace per repo
 ```
+
+Config is repo-only: `link`/`init` always clone a remote (`owner/repo`,
+`github:owner/repo`, a git URL, optionally `@ref`) into a botu-managed cache dir —
+never an arbitrary local folder. `apply`/`fix` fast-forward-pull the config repo
+first and report what moved; `verify` reports "N commits behind" as drift without
+pulling. Auth is whatever git/SSH already works in your shell.
 
 ## The `botufile.toml`
 

@@ -3,7 +3,13 @@ import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BotuConfigError, linkConfigRepo, resolveConfigDir } from "../src/config/load.ts";
+import {
+  BotuConfigError,
+  configRepoCacheDir,
+  readConfigBreadcrumb,
+  resolveConfigDir,
+} from "../src/config/load.ts";
+import { linkRemoteConfigRepo } from "../src/config/remote.ts";
 import type { BotuContext } from "../src/context.ts";
 import {
   agentsFarmDir,
@@ -14,9 +20,25 @@ import {
   resolveCodeDir,
 } from "../src/engine/code.ts";
 import { runUserCommand } from "../src/engine/discovery.ts";
+import { captureArgv } from "../src/lib/proc.ts";
 
 async function base(): Promise<string> {
   return mkdtemp(join(tmpdir(), "botu-cmd-"));
+}
+
+// A local git repo with one commit — plays the role of "remote" for linkRemoteConfigRepo
+// tests. `git clone` treats a local path exactly like any other remote, so no network
+// (or a bare repo) is needed.
+async function gitFixture(withBotufile = true): Promise<string> {
+  const dir = await base();
+  if (withBotufile) await writeFile(join(dir, "botufile.toml"), `[[section]]\nname = "x"\n`);
+  else await writeFile(join(dir, "README.md"), "hi\n");
+  const git = (...args: string[]) =>
+    Bun.spawnSync(["git", "-C", dir, ...args], { stdout: "ignore", stderr: "ignore" });
+  git("init", "-q", "-b", "main");
+  git("-c", "user.email=t@t.com", "-c", "user.name=t", "add", "-A");
+  git("-c", "user.email=t@t.com", "-c", "user.name=t", "commit", "-q", "-m", "init");
+  return dir;
 }
 
 function ctxFor(env: Record<string, string | undefined>, cwd: string): { ctx: BotuContext; out(): string } {
@@ -145,20 +167,80 @@ test("runUserCommand dispatches a config-supplied command", async () => {
   expect(out()).toBe("hi a,b");
 });
 
-test("linkConfigRepo records a breadcrumb resolveConfigDir then reads (the `botu link` core)", async () => {
-  const repo = await base();
-  await writeFile(join(repo, "botufile.toml"), `[[section]]\nname = "x"\n`);
+test("linkRemoteConfigRepo clones into the managed cache dir and records the breadcrumb (the `botu link` core)", async () => {
+  const origin = await gitFixture();
   const env = { XDG_STATE_HOME: await base() };
-  const target = await linkConfigRepo(env, repo);
-  expect(target).toBe(repo);
+  const target = await linkRemoteConfigRepo(env, origin);
+  expect(target).toBe(configRepoCacheDir(env));
   // The breadcrumb is the only resolution signal here (no BOTU_CONFIG, cwd elsewhere).
-  expect(await resolveConfigDir(env, await base())).toBe(repo);
+  expect(await resolveConfigDir(env, await base())).toBe(target);
+  expect((await readConfigBreadcrumb(env))?.remote.url).toBe(origin);
 });
 
-test("linkConfigRepo rejects a dir with no botufile.toml", async () => {
-  const empty = await base();
+test("linkRemoteConfigRepo rejects a remote with no botufile.toml", async () => {
+  const origin = await gitFixture(false);
   const env = { XDG_STATE_HOME: await base() };
-  expect(linkConfigRepo(env, empty)).rejects.toBeInstanceOf(BotuConfigError);
+  expect(linkRemoteConfigRepo(env, origin)).rejects.toBeInstanceOf(BotuConfigError);
+});
+
+test("linkRemoteConfigRepo refuses to clobber an unclean managed clone on re-link", async () => {
+  const origin = await gitFixture();
+  const env = { XDG_STATE_HOME: await base() };
+  const dest = await linkRemoteConfigRepo(env, origin);
+  await writeFile(join(dest, "dirty.txt"), "uncommitted\n");
+  expect(linkRemoteConfigRepo(env, origin)).rejects.toBeInstanceOf(BotuConfigError);
+});
+
+test("linkRemoteConfigRepo refuses to clobber a managed clone with committed-but-unpushed work", async () => {
+  const origin = await gitFixture();
+  const env = { XDG_STATE_HOME: await base() };
+  const dest = await linkRemoteConfigRepo(env, origin);
+  const git = (...args: string[]) =>
+    Bun.spawnSync(["git", "-C", dest, ...args], { stdout: "ignore", stderr: "ignore" });
+  await writeFile(join(dest, "new.txt"), "hi\n");
+  git("add", "-A");
+  git("-c", "user.email=t@t.com", "-c", "user.name=t", "commit", "-q", "-m", "local work");
+  // Working tree is clean once committed — `git status --porcelain` alone would miss
+  // this. Re-linking must still refuse, or the commit is silently discarded on re-clone.
+  expect(linkRemoteConfigRepo(env, origin)).rejects.toBeInstanceOf(BotuConfigError);
+});
+
+test("linkRemoteConfigRepo refuses to clobber unpushed commits on a pinned (detached-HEAD) clone", async () => {
+  const origin = await gitFixture();
+  const sha = captureArgv(["git", "-C", origin, "rev-parse", "HEAD"], {}).stdout;
+  const env = { XDG_STATE_HOME: await base() };
+  const dest = await linkRemoteConfigRepo(env, `${origin}@${sha}`);
+  // Commit on the detached HEAD: the tree is clean and there is no upstream to be
+  // "ahead of" — only the not-on-any-remote check can see this commit, so an
+  // @{u}-based guard would let the re-link wipe it.
+  await writeFile(join(dest, "new.txt"), "hi\n");
+  captureArgv(["git", "-C", dest, "add", "-A"], {});
+  captureArgv(
+    ["git", "-C", dest, "-c", "user.email=t@t.com", "-c", "user.name=t", "commit", "-q", "-m", "pinned work"],
+    {},
+  );
+  expect(await linkRemoteConfigRepo(env, origin).catch((e) => e)).toBeInstanceOf(BotuConfigError);
+});
+
+test("a failed re-link leaves the existing clone and breadcrumb untouched", async () => {
+  const good = await gitFixture();
+  const env = { XDG_STATE_HOME: await base() };
+  const dest = await linkRemoteConfigRepo(env, good);
+  const other = await gitFixture();
+  // Clone of `other` succeeds but the bogus pin fails its checkout: the last-known-good
+  // clone must survive (offline apply depends on it), and the breadcrumb must still
+  // name `good` — not dangle over a half-linked dir holding `other`'s content.
+  expect(await linkRemoteConfigRepo(env, `${other}@nosuchref`).catch((e) => e)).toBeInstanceOf(
+    BotuConfigError,
+  );
+  expect((await readConfigBreadcrumb(env))?.remote.url).toBe(good);
+  expect(await resolveConfigDir(env, await base())).toBe(dest);
+  expect(captureArgv(["git", "-C", dest, "remote", "get-url", "origin"], {}).stdout).toBe(good);
+});
+
+test("linkRemoteConfigRepo refuses a relative state dir (HOME and XDG_STATE_HOME both unset)", async () => {
+  const origin = await gitFixture();
+  expect(linkRemoteConfigRepo({}, origin)).rejects.toBeInstanceOf(BotuConfigError);
 });
 
 test("runUserCommand returns undefined for an unknown command", async () => {

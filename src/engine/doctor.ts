@@ -4,10 +4,11 @@
 // PATH, is the agent's 1Password token in the keychain, is the state dir writable.
 // Exit code mirrors verify: 0 ok / 2 warnings / 1 failures.
 import { mkdir } from "node:fs/promises";
-import { loadConfig, resolveConfigDir } from "../config/load.ts";
+import { loadConfig, readConfigBreadcrumb, resolveConfigDir } from "../config/load.ts";
 import { detectOs } from "../config/profile.ts";
 import type { BotuContext } from "../context.ts";
 import { colorEnabled } from "../lib/color.ts";
+import { remoteReachable } from "../lib/git.ts";
 import { hasCommand } from "../lib/proc.ts";
 import { Reporter } from "../lib/reporter.ts";
 import { botuStateDir } from "./state.ts";
@@ -15,8 +16,10 @@ import { botuStateDir } from "./state.ts";
 // The external tools botu's resources / commands shell out to, and what needs each.
 // None are required for botu itself to run (it's a self-contained binary), so a missing
 // tool is a warning, not a failure — it only bites if a botufile uses that resource.
+// (git is the one exception: repo-only config means it's load-bearing the moment a
+// remote config is linked — the Config repo section below fails on that specifically.)
 const TOOLS: ReadonlyArray<{ cmd: string; why: string }> = [
-  { cmd: "git", why: "code crawl + agent git" },
+  { cmd: "git", why: "config repo sync, code crawl + agent git" },
   { cmd: "brew", why: "brewfile resource" },
   { cmd: "mise", why: "mise resource" },
   { cmd: "op", why: "1Password secrets (hooks/mcp)" },
@@ -41,8 +44,25 @@ export async function doctor(ctx: BotuContext): Promise<number> {
     }
   }
 
+  report.header("Config repo");
+  const breadcrumb = await readConfigBreadcrumb(ctx.env);
+  // Tracked so the Tools section below doesn't also warn on the same missing git —
+  // one fact, one report, at the severity that actually applies here.
+  let gitRequiredAndMissing = false;
+  if (!breadcrumb) {
+    report.warn("no remote config linked — run `botu link <owner/repo>` or `botu init <owner/repo>`");
+  } else if (!hasCommand("git", ctx.env)) {
+    gitRequiredAndMissing = true;
+    report.fail("git not on PATH — required to sync the config repo (repo-only config)");
+  } else if (!remoteReachable(breadcrumb.remote.url, ctx.env)) {
+    report.warn(`cannot reach ${breadcrumb.remote.url} — sync will be skipped until it's reachable`);
+  } else {
+    report.ok(`${breadcrumb.remote.url} reachable`);
+  }
+
   report.header("Tools on PATH");
   for (const { cmd, why } of TOOLS) {
+    if (cmd === "git" && gitRequiredAndMissing) continue;
     if (hasCommand(cmd, ctx.env)) report.ok(`${cmd} found`);
     else report.warn(`${cmd} not on PATH — needed for ${why}`);
   }

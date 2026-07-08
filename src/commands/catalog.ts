@@ -9,13 +9,15 @@ export interface CommandInfo {
 }
 
 export const COMMANDS: readonly CommandInfo[] = [
-  { name: "init", brief: "Record your dotfiles repo (+ write botuinit.sh there)" },
-  { name: "link", brief: "Record an existing dotfiles repo as the active config" },
+  { name: "init", brief: "Clone a remote dotfiles repo and apply it — one-command bootstrap" },
+  { name: "link", brief: "Clone a remote dotfiles repo and record it as the active config" },
   { name: "apply", brief: "Reconcile your machine from the botufile — make it so" },
   { name: "verify", brief: "Check for drift (exit 0 ok / 2 warn / 1 fail)" },
   { name: "fix", brief: "Repair drift (apply, overwriting conflicts)" },
   { name: "update", brief: "Apply with upgrades" },
   { name: "uninstall", brief: "Remove everything botu installed" },
+  { name: "push", brief: "Push the config repo's local commits upstream" },
+  { name: "reset", brief: "Discard local changes in the config repo and reset it to origin" },
   { name: "where", brief: "Print a resolved botu path: config | code | engine" },
   { name: "rollback", brief: "Undo the most recent apply" },
   { name: "upgrade", brief: "Fetch the latest release and replace the binary in place" },
