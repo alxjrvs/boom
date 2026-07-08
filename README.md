@@ -20,6 +20,11 @@ portals to your machine's ideal state, and to your code. You drive it with the
 botu init ~/dotfiles     # record your dotfiles repo (+ writes botuinit.sh there)
 botu link ~/dotfiles     # … record the repo only (init without the bootstrap)
 botu apply               # symlink/copy/install/run from its botufile.toml
+botu apply --dry-run     # preview what apply would change; change nothing
+botu apply --skip        # skip conflicting targets instead of overwriting them
+botu apply --hard        # discard local dotfiles-repo changes; reset --hard to remote
+botu apply --commit      # commit local dotfiles-repo changes, then pull --rebase
+botu commit              # commit uncommitted local changes in the dotfiles repo
 botu verify              # check for drift (exit 0 ok / 2 warn / 1 fail)
 botu verify --json       # … as a structured drift report
 botu fix                 # repair drift
@@ -31,6 +36,14 @@ botu code init ~/Code    # record your code dir
 botu code claude         # symlink every repo into one dir, open `claude agents` there
 botu code cmux           # one cmux workspace per repo
 ```
+
+`apply`/`sync` first bring the dotfiles repo's own git state in line with its
+remote (a no-op if it's not a git repo, or has no upstream configured): by
+default they stash any uncommitted local edits, `pull --rebase`, then pop the
+stash back on top; `--commit` commits local edits first instead of stashing
+them; `--hard` discards local commits and edits entirely and resets to match
+the remote. A conflicting (non-botu-owned) file at a link's destination is
+**overwritten by default** — pass `--skip` to leave it alone instead.
 
 ## The `botufile.toml`
 

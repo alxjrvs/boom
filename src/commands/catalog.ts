@@ -15,6 +15,7 @@ export const COMMANDS: readonly CommandInfo[] = [
   { name: "verify", brief: "Check for drift (exit 0 ok / 2 warn / 1 fail)" },
   { name: "fix", brief: "Repair drift (apply, overwriting conflicts)" },
   { name: "update", brief: "Apply with upgrades" },
+  { name: "commit", brief: "Commit uncommitted local changes in the dotfiles repo" },
   { name: "uninstall", brief: "Remove everything botu installed" },
   { name: "where", brief: "Print a resolved botu path: config | code | engine" },
   { name: "rollback", brief: "Undo the most recent apply" },

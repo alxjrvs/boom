@@ -5,7 +5,7 @@ import { expect, test } from "bun:test";
 import { realpathSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { BotuContext } from "../src/context.ts";
 import { reconcile } from "../src/engine/reconcile.ts";
 import { linkTarget, pathExists } from "../src/lib/fs.ts";
@@ -29,6 +29,9 @@ async function sandbox(botufile: string): Promise<Sandbox> {
     XDG_STATE_HOME: join(base, "state"),
     BOTU_CONFIG: repo,
     NO_COLOR: "1",
+    // Never let a repo's git sync (src/lib/git.ts) see this machine's real system-wide
+    // git config (e.g. a global commit hook) — HOME is already sandboxed above.
+    GIT_CONFIG_NOSYSTEM: "1",
   };
   const buf = { out: "" };
   const proc = {
@@ -180,4 +183,72 @@ test("hook runs a TS resource module with its inputs", async () => {
   );
   expect(await reconcile("apply", sb.ctx, {})).toBe(0);
   expect(sb.out()).toContain("hello world");
+});
+
+// HOME is isolated to the sandbox's own dir (+ GIT_CONFIG_NOSYSTEM) so these throwaway
+// repos never see this machine's real ~/.gitconfig (e.g. a global commit hook).
+function gitSh(args: string[], cwd: string, home: string): void {
+  const p = Bun.spawnSync(["git", ...args], {
+    cwd,
+    env: { HOME: home, GIT_CONFIG_NOSYSTEM: "1" },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  if (p.exitCode !== 0) throw new Error(`git ${args.join(" ")} failed: ${p.stderr.toString()}`);
+}
+
+// verb "apply" (which sync/update alias to) pulls the dotfiles repo's own git remote
+// before reading the botufile — so a change pushed remotely takes effect the same run.
+test("apply pulls a remote botufile change before reconciling, keeping local edits", async () => {
+  const sb = await sandbox(`[[section]]\nname = "S"\nlink = [{ src = ".a", dst = "~/.a" }]\n`);
+  await writeFile(join(sb.repo, ".a"), "a\n");
+  const base = dirname(sb.repo);
+  const remote = join(base, "remote.git");
+  await mkdir(remote, { recursive: true });
+  gitSh(["init", "--bare", "-b", "main", remote], base, sb.home);
+  gitSh(["init", "-b", "main", sb.repo], sb.repo, sb.home);
+  gitSh(["config", "user.email", "test@example.com"], sb.repo, sb.home);
+  gitSh(["config", "user.name", "Test"], sb.repo, sb.home);
+  gitSh(["remote", "add", "origin", remote], sb.repo, sb.home);
+  gitSh(["add", "-A"], sb.repo, sb.home);
+  gitSh(["commit", "-m", "initial"], sb.repo, sb.home);
+  gitSh(["push", "-u", "origin", "main"], sb.repo, sb.home);
+
+  // "someone else" pushes a second `link` entry to the remote.
+  const other = join(base, "other");
+  gitSh(["clone", remote, other], base, sb.home);
+  gitSh(["config", "user.email", "other@example.com"], other, sb.home);
+  gitSh(["config", "user.name", "Other"], other, sb.home);
+  await writeFile(
+    join(other, "botufile.toml"),
+    `[[section]]
+name = "S"
+link = [{ src = ".a", dst = "~/.a" }, { src = ".b", dst = "~/.b" }]
+`,
+  );
+  await writeFile(join(other, ".b"), "b\n");
+  gitSh(["add", "-A"], other, sb.home);
+  gitSh(["commit", "-m", "add .b"], other, sb.home);
+  gitSh(["push"], other, sb.home);
+
+  // an uncommitted local edit in the sandbox repo should survive the pull.
+  await writeFile(join(sb.repo, "scratch.txt"), "local scratch\n");
+
+  expect(await reconcile("apply", sb.ctx, {})).toBe(0);
+  expect(await linkTarget(join(sb.home, ".a"))).toBe(join(sb.repo, ".a"));
+  expect(await linkTarget(join(sb.home, ".b"))).toBe(join(sb.repo, ".b")); // pulled in this run
+  expect(await readFile(join(sb.repo, "scratch.txt"), "utf8")).toBe("local scratch\n");
+  expect(sb.out()).toContain("dotfiles repo up to date with");
+});
+
+test("verify never touches the dotfiles repo's git state", async () => {
+  const sb = await sandbox(`[[section]]\nname = "S"\nlink = [{ src = ".a", dst = "~/.a" }]\n`);
+  await writeFile(join(sb.repo, ".a"), "a\n");
+  gitSh(["init", "-b", "main", sb.repo], sb.repo, sb.home);
+  gitSh(["config", "user.email", "test@example.com"], sb.repo, sb.home);
+  gitSh(["config", "user.name", "Test"], sb.repo, sb.home);
+  await reconcile("apply", sb.ctx, {});
+  const beforeVerify = sb.out().length;
+  expect(await reconcile("verify", sb.ctx, {})).toBe(0);
+  expect(sb.out().slice(beforeVerify)).not.toContain("dotfiles repo");
 });

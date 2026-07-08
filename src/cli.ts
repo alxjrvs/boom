@@ -4,6 +4,7 @@
 // names for the dispatch guard, completions, and the man page.
 import { buildApplication, buildRouteMap } from "@stricli/core";
 import { codeRouteMap } from "./commands/code.ts";
+import { commitCommand } from "./commands/commit.ts";
 import { completionsCommand } from "./commands/completions.ts";
 import { doctorCommand } from "./commands/doctor.ts";
 import { initCommand } from "./commands/init.ts";
@@ -30,6 +31,7 @@ const routes = buildRouteMap({
     verify: verifyCommand,
     fix: fixCommand,
     update: updateCommand,
+    commit: commitCommand,
     uninstall: uninstallCommand,
     where: whereCommand,
     rollback: rollbackCommand,

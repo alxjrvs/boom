@@ -20,7 +20,17 @@ A `botu` invocation does one of two things:
    - `botu uninstall` / `botu update` (= apply with upgrades)
    These share **one verb-parameterized loop** (`src/engine/reconcile.ts`) over a
    resource-type registry — siblings, not separate scripts. `botu rollback` undoes
-   the most recent apply; `apply --resume` continues an interrupted one.
+   the most recent apply; `apply --resume` continues an interrupted one. A
+   conflicting (non-botu-owned) file at a `link` destination is **overwritten by
+   default**; `apply --skip` opts out instead.
+
+   `apply`/`sync` (never `verify`/`uninstall`) also sync the config repo's own git
+   state against its remote first, via `src/lib/git.ts` (best-effort: no git repo
+   or no upstream is a silent no-op). Default `pull` mode stashes uncommitted local
+   edits, `pull --rebase`s, then pops the stash back on top; `apply --commit`
+   commits local edits first instead of stashing; `apply --hard` discards local
+   commits/edits and resets to match the remote. `botu commit` commits local
+   dotfiles-repo changes standalone, sharing its commit logic with `apply --commit`.
 
 2. **Discovered subcommands** — built-ins are the `@stricli` route map (`code`,
    `mcp`, `where`, `rollback`, `upgrade`, `validate`, `doctor`, `completions`, `man`);
@@ -77,17 +87,17 @@ the dotfiles repo and code dir.
 ```
 src/
   cli.ts · index.ts        @stricli app + entrypoint (dispatch: mcp, user cmds, built-ins)
-  commands/                init, link, apply/verify/fix/update/uninstall (reconcile.ts), where,
-                           rollback, upgrade, validate, doctor, code, mcp, completions, man
+  commands/                init, link, apply/verify/fix/update/uninstall (reconcile.ts), commit,
+                           where, rollback, upgrade, validate, doctor, code, mcp, completions, man
                            catalog.ts (command names: dispatch guard + completions + man)
   engine/
-    reconcile.ts           the one verb loop
+    reconcile.ts           the one verb loop (+ the apply/sync git-repo sync step)
     registry.ts            per-section phase dispatch
     resources/             link · copy · glob · packages · run · hook
     journal.ts state.ts    transaction + on-disk state
     rollback.ts code.ts discovery.ts
   config/  schema.ts load.ts migrate.ts profile.ts
-  lib/     reporter.ts color.ts fs.ts proc.ts version.ts
+  lib/     reporter.ts color.ts fs.ts git.ts proc.ts version.ts
 test/                       bun test (unit + sandboxed integration)
 examples/dotfiles/          a runnable botufile.toml example
 .github/workflows/          ci.yml (check + cross-compile smoke), release.yml (tag → matrix → attach)

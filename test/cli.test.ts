@@ -53,3 +53,18 @@ test("an unknown command reports an error", async () => {
   await run(app, ["definitely-not-a-command"], ctx);
   expect(buf.err.length).toBeGreaterThan(0);
 });
+
+test("apply --hard --commit are mutually exclusive", async () => {
+  const { buf, proc, ctx } = fakeContext();
+  await run(app, ["apply", "--hard", "--commit"], ctx);
+  expect(buf.err).toContain("mutually exclusive");
+  expect(proc.exitCode).toBe(1);
+});
+
+test("sync routes to apply and accepts --hard", async () => {
+  const { buf, ctx } = fakeContext();
+  await run(app, ["sync", "--hard"], ctx);
+  // cwd resolves no config, same as plain `apply` — proves the flag parsed, not that
+  // a git sync ran.
+  expect(buf.err).toContain("no dotfiles repo");
+});

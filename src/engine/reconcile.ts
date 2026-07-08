@@ -9,6 +9,7 @@ import type { Botufile, Section } from "../config/schema.ts";
 import type { BotuContext } from "../context.ts";
 import { colorEnabled } from "../lib/color.ts";
 import { displayPath, filesEqual, linkTarget, pathExists, rm } from "../lib/fs.ts";
+import { type GitSyncMode, syncRepo } from "../lib/git.ts";
 import { Reporter } from "../lib/reporter.ts";
 import { Journal, newRunId, pruneRuns, readRun } from "./journal.ts";
 import { reconcileSection } from "./registry.ts";
@@ -26,6 +27,9 @@ export interface ReconcileOptions {
   readonly json?: boolean;
   readonly resume?: boolean;
   readonly profiles?: string[];
+  // Only consulted for verb "apply" (sync/update alias to it too). Default: "pull".
+  readonly gitSync?: GitSyncMode;
+  readonly commitMessage?: string;
 }
 
 // Merge a partial run's declared set into the prior manifest (union by dst, declared
@@ -132,6 +136,20 @@ export async function reconcile(verb: Verb, ctx: BotuContext, opts: ReconcileOpt
     report.fail("no dotfiles repo found — run `botu init`");
     return finish();
   }
+
+  const dryRun = opts.dryRun ?? false;
+
+  // Bring the repo's own git state in line with its remote before reading the botufile
+  // off disk, so a pulled change to it takes effect the same run (verify/uninstall never
+  // touch the repo's git state — only apply/update, which alias to verb "apply").
+  if (verb === "apply") {
+    const sync = syncRepo(repo, ctx.env, opts.gitSync ?? "pull", report, {
+      commitMessage: opts.commitMessage,
+      dryRun,
+    });
+    if (!sync.ok) return finish();
+  }
+
   let config: Botufile;
   try {
     config = await loadConfig(repo);
@@ -140,7 +158,6 @@ export async function reconcile(verb: Verb, ctx: BotuContext, opts: ReconcileOpt
     return finish();
   }
 
-  const dryRun = opts.dryRun ?? false;
   const mutating = (verb === "apply" || verb === "fix") && !dryRun;
   let journal: Journal | undefined;
   let backupRoot: string | undefined;

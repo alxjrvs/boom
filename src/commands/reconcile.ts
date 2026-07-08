@@ -4,6 +4,9 @@ import { buildCommand } from "@stricli/core";
 import type { BotuContext } from "../context.ts";
 import { reconcile } from "../engine/reconcile.ts";
 import type { LinkMode } from "../engine/types.ts";
+import { colorEnabled } from "../lib/color.ts";
+import type { GitSyncMode } from "../lib/git.ts";
+import { Reporter } from "../lib/reporter.ts";
 
 const parseTag = (s: string): string => s;
 const onlyFlag = {
@@ -32,12 +35,24 @@ type ApplyFlags = {
   json?: boolean;
   only?: string[];
   profile?: string[];
+  hard?: boolean;
+  commit?: boolean;
+  message?: string;
 };
 
 // overwrite is the default (and what --force explicitly asks for too) — --skip is
 // the one way to opt out of clobbering a conflicting target.
 function linkModeOf(flags: { skip?: boolean }): LinkMode {
   return flags.skip ? "skip" : "overwrite";
+}
+
+// pull (stash → rebase → pop) is the default; --commit and --hard are the two explicit
+// alternatives, and can't both apply at once.
+function gitSyncModeOf(flags: { hard?: boolean; commit?: boolean }): GitSyncMode | Error {
+  if (flags.hard && flags.commit) return new Error("--hard and --commit are mutually exclusive");
+  if (flags.hard) return "hard";
+  if (flags.commit) return "commit";
+  return "pull";
 }
 
 export const applyCommand = buildCommand<ApplyFlags, [], BotuContext>({
@@ -48,13 +63,35 @@ export const applyCommand = buildCommand<ApplyFlags, [], BotuContext>({
       force: { kind: "boolean", optional: true, brief: "Overwrite conflicting targets (default)" },
       skip: { kind: "boolean", optional: true, brief: "Skip conflicting targets instead of overwriting" },
       resume: { kind: "boolean", optional: true, brief: "Continue an interrupted apply (skip done steps)" },
+      hard: {
+        kind: "boolean",
+        optional: true,
+        brief: "Discard local dotfiles-repo changes; reset --hard to remote",
+      },
+      commit: {
+        kind: "boolean",
+        optional: true,
+        brief: "Commit local dotfiles-repo changes, then pull --rebase",
+      },
+      message: {
+        kind: "parsed",
+        parse: parseTag,
+        optional: true,
+        brief: 'Commit message for --commit (default: "botu: local changes")',
+      },
       only: onlyFlag,
       profile: profileFlag,
       json: jsonFlag,
     },
-    aliases: { f: "force", s: "skip" },
+    aliases: { f: "force", s: "skip", m: "message" },
   },
   async func(flags) {
+    const gitSync = gitSyncModeOf(flags);
+    if (gitSync instanceof Error) {
+      new Reporter(this.process.stdout, this.process.stderr, colorEnabled(this.env)).fail(gitSync.message);
+      this.process.exitCode = 1;
+      return;
+    }
     this.process.exitCode = await reconcile("apply", this, {
       only: flags.only,
       dryRun: flags.dryRun,
@@ -62,6 +99,8 @@ export const applyCommand = buildCommand<ApplyFlags, [], BotuContext>({
       json: flags.json,
       profiles: flags.profile,
       linkMode: linkModeOf(flags),
+      gitSync,
+      commitMessage: flags.message,
     });
   },
 });
