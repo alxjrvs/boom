@@ -19,6 +19,26 @@ import {
 import type { UndoToken } from "../journal.ts";
 import type { LinkMode, ReconcileCtx } from "../types.ts";
 
+// mkdir(dir, {recursive:true}) only no-ops when `dir` already exists AND is a real
+// directory — if it's a stale non-directory (a broken symlink, or a symlink to a file,
+// left over from e.g. an earlier whole-directory `link` config now switched to `glob`)
+// it throws EEXIST instead. Clear that conflict the same way applyLink's overwrite mode
+// clears a conflicting `dst`, so a `link`→`glob` migration self-heals instead of crashing.
+// Returns false (caller should skip) when the conflict exists but `mode` forbids clobbering it.
+async function ensureParentDir(dir: string, mode: LinkMode, ctx: ReconcileCtx): Promise<boolean> {
+  if (!(await pathExists(dir))) return true; // mkdir will create it fresh below
+  if ((await stat(dir).catch(() => undefined))?.isDirectory()) return true;
+  if (mode !== "overwrite") return false;
+  await ctx.journal?.intent("mkdir", dir);
+  const undo: UndoToken = ctx.backupRoot
+    ? { kind: "restore", from: await backupTo(dir, ctx.backupRoot) }
+    : { kind: "remove" };
+  if (!ctx.backupRoot) await rm(dir, { recursive: true, force: true });
+  await mkdir(dir, { recursive: true });
+  await ctx.journal?.done("mkdir", dir, undo);
+  return true;
+}
+
 async function applyLink(
   src: string,
   dst: string,
@@ -40,6 +60,10 @@ async function applyLink(
   }
   if (ctx.resumeDone?.has(dst)) {
     report.skip(`${disp} (resumed — already applied)`);
+    return;
+  }
+  if (!(await ensureParentDir(dirname(dst), mode, ctx))) {
+    report.skip(`${disp} parent exists but is not a directory — skipped`);
     return;
   }
   if (!conflict) {

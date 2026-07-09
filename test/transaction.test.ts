@@ -1,13 +1,13 @@
 // M3: the apply transaction — journal, backups, rollback, verify --json, and orphan
 // reaping. Each test drives the engine against a fully sandboxed $HOME + repo.
 import { expect, test } from "bun:test";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BotuContext } from "../src/context.ts";
 import { reconcile } from "../src/engine/reconcile.ts";
 import { rollback } from "../src/engine/rollback.ts";
-import { linkTarget, pathExists } from "../src/lib/fs.ts";
+import { linkTarget, pathExists, stat } from "../src/lib/fs.ts";
 
 interface Sandbox {
   readonly home: string;
@@ -75,6 +75,34 @@ test("rollback restores a file displaced by an overwrite", async () => {
   expect(await linkTarget(join(sb.home, ".z"))).toBe(join(sb.repo, ".z"));
   expect(await rollback(sb.ctx)).toBe(0);
   expect(await readFile(join(sb.home, ".z"), "utf8")).toBe("ORIGINAL");
+});
+
+test("glob self-heals a stale non-directory left at `into` (e.g. a link→glob migration)", async () => {
+  const sb = await sandbox(
+    `[[section]]\nname = "S"\nglob = [{ pattern = "skills/*", into = "~/.claude/skills" }]\n`,
+  );
+  await mkdir(join(sb.repo, "skills"), { recursive: true });
+  await sb.write("skills/a.md", "a");
+  await mkdir(join(sb.home, ".claude"), { recursive: true });
+  // A broken symlink at the shared `into` dir — mkdir(recursive) throws EEXIST on this
+  // (it only no-ops for a real directory), which is exactly the crash being fixed here.
+  await symlink(join(sb.repo, "gone"), join(sb.home, ".claude/skills"));
+  expect(await reconcile("apply", sb.ctx, {})).toBe(0);
+  expect((await stat(join(sb.home, ".claude/skills"))).isDirectory()).toBe(true);
+  expect(await linkTarget(join(sb.home, ".claude/skills/a.md"))).toBe(join(sb.repo, "skills/a.md"));
+});
+
+test("rollback restores a stale `into` symlink a glob apply cleared", async () => {
+  const sb = await sandbox(
+    `[[section]]\nname = "S"\nglob = [{ pattern = "skills/*", into = "~/.claude/skills" }]\n`,
+  );
+  await mkdir(join(sb.repo, "skills"), { recursive: true });
+  await sb.write("skills/a.md", "a");
+  await mkdir(join(sb.home, ".claude"), { recursive: true });
+  await symlink(join(sb.repo, "gone"), join(sb.home, ".claude/skills"));
+  expect(await reconcile("apply", sb.ctx, {})).toBe(0);
+  expect(await rollback(sb.ctx)).toBe(0);
+  expect(await linkTarget(join(sb.home, ".claude/skills"))).toBe(join(sb.repo, "gone"));
 });
 
 test("verify --json emits a parseable structured report", async () => {
