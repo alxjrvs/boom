@@ -37,12 +37,42 @@ jobs:
         run: ./build/botu --version
 
       # Smoke the config-free generators so a broken catalog/route fails CI, not a user.
-      - name: Smoke — completions + man
+      - name: Smoke — completions + man + skill
         run: |
           ./build/botu completions bash > /dev/null
           ./build/botu completions zsh > /dev/null
           ./build/botu completions fish > /dev/null
           ./build/botu man > /dev/null
+          ./build/botu skill > /dev/null
+
+  version-guard:
+    # Every PR must move package.json's version exactly one semver step from main —
+    # patch (x.y.z+1), minor (x.y+1.0), or major (x+1.0.0) — or leave it unchanged.
+    # Never skip (0.0.1→0.0.3) or jump (0.0.1→3.0.0): one merge, at most one release.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Enforce a single-step version bump vs main
+        run: |
+          git fetch -q origin main
+          base=$(git show origin/main:package.json | jq -r .version)
+          head=$(jq -r .version package.json)
+          echo "main: $base   this PR: $head"
+          IFS=. read -r bM bm bp <<<"$base"
+          IFS=. read -r hM hm hp <<<"$head"
+          ok=0
+          [ "$head" = "$base" ] && ok=1                                              # unchanged
+          [ "$hM" = "$bM" ] && [ "$hm" = "$bm" ] && [ "$hp" = "$((bp+1))" ] && ok=1   # patch
+          [ "$hM" = "$bM" ] && [ "$hm" = "$((bm+1))" ] && [ "$hp" = 0 ] && ok=1       # minor
+          [ "$hM" = "$((bM+1))" ] && [ "$hm" = 0 ] && [ "$hp" = 0 ] && ok=1           # major
+          if [ "$ok" != 1 ]; then
+            echo "::error::version must be one step from main ($base): patch $bM.$bm.$((bp+1)), minor $bM.$((bm+1)).0, major $((bM+1)).0.0, or unchanged — got $head"
+            exit 1
+          fi
+          echo "version OK: $base -> $head"
 
   cross-compile:
     # Bun cross-compiles every target from one host; prove the release matrix builds.

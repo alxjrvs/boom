@@ -21,7 +21,7 @@ the design of record.
    (`botufile.toml`), parsed once into the schema in `src/config/schema.ts`.
 3. **Legible showpiece.** Small, exemplary, senior-engineer quality. Comments
    explain the *decision and the gotcha*, not the *what*.
-4. **One model, two surfaces.** `apply`/`verify`/`fix`/`uninstall` are one
+4. **One model, two surfaces.** `apply`/`verify`/`repair`/`uninstall` are one
    verb-parameterized loop (`src/engine/reconcile.ts`) over a resource-type
    registry. Commands are *discovered*, never a growing hardcoded dispatch:
    built-ins are the `@stricli` route map; user commands resolve at runtime from
@@ -34,12 +34,22 @@ the design of record.
   never touch the real machine. Use `Bun.spawnSync` (not piped `Bun.spawn`) when a
   test spawns the compiled binary (oven-sh/bun#24690).
 - Resources are handlers implementing the verb contract (`src/engine/resources/`);
-  user **hooks** are `hooks/<name>.ts` modules exporting `apply`/`verify`/`fix`
+  user **hooks** are `hooks/<name>.ts` modules exporting `apply`/`verify`/`repair`
   that receive a `HookApi` ( `with` inputs, `ok`/`warn`/`fail`, `dryRun`, `env`).
 - Mutating runs journal to `${XDG_STATE_HOME:-~/.local/state}/botu/journal/` and
   back up displaced files; `botu rollback` replays the journal. Breadcrumbs +
   manifest live under the same state dir.
 - Commit messages: `type(scope): summary`. End with the co-author trailer.
+
+## Merge policy (enforced by branch protection + CI)
+
+- **Every change lands via PR; direct pushes to `main` are blocked.**
+- **CI must be green before merge** — the required checks are `check` on Linux + macOS
+  (biome + tsc + bun test + binary/generator smoke), `cross-compile`, and `version-guard`.
+- **One merge, at most one release.** Each PR must move `package.json`'s version exactly
+  one semver step from `main` — patch (`x.y.z+1`), minor (`x.y+1.0`), or major
+  (`x+1.0.0`) — or leave it unchanged. Never skip (`0.0.1`→`0.0.3`) or jump
+  (`0.0.1`→`3.0.0`). Enforced by the `version-guard` job in `.github/workflows/ci.yml`.
 
 ## Don't
 
@@ -47,7 +57,7 @@ the design of record.
   use `Bun.$`/`Bun.spawnSync` only for genuinely external tools (brew/mise/claude).
 - Don't add a hardcoded subcommand case — built-ins go in the route map, everything
   else is command discovery.
-- Don't let `apply`/`verify`/`fix`/`uninstall` drift into separate code paths —
+- Don't let `apply`/`verify`/`repair`/`uninstall` drift into separate code paths —
   they are one loop, parameterized by verb, over the resource registry.
 - Don't pull a CLI framework that breaks `bun build --compile` (oclif/yargs/
   commander's discovery features do) — we use `@stricli/core` for that reason.
