@@ -68,7 +68,7 @@ brew install botu</pre>
       <p><code>init</code>/<code>link</code> take a <strong>remote reference</strong> — <code>owner/repo</code>, <code>github:owner/repo</code>, a git URL, optionally <code>@ref</code> — never an arbitrary local path. botu clones it into a managed cache dir and records a breadcrumb. <code>init</code> clones <em>and</em> applies; <code>link</code> clones and records only.</p>
       <p style="margin-bottom:.4rem"><strong>The fresh-machine one-liner:</strong></p>
       <div class="codebox">
-        <pre tabindex="0" role="region" aria-label="Fresh-machine one-liner">curl -fsSL https://raw.githubusercontent.com/alxjrvs/botu/main/install.sh | sh &amp;&amp; <span class="k">botu</span> init owner/repo</pre>
+        <pre tabindex="0" role="region" aria-label="Fresh-machine one-liner">curl -fsSL https://raw.githubusercontent.com/alxjrvs/botu/main/install.sh | sh &amp;&amp; <span class="k">botu</span> source set owner/repo</pre>
       </div>
     </div>
   </div>
@@ -82,7 +82,7 @@ brew install botu</pre>
     <div class="sec-head">
       <p class="caption">Three verbs. One loop. And a way back!</p>
       <h2 class="display">The Reconcile Loop</h2>
-      <p style="max-width:70ch"><code>apply</code> / <code>verify</code> / <code>fix</code> (and their quiet sibling <code>uninstall</code>) are <strong>one verb-parameterized loop</strong> over a resource registry — the same walk over the same resources every time; only the verb changes. <code>rollback</code> is the escape hatch: it replays the journal, not the loop.</p>
+      <p style="max-width:70ch"><code>apply</code> / <code>verify</code> / <code>repair</code> (and their quiet sibling <code>uninstall</code>) are <strong>one verb-parameterized loop</strong> over a resource registry — the same walk over the same resources every time; only the verb changes. <code>rollback</code> is the escape hatch: it replays the journal, not the loop.</p>
     </div>
 
     <div class="gridloop">
@@ -119,9 +119,9 @@ brew install botu</pre>
         <header><h3>Fix! <span class="ep">panel three</span></h3></header>
         <div class="kbody">
           <div class="codebox">
-            <pre tabindex="0" role="region" aria-label="botu fix"><span class="k">botu</span> fix                <span class="c"># repair drift (apply, overwriting conflicts)</span></pre>
+            <pre tabindex="0" role="region" aria-label="botu repair"><span class="k">botu</span> repair             <span class="c"># repair drift (apply, overwriting conflicts)</span></pre>
           </div>
-          <p>Drift detected? Drift <strong>destroyed</strong>. <code>fix</code> is the loop again, with the gloves off.</p>
+          <p>Drift detected? Drift <strong>destroyed</strong>. <code>repair</code> is the loop again, with the gloves off.</p>
         </div>
       </article>
 
@@ -139,7 +139,7 @@ brew install botu</pre>
     <div class="note-cap tilt-l">
       <p class="caption right">Editor&rsquo;s note!</p>
       <ul class="note-list">
-        <li><code>apply</code>/<code>fix</code> pull the config repo first (<code>pull --rebase --autostash</code>) — local edits ride along and land back on top. A failed pull is <em>reported</em>, never blocking: botu reconciles from the last-known-good local clone.</li>
+        <li><code>apply</code>/<code>repair</code> pull the config repo first (<code>pull --rebase --autostash</code>) — local edits ride along and land back on top. A failed pull is <em>reported</em>, never blocking: botu reconciles from the last-known-good local clone.</li>
         <li><code>verify</code> counts <em>&ldquo;N commits behind&rdquo;</em> as drift and warns on uncommitted or unpushed changes — without touching the working tree.</li>
         <li>A file already squatting at a <code>link</code> destination is <strong>overwritten by default</strong>; pass <code>--skip</code> to spare it.</li>
       </ul>
@@ -188,7 +188,7 @@ brew install botu</pre>
         <span class="phase" role="listitem">run</span><span class="arr" aria-hidden="true">&rarr;</span>
         <span class="phase" role="listitem">hook</span>
       </div>
-      <p>Imperative escapes are <code>run</code> steps (a shell command) or a <strong>hook</strong>: a <code>hooks/&lt;name&gt;.ts</code> module exporting <code>apply</code>/<code>verify</code>/<code>fix</code> that receives a typed <code>HookApi</code>. Hooks are the extension point for anything the declarative resources can&rsquo;t express. Multi-machine setups gate sections with <code>when</code>, or layer overlay files (<code>botufile.&lt;os|host|profile&gt;.toml</code>).</p>
+      <p>Imperative escapes are <code>run</code> steps (a shell command) or a <strong>hook</strong>: a <code>hooks/&lt;name&gt;.ts</code> module exporting <code>apply</code>/<code>verify</code>/<code>repair</code> that receives a typed <code>HookApi</code>. Hooks are the extension point for anything the declarative resources can&rsquo;t express. Multi-machine setups gate sections with <code>when</code>, or layer overlay files (<code>botufile.&lt;os|host|profile&gt;.toml</code>).</p>
     </div>
   </div>
 </section>
@@ -204,11 +204,11 @@ brew install botu</pre>
     </div>
     <div class="panel tilt-l">
       <div class="codebox">
-        <pre tabindex="0" role="region" aria-label="Config-repo git commands"><span class="k">botu</span> diff               <span class="c"># show uncommitted local changes in the config repo</span>
-<span class="k">botu</span> commit             <span class="c"># commit local changes in the config repo</span>
-<span class="k">botu</span> push               <span class="c"># push the config repo's local commits upstream</span>
-<span class="k">botu</span> reset              <span class="c"># discard local changes, reset to origin</span>
-<span class="k">botu</span> reset <span class="f">--force</span>      <span class="c"># …including commits no remote has (refused otherwise)</span></pre>
+        <pre tabindex="0" role="region" aria-label="Config-repo git commands"><span class="k">botu</span> source diff        <span class="c"># show uncommitted local changes in the config repo</span>
+<span class="k">botu</span> source commit      <span class="c"># commit local changes in the config repo</span>
+<span class="k">botu</span> source push        <span class="c"># push the config repo's local commits upstream</span>
+<span class="k">botu</span> source reset       <span class="c"># discard local changes, reset to origin</span>
+<span class="k">botu</span> source reset <span class="f">--force</span> <span class="c"># …including commits no remote has (refused otherwise)</span></pre>
       </div>
       <p>Your dotfiles repo is the source of truth — botu speaks git for it so you never have to <code>cd</code> into the cache dir yourself.</p>
     </div>
@@ -260,9 +260,10 @@ brew install botu</pre>
 <span class="k">botu</span> where config|code|engine   <span class="c"># resolve where botu keeps things</span>
 <span class="k">botu</span> upgrade            <span class="c"># upgrade the botu binary itself</span>
 <span class="k">botu</span> completions bash|zsh|fish  <span class="c"># shell completions</span>
-<span class="k">botu</span> man                <span class="c"># the man page</span></pre>
+<span class="k">botu</span> man                <span class="c"># the man page</span>
+<span class="k">botu</span> skill              <span class="c"># a Claude Code SKILL.md for driving botu (agentic use)</span></pre>
       </div>
-      <p>The maintenance bay: check the file, check the engine, find where everything lives, keep the binary fresh.</p>
+      <p>The maintenance bay: check the file, check the engine, find where everything lives, keep the binary fresh — and hand an agent a skill so it drives botu correctly.</p>
     </div>
   </div>
 </section>

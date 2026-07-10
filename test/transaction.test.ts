@@ -71,7 +71,7 @@ test("rollback restores a file displaced by an overwrite", async () => {
   const sb = await sandbox(`[[section]]\nname = "S"\nlink = [{ src = ".z", dst = "~/.z" }]\n`);
   await sb.write(".z", "new");
   await writeFile(join(sb.home, ".z"), "ORIGINAL"); // a foreign file in the way
-  expect(await reconcile("fix", sb.ctx, {})).toBe(0); // fix overwrites → backs the original up
+  expect(await reconcile("repair", sb.ctx, {})).toBe(0); // repair overwrites → backs the original up
   expect(await linkTarget(join(sb.home, ".z"))).toBe(join(sb.repo, ".z"));
   expect(await rollback(sb.ctx)).toBe(0);
   expect(await readFile(join(sb.home, ".z"), "utf8")).toBe("ORIGINAL");

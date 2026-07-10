@@ -91,11 +91,11 @@ test("link: --dry-run warns it would overwrite a foreign file, and changes nothi
   expect(await readFile(join(sb.home, ".zshrc"), "utf8")).toBe("pre-existing, not ours\n");
 });
 
-test("link: fix always overwrites a foreign file regardless of linkMode", async () => {
+test("link: repair always overwrites a foreign file regardless of linkMode", async () => {
   const sb = await sandbox(`[[section]]\nname = "Shell"\nlink = [{ src = ".zshrc", dst = "~/.zshrc" }]\n`);
   await writeFile(join(sb.repo, ".zshrc"), "z\n");
   await writeFile(join(sb.home, ".zshrc"), "pre-existing, not ours\n");
-  expect(await reconcile("fix", sb.ctx, {})).toBe(0);
+  expect(await reconcile("repair", sb.ctx, {})).toBe(0);
   expect(await linkTarget(join(sb.home, ".zshrc"))).toBe(join(sb.repo, ".zshrc"));
 });
 

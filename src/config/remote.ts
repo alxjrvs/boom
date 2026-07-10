@@ -1,4 +1,4 @@
-// Config source is always a git remote (repo-only): `botu link`/`botu init` take a
+// Config source is always a git remote (repo-only): `botu source set` takes a
 // remote reference — `owner/repo`, `github:owner/repo`, a full git URL, optionally
 // `@ref` — clone it into the botu-managed cache dir, and record the breadcrumb.
 // engine/sync.ts owns the ongoing fetch/pull-and-report on every apply/verify/fix;
@@ -61,8 +61,8 @@ export function parseRemoteRef(input: string): ParsedRemoteRef {
 // (Re-)clone `refInput` into the managed cache dir and record it as the active
 // config. Re-linking always wipes and re-clones — the cache dir is never meant to
 // hold precious work, so refuse instead of silently clobbering one that has any
-// (uncommitted changes, or commits made but not yet pushed) — `botu push` (to keep
-// it) or `botu reset` (to discard it) first, then re-link.
+// (uncommitted changes, or commits made but not yet pushed) — `botu source push` (to keep
+// it) or `botu source reset` (to discard it) first, then re-link.
 export async function linkRemoteConfigRepo(env: Env, refInput: string): Promise<string> {
   const { url, ref } = parseRemoteRef(refInput);
   const dest = configRepoCacheDir(env);
@@ -79,7 +79,7 @@ export async function linkRemoteConfigRepo(env: Env, refInput: string): Promise<
 
   if ((await pathExists(dest)) && (!isClean(dest, env) || hasUnpushedCommits(dest, env))) {
     throw new BotuConfigError(
-      `${dest} has uncommitted or unpushed changes — \`botu push\` or \`botu reset\` before re-linking`,
+      `${dest} has uncommitted or unpushed changes — \`botu source push\` or \`botu source reset\` before re-linking`,
     );
   }
 

@@ -25,7 +25,7 @@ botu reconciles a machine from a declarative
 packages, running steps and hooks \\(em and opens
 portals to your code workspaces.
 It is a single self-contained binary.
-The reconcile verbs (apply, verify, fix, update,
+The reconcile verbs (apply, verify, repair,
 uninstall) share one loop over a resource registry,
 and rollback undoes the most recent apply.
 .SH COMMANDS

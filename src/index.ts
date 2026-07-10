@@ -4,14 +4,14 @@
 // Stricli; everything else is a built-in route.
 import { run } from "@stricli/core";
 import { app } from "./cli.ts";
-import { ALIASES, COMMAND_NAMES } from "./commands/catalog.ts";
+import { COMMAND_NAMES } from "./commands/catalog.ts";
 import { runMcp } from "./commands/mcp.ts";
 import { buildContext } from "./context.ts";
 import { runUserCommand } from "./engine/discovery.ts";
 
-// Names that route to a built-in (the catalog + its aliases). A first arg that is none
-// of these and doesn't start with `-` is tried as a discovered user command first.
-const BUILTINS = new Set([...COMMAND_NAMES, ...Object.keys(ALIASES)]);
+// Names that route to a built-in. A first arg that is none of these and doesn't start
+// with `-` is tried as a discovered user command first.
+const BUILTINS = new Set(COMMAND_NAMES);
 
 const ctx = buildContext(process);
 const argv = process.argv.slice(2);

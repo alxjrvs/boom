@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>BoomTube — botu</title>
-<meta name="description" content="BoomTube (botu) — an installable dotfiles + workspace engine. One self-contained binary reconciles your machine from a declarative botufile.toml: apply, verify, fix, roll back — and opens portals to your code. Named for Jack Kirby's Boom Tube.">
+<meta name="description" content="BoomTube (botu) — an installable dotfiles + workspace engine. One self-contained binary reconciles your machine from a declarative botufile.toml: apply, verify, repair, roll back — and opens portals to your code. Named for Jack Kirby's Boom Tube.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='48' fill='%230b0a12'/%3E%3Ccircle cx='50' cy='50' r='36' fill='%237a1fa2'/%3E%3Ccircle cx='50' cy='50' r='27' fill='%23e2231a'/%3E%3Ccircle cx='50' cy='50' r='18' fill='%23ffcf00'/%3E%3Ccircle cx='50' cy='50' r='9' fill='%23fff8e7'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="styles.css">
 </head>
@@ -235,7 +235,7 @@
       </div>
 
       <div class="cconn" aria-hidden="true">
-        <span class="fwd">apply &middot; fix &rarr;</span>
+        <span class="fwd">apply &middot; repair &rarr;</span>
         <span class="back">&larr; verify &middot; rollback</span>
       </div>
 
@@ -246,7 +246,7 @@
       </div>
 
       <div class="cconn" aria-hidden="true">
-        <span class="fwd">apply &middot; fix &rarr;</span>
+        <span class="fwd">apply &middot; repair &rarr;</span>
         <span class="back">&larr; verify &middot; rollback</span>
       </div>
 
@@ -264,7 +264,7 @@
       </div>
     </div>
 
-    <p class="concept-note lede">Point <code>botu</code> at your repo and step through: <strong>apply</strong> makes the machine match the file, <strong>verify</strong> proves it, <strong>fix</strong> repairs drift — and <strong>rollback</strong> walks it all back, every journaled step retraced.</p>
+    <p class="concept-note lede">Point <code>botu</code> at your repo and step through: <strong>apply</strong> makes the machine match the file, <strong>verify</strong> proves it, <strong>repair</strong> mends drift — and <strong>rollback</strong> walks it all back, every journaled step retraced.</p>
   </div>
 </section>
 
@@ -295,7 +295,7 @@ curl -fsSL https://raw.githubusercontent.com/alxjrvs/botu/main/install.sh | sh</
         <div class="kbody">
           <div class="codebox">
             <pre tabindex="0" role="region" aria-label="Bootstrap a machine"><span class="c"># clone your dotfiles repo and apply it</span>
-<span class="k">botu</span> init you/dotfiles</pre>
+<span class="k">botu</span> source set you/dotfiles</pre>
           </div>
           <p>A bare machine, claimed in one shot — clone plus a first <code>apply</code>.</p>
         </div>
@@ -308,7 +308,7 @@ curl -fsSL https://raw.githubusercontent.com/alxjrvs/botu/main/install.sh | sh</
             <pre tabindex="0" role="region" aria-label="Keep the machine in sync"><span class="k">botu</span> apply    <span class="c"># pull the repo, reconcile</span>
 <span class="k">botu</span> verify   <span class="c"># hunt for drift</span></pre>
           </div>
-          <p>The repo is the source of truth. <code>verify</code> reports drift as exit 0 / 2 / 1 — ok / warn / fail; <code>fix</code> repairs it. <code>apply</code> overwrites conflicting files by default — pass <code>--skip</code> to spare them.</p>
+          <p>The repo is the source of truth. <code>verify</code> reports drift as exit 0 / 2 / 1 — ok / warn / fail; <code>repair</code> mends it. <code>apply</code> overwrites conflicting files by default — pass <code>--skip</code> to spare them.</p>
         </div>
       </article>
     </div>
@@ -328,7 +328,7 @@ curl -fsSL https://raw.githubusercontent.com/alxjrvs/botu/main/install.sh | sh</
     <div class="cards">
       <a class="card" href="guide.html#reconcile">
         <h3>The Reconcile Loop</h3>
-        <p><code>apply</code> / <code>verify</code> / <code>fix</code> — one loop over every resource. And <code>rollback</code>, for the way back.</p>
+        <p><code>apply</code> / <code>verify</code> / <code>repair</code> — one loop over every resource. And <code>rollback</code>, for the way back.</p>
         <span class="go">Open &rarr;</span>
       </a>
       <a class="card" href="guide.html#botufile">

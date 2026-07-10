@@ -4,23 +4,13 @@
 // names for the dispatch guard, completions, and the man page.
 import { buildApplication, buildRouteMap } from "@stricli/core";
 import { codeRouteMap } from "./commands/code.ts";
-import { commitCommand } from "./commands/commit.ts";
 import { completionsCommand } from "./commands/completions.ts";
-import { diffCommand } from "./commands/diff.ts";
 import { doctorCommand } from "./commands/doctor.ts";
-import { initCommand } from "./commands/init.ts";
-import { linkCommand } from "./commands/link.ts";
 import { manCommand } from "./commands/man.ts";
-import { pushCommand } from "./commands/push.ts";
-import {
-  applyCommand,
-  fixCommand,
-  uninstallCommand,
-  updateCommand,
-  verifyCommand,
-} from "./commands/reconcile.ts";
-import { resetCommand } from "./commands/reset.ts";
+import { applyCommand, repairCommand, uninstallCommand, verifyCommand } from "./commands/reconcile.ts";
 import { rollbackCommand } from "./commands/rollback.ts";
+import { skillCommand } from "./commands/skill.ts";
+import { sourceRouteMap } from "./commands/source.ts";
 import { upgradeCommand } from "./commands/upgrade.ts";
 import { validateCommand } from "./commands/validate.ts";
 import { whereCommand } from "./commands/where.ts";
@@ -28,17 +18,11 @@ import { VERSION } from "./lib/version.ts";
 
 const routes = buildRouteMap({
   routes: {
-    init: initCommand,
-    link: linkCommand,
     apply: applyCommand,
     verify: verifyCommand,
-    fix: fixCommand,
-    update: updateCommand,
+    repair: repairCommand,
     uninstall: uninstallCommand,
-    commit: commitCommand,
-    diff: diffCommand,
-    push: pushCommand,
-    reset: resetCommand,
+    source: sourceRouteMap,
     where: whereCommand,
     rollback: rollbackCommand,
     upgrade: upgradeCommand,
@@ -47,10 +31,8 @@ const routes = buildRouteMap({
     code: codeRouteMap,
     completions: completionsCommand,
     man: manCommand,
+    skill: skillCommand,
   },
-  // Keep this literal in sync with ALIASES in commands/catalog.ts (the dispatch guard
-  // reads that copy; Stricli needs a literal here to type-check the alias targets).
-  aliases: { sync: "apply" },
   docs: { brief: "botu — a dotfiles + workspace engine. Reconcile your machine from a botufile.toml." },
 });
 

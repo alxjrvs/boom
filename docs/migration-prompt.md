@@ -69,7 +69,7 @@ export async function apply(api: HookApi) {
 }
 
 export async function verify(api: HookApi) { /* ... */ }
-// fix falls back to apply if omitted.
+// repair falls back to apply if omitted.
 ```
 
 Translate shell hook bodies to TypeScript: prefer `Bun.$` for pipelines and

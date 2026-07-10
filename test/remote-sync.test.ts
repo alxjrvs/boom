@@ -1,5 +1,5 @@
 // Repo-only config: ref parsing, the clone/fetch/pull-and-report sync step, the
-// doctor config-repo section, and `botu push`. Fixtures are local git repos —
+// doctor config-repo section, and `botu source push`. Fixtures are local git repos —
 // `git clone`/`fetch`/`push` treat a local path exactly like any other remote, so
 // none of this needs real network access.
 import { expect, test } from "bun:test";

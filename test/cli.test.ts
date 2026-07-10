@@ -54,10 +54,15 @@ test("an unknown command reports an error", async () => {
   expect(buf.err.length).toBeGreaterThan(0);
 });
 
-test("sync routes to apply and accepts --commit/-m", async () => {
+test("apply accepts --commit/-m", async () => {
+  const { buf, ctx } = fakeContext();
+  await run(app, ["apply", "--commit", "-m", "wip"], ctx);
+  // cwd resolves no config — proves the flags parsed, not that a git sync ran.
+  expect(buf.err).toContain("no dotfiles repo");
+});
+
+test("the removed `sync` alias is no longer a command", async () => {
   const { buf, ctx } = fakeContext();
   await run(app, ["sync", "--commit", "-m", "wip"], ctx);
-  // cwd resolves no config, same as plain `apply` — proves the flags parsed, not that
-  // a git sync ran.
-  expect(buf.err).toContain("no dotfiles repo");
+  expect(buf.err.length).toBeGreaterThan(0);
 });

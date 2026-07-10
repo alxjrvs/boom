@@ -167,7 +167,7 @@ test("runUserCommand dispatches a config-supplied command", async () => {
   expect(out()).toBe("hi a,b");
 });
 
-test("linkRemoteConfigRepo clones into the managed cache dir and records the breadcrumb (the `botu link` core)", async () => {
+test("linkRemoteConfigRepo clones into the managed cache dir and records the breadcrumb (the `botu source set` core)", async () => {
   const origin = await gitFixture();
   const env = { XDG_STATE_HOME: await base() };
   const target = await linkRemoteConfigRepo(env, origin);

@@ -1,6 +1,6 @@
-// `botu reset` — discard local changes in the config repo and reset it to match
+// `botu source reset` — discard local changes in the config repo and reset it to match
 // origin. The counterpart to what linkRemoteConfigRepo's re-link refusal points you
-// at ("`botu push` or clean it up"): this is the "clean it up" half, without having
+// at ("`botu source push` or clean it up"): this is the "clean it up" half, without having
 // to know the managed clone's path or wipe/re-clone by hand. Fetches first, then
 // hard-resets to the upstream tip (or the pinned ref, for a detached/@ref-pinned
 // clone — pins are static, so "reset to remote" means "back to the pin") and clears
@@ -9,7 +9,7 @@
 // Committed-but-unpushed commits are real work, not "local changes" — linkRemoteConfigRepo
 // refuses to clobber them (see config/remote.ts), so reset must too: require --force
 // before a hard reset discards commits no remote has.
-import { readConfigBreadcrumb } from "../config/load.ts";
+import { requireConfigBreadcrumb } from "../config/load.ts";
 import type { BotuContext } from "../context.ts";
 import {
   cleanUntracked,
@@ -26,11 +26,8 @@ export interface ResetOptions {
 }
 
 export async function resetConfigRepo(ctx: BotuContext, opts: ResetOptions = {}): Promise<number> {
-  const breadcrumb = await readConfigBreadcrumb(ctx.env);
-  if (!breadcrumb) {
-    ctx.process.stderr.write("botu: no remote config linked — run `botu link <owner/repo>`\n");
-    return 1;
-  }
+  const breadcrumb = await requireConfigBreadcrumb(ctx);
+  if (!breadcrumb) return 1;
   const { path, remote } = breadcrumb;
 
   const fetch = fetchOrigin(path, ctx.env);
@@ -45,7 +42,7 @@ export async function resetConfigRepo(ctx: BotuContext, opts: ResetOptions = {})
       .join("\n");
     ctx.process.stderr.write(
       `botu: ${path} has commit(s) no remote has — reset would discard them:\n${commits}\n` +
-        "botu: pass --force to discard anyway, or `botu push` first\n",
+        "botu: pass --force to discard anyway, or `botu source push` first\n",
     );
     return 1;
   }

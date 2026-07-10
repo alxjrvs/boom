@@ -1,6 +1,6 @@
 // The reconcile core: load + validate the config, run each section under a verb, reap
 // orphaned links, and return the exit code (verify: 0/2/1; mutating verbs: 0/1). For
-// apply/fix it opens a transaction journal (+ backups) so the run is rollback-able and
+// apply/repair it opens a transaction journal (+ backups) so the run is rollback-able and
 // resumable, and persists the manifest of owned destinations.
 import { join } from "node:path";
 import { loadConfig, loadOptionalConfigFile, resolveConfigDir } from "../config/load.ts";
@@ -27,13 +27,13 @@ export interface ReconcileOptions {
   readonly json?: boolean;
   readonly resume?: boolean;
   readonly profiles?: string[];
-  // Only consulted for verb "apply"/"fix" (sync/update alias to apply too): commit
-  // local config-repo changes before pulling, instead of the default autostash.
+  // Only consulted for verb "apply"/"repair": commit local config-repo changes before
+  // pulling, instead of the default autostash.
   readonly commit?: boolean;
   readonly commitMessage?: string;
-  // Only consulted for verb "apply"/"fix": also upgrade outdated brewfile formulae
-  // (what `update` sets). Default false — plain apply reconciles declared state,
-  // it doesn't force package upgrades as a side effect.
+  // Only consulted for verb "apply"/"repair": also upgrade outdated brewfile formulae
+  // (what `apply --upgrade` sets). Default false — plain apply reconciles declared
+  // state, it doesn't force package upgrades as a side effect.
   readonly upgrade?: boolean;
 }
 
@@ -58,7 +58,7 @@ async function reapOrphans(ctx: ReconcileCtx, prior: readonly ManifestEntry[]): 
   };
   const reap = async (dst: string, disp: string, why: string): Promise<void> => {
     head();
-    if (ctx.verb === "verify") ctx.report.warn(`${disp} ${why} — botu fix to reap`);
+    if (ctx.verb === "verify") ctx.report.warn(`${disp} ${why} — botu repair to reap`);
     else if (ctx.dryRun) ctx.report.note(`would reap ${disp}`);
     else {
       // Same transaction as every other mutation here: journaled with a backup, so
@@ -121,7 +121,7 @@ export async function reconcile(verb: Verb, ctx: BotuContext, opts: ReconcileOpt
       }
       return report.failures > 0 ? 1 : report.warnings > 0 ? 2 : 0;
     }
-    // Mutating verbs (apply/fix/update/uninstall): same structured envelope as verify,
+    // Mutating verbs (apply/repair/uninstall): same structured envelope as verify,
     // so every reconcile verb is scriptable, not just the read-only one.
     if (json) {
       ctx.process.stdout.write(
@@ -146,7 +146,7 @@ export async function reconcile(verb: Verb, ctx: BotuContext, opts: ReconcileOpt
 
   const repo = await resolveConfigDir(ctx.env, ctx.cwd);
   if (!repo) {
-    report.fail("no dotfiles repo found — run `botu init`");
+    report.fail("no dotfiles repo found — run `botu source set <owner/repo>`");
     return finish();
   }
   const dryRun = opts.dryRun ?? false;
@@ -162,7 +162,7 @@ export async function reconcile(verb: Verb, ctx: BotuContext, opts: ReconcileOpt
     return finish();
   }
 
-  const mutating = (verb === "apply" || verb === "fix") && !dryRun;
+  const mutating = (verb === "apply" || verb === "repair") && !dryRun;
   let journal: Journal | undefined;
   let backupRoot: string | undefined;
   let resumeDone: ReadonlySet<string> | undefined;

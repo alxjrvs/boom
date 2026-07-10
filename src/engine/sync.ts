@@ -1,8 +1,8 @@
 // Config-repo sync: the pre-reconcile step that keeps a repo-only config fresh.
 // `verify` (and any dry-run) fetches and reports drift without touching the working
 // tree — behind origin, ahead with unpushed commits, or a dirty tree, since those are
-// exactly the states `botu commit`/`botu push` exist to handle and "up to date" must
-// not paper over them. `apply`/`fix` pull (rebasing local changes on top via
+// exactly the states `botu source commit`/`botu source push` exist to handle and "up to date" must
+// not paper over them. `apply`/`repair` pull (rebasing local changes on top via
 // --autostash, or committing them first with --commit) and report what moved, then
 // reconcile proceeds against whatever's on disk regardless — a failed pull is reported
 // but never blocks reconciling from the last-known-good local state (a rebase conflict

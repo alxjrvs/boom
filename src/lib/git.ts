@@ -1,6 +1,6 @@
 // Thin git plumbing for a repo-only config source: clone/fetch/pull the managed
 // config-repo clone, and answer the small questions engine/sync.ts and `botu doctor`/
-// `botu push` need (ahead/behind, upstream, reachability). Shells out via
+// `botu source push` need (ahead/behind, upstream, reachability). Shells out via
 // captureArgv — no libgit2, no GitHub API client; ambient git/SSH auth is whatever
 // already works in the user's shell.
 import { type CaptureResult, captureArgv, type Env, runArgv, type ShellResult } from "./proc.ts";
@@ -119,9 +119,9 @@ export function diffHead(dir: string, env: Env): ShellResult {
   return runArgv(["git", "diff", "HEAD"], env, { cwd: dir });
 }
 
-// Paths git isn't tracking yet — the new files `git diff` omits but `botu commit`
+// Paths git isn't tracking yet — the new files `git diff` omits but `botu source commit`
 // (git add -A) would capture. Mirrors the `--others` half of the porcelain status so a
-// `botu diff` doesn't silently hide a freshly added base file.
+// `botu source diff` doesn't silently hide a freshly added base file.
 export function untrackedFiles(dir: string, env: Env): string[] {
   const r = captureArgv(["git", "ls-files", "--others", "--exclude-standard"], env, { cwd: dir });
   return r.code === 0 && r.stdout.length > 0 ? r.stdout.split("\n") : [];

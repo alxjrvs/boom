@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { COMMAND_NAMES, COMMANDS } from "../src/commands/catalog.ts";
 import { completionScript } from "../src/commands/completions.ts";
 import { manPage } from "../src/commands/man.ts";
+import { skillDoc } from "../src/commands/skill.ts";
 import type { BotuContext } from "../src/context.ts";
 import { doctor } from "../src/engine/doctor.ts";
 import { validateConfig } from "../src/engine/validate.ts";
@@ -28,7 +29,7 @@ function ctxFor(env: Record<string, string | undefined>, cwd: string): { ctx: Bo
 
 test("catalog command names are unique and include the core verbs", () => {
   expect(new Set(COMMAND_NAMES).size).toBe(COMMAND_NAMES.length);
-  for (const v of ["apply", "verify", "fix", "uninstall", "doctor", "validate"]) {
+  for (const v of ["apply", "verify", "repair", "uninstall", "source", "doctor", "validate"]) {
     expect(COMMAND_NAMES).toContain(v);
   }
   expect(COMMAND_NAMES).not.toContain("watchtower");
@@ -64,6 +65,19 @@ test("man page is valid-ish roff naming every command", () => {
   expect(m).toContain('.TH BOTU 1 "" "botu 9.9.9"');
   expect(m).toContain(".SH COMMANDS");
   for (const c of COMMANDS) expect(m).toContain(`.B ${c.name}`);
+});
+
+// ---- skill -------------------------------------------------------------------
+
+test("skill doc is a SKILL.md with frontmatter naming every command", () => {
+  const s = skillDoc("9.9.9");
+  expect(s).toStartWith("---\nname: botu\n");
+  expect(s).toContain("# botu (v9.9.9)"); // version stamped in the heading
+  for (const c of COMMANDS) expect(s).toContain(`\`botu ${c.name}\``);
+  // the safety facts an agent must not miss
+  expect(s).toContain("--dry-run");
+  expect(s).toContain("--json");
+  expect(s).toContain("source reset --force");
 });
 
 // ---- validate ----------------------------------------------------------------
@@ -105,7 +119,7 @@ test("doctor reports a parseable config and a writable state dir", async () => {
     repo,
   );
   const rc = await doctor(ctx);
-  expect(out()).toContain("botufile.toml parses (1 section(s))");
+  expect(out()).toContain("botufile.toml — 1 section(s)");
   expect(out()).toContain("state dir writable");
   // No failures possible here (config valid, state writable); tool warnings may bump to 2.
   expect([0, 2]).toContain(rc);

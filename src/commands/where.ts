@@ -20,7 +20,7 @@ export const whereCommand = buildCommand<Record<never, never>, [string], BotuCon
     switch (target) {
       case "config": {
         const dir = await resolveConfigDir(this.env, this.cwd);
-        if (!dir) return new Error("no dotfiles repo found — run `botu init`");
+        if (!dir) return new Error("no dotfiles repo found — run `botu source set <owner/repo>`");
         this.process.stdout.write(`${dir}\n`);
         return;
       }

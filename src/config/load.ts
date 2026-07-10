@@ -1,5 +1,5 @@
 // Resolve, parse, and validate a botufile.toml. Resolution order mirrors the bash
-// engine: $BOTU_CONFIG → breadcrumb (from `botu link`/`botu init`) → cwd; first dir
+// engine: $BOTU_CONFIG → breadcrumb (from `botu source set`) → cwd; first dir
 // with a botufile.toml wins. Parsing is smol-toml; validation is the valibot schema.
 //
 // Config is repo-only: the breadcrumb always names a botu-managed clone of a git
@@ -9,6 +9,7 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { parse as parseToml } from "smol-toml";
 import * as v from "valibot";
+import type { BotuContext } from "../context.ts";
 import { type Env, stateHome } from "../engine/state.ts";
 import { type Botufile, BotufileSchema } from "./schema.ts";
 
@@ -30,7 +31,7 @@ export function configBreadcrumbPath(env: Env): string {
   return join(stateHome(env), "botu", "config");
 }
 
-// Where `botu link`/`botu init` clone the remote config repo. Fixed — repo-only mode
+// Where `botu source set` clones the remote config repo. Fixed — repo-only mode
 // has exactly one active config at a time, same as the breadcrumb it pairs with.
 export function configRepoCacheDir(env: Env): string {
   return join(stateHome(env), "botu", "config-repo");
@@ -55,6 +56,18 @@ export async function readConfigBreadcrumb(env: Env): Promise<ConfigBreadcrumb |
   } catch {
     return undefined;
   }
+}
+
+// The one linked-config guard shared by every `botu source` subcommand (and any command
+// that operates the managed clone): resolve the breadcrumb or print the single canonical
+// "not linked" error. Returns undefined so callers can `return 1` uniformly.
+export async function requireConfigBreadcrumb(ctx: BotuContext): Promise<ConfigBreadcrumb | undefined> {
+  const breadcrumb = await readConfigBreadcrumb(ctx.env);
+  if (!breadcrumb) {
+    ctx.process.stderr.write("botu: no remote config linked — run `botu source set <owner/repo>`\n");
+    return undefined;
+  }
+  return breadcrumb;
 }
 
 export async function writeConfigBreadcrumb(env: Env, breadcrumb: ConfigBreadcrumb): Promise<void> {

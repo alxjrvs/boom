@@ -26,7 +26,6 @@ type OnlyFlags = { only?: string[]; json?: boolean; profile?: string[] };
 type VerifyFlags = { only?: string[]; json?: boolean; profile?: string[] };
 type ApplyFlags = {
   dryRun?: boolean;
-  force?: boolean;
   skip?: boolean;
   resume?: boolean;
   json?: boolean;
@@ -37,8 +36,8 @@ type ApplyFlags = {
   upgrade?: boolean;
 };
 
-// overwrite is the default (and what --force explicitly asks for too) — --skip is
-// the one way to opt out of clobbering a conflicting target.
+// overwrite is the default — --skip is the one way to opt out of clobbering a
+// conflicting target.
 function linkModeOf(flags: { skip?: boolean }): LinkMode {
   return flags.skip ? "skip" : "overwrite";
 }
@@ -48,7 +47,6 @@ export const applyCommand = buildCommand<ApplyFlags, [], BotuContext>({
   parameters: {
     flags: {
       dryRun: { kind: "boolean", optional: true, brief: "Show what would change; change nothing" },
-      force: { kind: "boolean", optional: true, brief: "Overwrite conflicting targets (default)" },
       skip: { kind: "boolean", optional: true, brief: "Skip conflicting targets instead of overwriting" },
       resume: { kind: "boolean", optional: true, brief: "Continue an interrupted apply (skip done steps)" },
       commit: {
@@ -65,13 +63,13 @@ export const applyCommand = buildCommand<ApplyFlags, [], BotuContext>({
       upgrade: {
         kind: "boolean",
         optional: true,
-        brief: "Also upgrade outdated brewfile formulae (what `botu update` runs)",
+        brief: "Also upgrade outdated brewfile formulae, not just reconcile declared state",
       },
       only: onlyFlag,
       profile: profileFlag,
       json: jsonFlag,
     },
-    aliases: { f: "force", s: "skip", m: "message" },
+    aliases: { s: "skip", m: "message" },
   },
   async func(flags) {
     this.process.exitCode = await reconcile("apply", this, {
@@ -106,27 +104,14 @@ export const verifyCommand = buildCommand<VerifyFlags, [], BotuContext>({
   },
 });
 
-export const fixCommand = buildCommand<OnlyFlags, [], BotuContext>({
+export const repairCommand = buildCommand<OnlyFlags, [], BotuContext>({
   docs: { brief: "Repair drift (apply, overwriting conflicts)" },
   parameters: { flags: { only: onlyFlag, profile: profileFlag, json: jsonFlag } },
   async func(flags) {
-    this.process.exitCode = await reconcile("fix", this, {
+    this.process.exitCode = await reconcile("repair", this, {
       only: flags.only,
       json: flags.json,
       profiles: flags.profile,
-    });
-  },
-});
-
-export const updateCommand = buildCommand<OnlyFlags, [], BotuContext>({
-  docs: { brief: "Apply with upgrades (apply --upgrade)" },
-  parameters: { flags: { only: onlyFlag, profile: profileFlag, json: jsonFlag } },
-  async func(flags) {
-    this.process.exitCode = await reconcile("apply", this, {
-      only: flags.only,
-      json: flags.json,
-      profiles: flags.profile,
-      upgrade: true,
     });
   },
 });

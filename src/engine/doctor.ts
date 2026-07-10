@@ -4,7 +4,7 @@
 // PATH, is the agent's 1Password token in the keychain, is the state dir writable.
 // Exit code mirrors verify: 0 ok / 2 warnings / 1 failures.
 import { mkdir } from "node:fs/promises";
-import { loadConfig, readConfigBreadcrumb, resolveConfigDir } from "../config/load.ts";
+import { readConfigBreadcrumb, resolveConfigDir } from "../config/load.ts";
 import { detectOs } from "../config/profile.ts";
 import type { BotuContext } from "../context.ts";
 import { colorEnabled } from "../lib/color.ts";
@@ -12,6 +12,7 @@ import { remoteReachable } from "../lib/git.ts";
 import { hasCommand } from "../lib/proc.ts";
 import { Reporter } from "../lib/reporter.ts";
 import { botuStateDir } from "./state.ts";
+import { validateConfigFiles } from "./validate.ts";
 
 // The external tools botu's resources / commands shell out to, and what needs each.
 // None are required for botu itself to run (it's a self-contained binary), so a missing
@@ -34,14 +35,11 @@ export async function doctor(ctx: BotuContext): Promise<number> {
   report.header("Config");
   const repo = await resolveConfigDir(ctx.env, ctx.cwd);
   if (!repo) {
-    report.warn("no dotfiles repo found — run `botu init` or `botu link <repo>`");
+    report.warn("no dotfiles repo found — run `botu source set <owner/repo>`");
   } else {
-    try {
-      const config = await loadConfig(repo);
-      report.ok(`${repo}/botufile.toml parses (${config.section.length} section(s))`);
-    } catch (e) {
-      report.fail((e as Error).message);
-    }
+    // Same parse `botu validate` runs (base botufile + every overlay), shared so the two
+    // commands can't disagree; here it's one section among doctor's broader preconditions.
+    await validateConfigFiles(repo, report);
   }
 
   report.header("Config repo");
@@ -50,7 +48,7 @@ export async function doctor(ctx: BotuContext): Promise<number> {
   // one fact, one report, at the severity that actually applies here.
   let gitRequiredAndMissing = false;
   if (!breadcrumb) {
-    report.warn("no remote config linked — run `botu link <owner/repo>` or `botu init <owner/repo>`");
+    report.warn("no remote config linked — run `botu source set <owner/repo>`");
   } else if (!hasCommand("git", ctx.env)) {
     gitRequiredAndMissing = true;
     report.fail("git not on PATH — required to sync the config repo (repo-only config)");

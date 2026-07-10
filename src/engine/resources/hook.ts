@@ -22,7 +22,7 @@ type HookFn = (api: HookApi) => void | Promise<void>;
 export interface HookModule {
   apply?: HookFn;
   verify?: HookFn;
-  fix?: HookFn;
+  repair?: HookFn;
   uninstall?: HookFn;
 }
 
@@ -41,13 +41,14 @@ export async function reconcileHook(entry: Hook, ctx: ReconcileCtx): Promise<voi
     report.fail(`hook ${entry.name}: failed to load — ${(e as Error).message}`);
     return;
   }
-  // fix falls back to apply (repair = re-apply), matching the bash contract.
-  const fn = ctx.verb === "fix" ? (mod.fix ?? mod.apply) : mod[ctx.verb];
+  // repair falls back to apply (repair = re-apply), matching the bash contract: a hook
+  // only needs a distinct `repair` when its drift-repair differs from a fresh install.
+  const fn = ctx.verb === "repair" ? (mod.repair ?? mod.apply) : mod[ctx.verb];
   if (!fn) return;
 
   // A hook can do anything; journal it as a non-reversible side effect (mutating runs
   // only) so rollback can warn that replaying it can't be undone.
-  if (!ctx.dryRun && (ctx.verb === "apply" || ctx.verb === "fix"))
+  if (!ctx.dryRun && (ctx.verb === "apply" || ctx.verb === "repair"))
     await ctx.journal?.side("hook", entry.name);
 
   const api: HookApi = {

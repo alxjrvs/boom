@@ -1,9 +1,9 @@
-// `botu commit` — commit local changes in the managed config-repo clone directly,
+// `botu source commit` — commit local changes in the managed config-repo clone directly,
 // without a full apply. `commitLocalChanges` is the shared half: apply's --commit
 // mode (engine/sync.ts) calls it too, so the default message/behavior can't drift
-// between the two entry points. No auto-push — pair with `botu push` (push.ts's
+// between the two entry points. No auto-push — pair with `botu source push` (push.ts's
 // "no auto-commit" is the mirror image of this file's "no auto-push").
-import { readConfigBreadcrumb } from "../config/load.ts";
+import { requireConfigBreadcrumb } from "../config/load.ts";
 import type { BotuContext } from "../context.ts";
 import { addAll, commitStaged, isClean } from "../lib/git.ts";
 import type { Env } from "../lib/proc.ts";
@@ -25,11 +25,8 @@ export function commitLocalChanges(dir: string, env: Env, message?: string): Com
 }
 
 export async function commitConfigRepo(ctx: BotuContext, message?: string): Promise<number> {
-  const breadcrumb = await readConfigBreadcrumb(ctx.env);
-  if (!breadcrumb) {
-    ctx.process.stderr.write("botu: no remote config linked — run `botu link <owner/repo>`\n");
-    return 1;
-  }
+  const breadcrumb = await requireConfigBreadcrumb(ctx);
+  if (!breadcrumb) return 1;
   const outcome = commitLocalChanges(breadcrumb.path, ctx.env, message);
   switch (outcome.kind) {
     case "clean":

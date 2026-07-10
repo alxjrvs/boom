@@ -2,7 +2,7 @@ import type { Reporter } from "../lib/reporter.ts";
 import type { Journal } from "./journal.ts";
 import type { ManifestEntry } from "./state.ts";
 
-export type Verb = "apply" | "verify" | "fix" | "uninstall";
+export type Verb = "apply" | "verify" | "repair" | "uninstall";
 export type LinkMode = "overwrite" | "skip";
 
 // Shared state threaded through every resource handler for one reconcile run.
@@ -14,8 +14,8 @@ export interface ReconcileCtx {
   // stdout so the only thing there is the structured envelope.
   readonly json: boolean;
   readonly linkMode: LinkMode;
-  // Gates brewfile's `--no-upgrade`: apply/fix reconcile declared state only, `update`
-  // (apply --upgrade) opts into upgrading outdated formulae too. Casks are unaffected
+  // Gates brewfile's `--no-upgrade`: apply/repair reconcile declared state only,
+  // `apply --upgrade` opts into upgrading outdated formulae too. Casks are unaffected
   // either way — Homebrew Bundle only upgrades a cask when its Brewfile entry sets
   // `greedy: true`, regardless of this flag.
   readonly upgrade: boolean;
@@ -24,7 +24,7 @@ export interface ReconcileCtx {
   // Destinations botu owns this run — populated as handlers run (drives orphan
   // reaping + the persisted manifest).
   readonly declared: ManifestEntry[];
-  // Transaction state (present for mutating apply/fix runs):
+  // Transaction state (present for mutating apply/repair runs):
   readonly journal?: Journal;
   readonly backupRoot?: string;
   readonly resumeDone?: ReadonlySet<string>;

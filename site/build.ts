@@ -133,7 +133,7 @@ const renderGuide = (): string => {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Guide — botu</title>
-<meta name="description" content="How to use botu: install, bootstrap a machine, the reconcile loop (apply / verify / fix, and rollback), the botufile.toml reference, config-repo git, code portals, and housekeeping.">
+<meta name="description" content="How to use botu: install, bootstrap a machine, the reconcile loop (apply / verify / repair, and rollback), the botufile.toml reference, config-repo git, code portals, and housekeeping.">
 ${faviconLink}
 <link rel="stylesheet" href="styles.css">
 </head>

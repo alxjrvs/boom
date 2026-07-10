@@ -55,7 +55,7 @@ export function reconcileOsxDefault(entry: OsxDefault, ctx: ReconcileCtx): void 
 
   switch (ctx.verb) {
     case "apply":
-    case "fix": {
+    case "repair": {
       if (ctx.dryRun) {
         report.plan(`would set ${disp} -${type} ${want}`);
         return;

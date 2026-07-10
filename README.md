@@ -2,7 +2,7 @@
 
 **BoomTube** is an installable **dotfiles + workspace engine**. Its executable,
 **`botu`**, reconciles your machine from a declarative `botufile.toml` —
-`apply` / `verify` / `fix` — rolls back any change, and opens portals to your
+`apply` / `verify` / `repair` — rolls back any change, and opens portals to your
 code workspaces. One self-contained binary, compiled from **TypeScript on
 [Bun](https://bun.com)**, with zero runtime dependencies on your machine.
 
@@ -33,35 +33,36 @@ Bun runtime, so nothing else is required. Override the install prefix with
 ## Bootstrap a machine
 
 ```sh
-botu init alxjrvs/dotfiles   # clone your remote dotfiles repo and apply it — one-shot bootstrap
-botu apply                   # thereafter: reconcile from the recorded config repo
+botu source set alxjrvs/dotfiles   # clone your remote dotfiles repo and apply it — one-shot bootstrap
+botu apply                         # thereafter: reconcile from the recorded config repo
 ```
 
-`init`/`link` take a **remote reference** — `owner/repo`, `github:owner/repo`, a
+`botu source set` takes a **remote reference** — `owner/repo`, `github:owner/repo`, a
 git URL, optionally `@ref` — never an arbitrary local path. botu clones it into a
-managed cache dir and records a breadcrumb. `init` clones *and* applies; `link`
-clones and records only. The fresh-machine one-liner is
-`curl install.sh | sh && botu init owner/repo`.
+managed cache dir, records a breadcrumb, and applies it. Pass `--no-apply` to clone and
+record only — to review before reconciling, or to re-point at a different repo. The
+fresh-machine one-liner is `curl install.sh | sh && botu source set owner/repo`.
 
 ## The reconcile loop
 
-`apply` / `verify` / `fix` / `uninstall` are **one verb-parameterized loop** over
+`apply` / `verify` / `repair` / `uninstall` are **one verb-parameterized loop** over
 a resource registry — siblings, not separate scripts.
 
 ```sh
 botu apply              # make it so: symlink / copy / install / run from botufile.toml
 botu apply --dry-run    # preview every change; touch nothing
 botu apply --skip       # skip conflicting targets instead of overwriting them
+botu apply --upgrade    # also upgrade outdated brewfile formulae, not just declared state
 botu apply --commit     # commit local config-repo edits before pulling
 botu apply --resume     # continue an interrupted apply (skips completed steps)
 
 botu verify             # check for drift — exit 0 ok / 2 warn / 1 fail
 botu verify --json      # …as a structured drift report
-botu fix                # repair drift (apply, overwriting conflicts)
+botu repair             # repair drift (apply, overwriting conflicts)
 botu rollback           # undo the most recent apply (restores backed-up files)
 ```
 
-`apply`/`fix` sync the config repo against its remote first (`pull --rebase
+`apply`/`repair` sync the config repo against its remote first (`pull --rebase
 --autostash`, so local edits ride along and land back on top). `verify` reports
 "N commits behind" as drift — plus separate warnings for uncommitted or unpushed
 local changes — without touching the working tree. A failed pull is *reported* but
@@ -71,12 +72,15 @@ never blocks reconciling from the last-known-good local clone. A conflicting
 
 ### Config-repo git, without leaving botu
 
+`botu source` operates the managed config-repo clone (the source your machine is
+reconciled from) without cd-ing into the cache dir it lives in:
+
 ```sh
-botu diff               # show uncommitted local changes in the config repo
-botu commit             # commit local changes in the config repo
-botu push               # push the config repo's local commits upstream
-botu reset              # discard local changes, reset to origin
-botu reset --force      # …including commits no remote has (refused otherwise)
+botu source diff          # show uncommitted local changes in the config repo
+botu source commit        # commit local changes in the config repo
+botu source push          # push the config repo's local commits upstream
+botu source reset         # discard local changes, reset to origin
+botu source reset --force # …including commits no remote has (refused otherwise)
 ```
 
 ### Housekeeping
@@ -120,7 +124,7 @@ hook = [{ name = "op-agent", with = { vault = "claude-agent" } }]   # → hooks/
 ```
 
 Imperative escapes are `run` steps (a shell command) or a **hook** — a
-`hooks/<name>.ts` module exporting `apply`/`verify`/`fix` that receives a typed
+`hooks/<name>.ts` module exporting `apply`/`verify`/`repair` that receives a typed
 `HookApi`. That's the extension point for anything the declarative resources can't
 express. Multi-machine setups gate sections with `when`, or layer overlay files
 (`botufile.<os|host|profile>.toml`).
