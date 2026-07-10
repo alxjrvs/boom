@@ -1,54 +1,93 @@
 # BoomTube
 
-**BoomTube** is a small, installable **dotfiles + workspace engine**. Its
-executable, **`botu`**, lets you `apply`/`verify`/`fix` your machine from a
-declarative `botufile.toml`, roll back any change, and open portals to your code
-workspaces. A single self-contained binary, compiled from **TypeScript on
-[Bun](https://bun.com)** — no runtime dependencies on your machine.
+**BoomTube** is an installable **dotfiles + workspace engine**. Its executable,
+**`botu`**, reconciles your machine from a declarative `botufile.toml` —
+`apply` / `verify` / `fix` — rolls back any change, and opens portals to your
+code workspaces. One self-contained binary, compiled from **TypeScript on
+[Bun](https://bun.com)**, with zero runtime dependencies on your machine.
 
-Named for Jack Kirby's **Boom Tube** (the Fourth World portal): BoomTube opens
-portals to your machine's ideal state, and to your code. You drive it with the
-`botu` command.
+Named for Jack Kirby's **Boom Tube** (the Fourth World portal): botu opens a
+portal to your machine's ideal state, and to your code.
+
+📖 **Docs site → [alxjrvs.github.io/botu](https://alxjrvs.github.io/botu/)**  ·
+📐 Design of record → [`SPEC.md`](SPEC.md)
 
 > Status: **early** — a TypeScript rewrite of the original bash engine, extracted
-> from [`alxjrvs/dotFiles`](https://github.com/alxjrvs/dotFiles). See
-> [`SPEC.md`](SPEC.md) for the design of record.
+> from [`alxjrvs/dotFiles`](https://github.com/alxjrvs/dotFiles).
 
-## Quickstart
+## Install
 
 ```sh
-botu init alxjrvs/dotfiles   # clone your remote dotfiles repo and apply it — bootstrap
-botu link alxjrvs/dotfiles   # … clone + record only (init without the apply)
-botu apply                   # symlink/copy/install/run from its botufile.toml
-botu apply --dry-run         # preview what apply would change; change nothing
-botu apply --skip            # skip conflicting targets instead of overwriting them
-botu apply --commit          # commit local config-repo changes before pulling
-botu commit                  # commit local changes in the config repo directly
-botu verify                  # check for drift (exit 0 ok / 2 warn / 1 fail)
-botu verify --json           # … as a structured drift report
-botu fix                     # repair drift
-botu push                    # push the config repo's local commits upstream
-botu reset                   # discard local changes in the config repo, reset to origin
-botu reset --force           # …including commits no remote has (refused otherwise)
-botu rollback                # undo the last apply (restores backed-up files)
-botu validate                # parse + schema-check the botufile; change nothing
-botu doctor                  # check botu's own preconditions (tools, keychain, state)
+# curl installer — downloads the binary for your platform, puts `botu` on PATH
+curl -fsSL https://raw.githubusercontent.com/alxjrvs/botu/main/install.sh | sh
 
-botu code init ~/Code    # record your code dir
-botu code claude         # symlink every repo into one dir, open `claude agents` there
-botu code cmux           # one cmux workspace per repo
+# …or Homebrew (this repo doubles as the tap)
+brew tap alxjrvs/botu https://github.com/alxjrvs/botu
+brew install botu
 ```
 
-Config is repo-only: `link`/`init` always clone a remote (`owner/repo`,
-`github:owner/repo`, a git URL, optionally `@ref`) into a botu-managed cache dir —
-never an arbitrary local folder. `apply`/`fix` pull the config repo first (rebasing
-any local edits on top via `--autostash`, or committing them first with
-`--commit`) and report what moved; `verify` reports "N commits behind" as drift,
-plus separate warnings for uncommitted or unpushed local changes, without pulling.
-A rebase conflict is reported but never blocks reconciling from
-the local clone as-is. Auth is whatever git/SSH already works in your shell. A
-conflicting (non-botu-owned) file at a link's destination is **overwritten by
-default** — pass `--skip` to leave it alone instead.
+One self-contained executable (macOS arm64/x64, Linux x64); the binary embeds the
+Bun runtime, so nothing else is required. Override the install prefix with
+`BOTU_PREFIX`.
+
+## Bootstrap a machine
+
+```sh
+botu init alxjrvs/dotfiles   # clone your remote dotfiles repo and apply it — one-shot bootstrap
+botu apply                   # thereafter: reconcile from the recorded config repo
+```
+
+`init`/`link` take a **remote reference** — `owner/repo`, `github:owner/repo`, a
+git URL, optionally `@ref` — never an arbitrary local path. botu clones it into a
+managed cache dir and records a breadcrumb. `init` clones *and* applies; `link`
+clones and records only. The fresh-machine one-liner is
+`curl install.sh | sh && botu init owner/repo`.
+
+## The reconcile loop
+
+`apply` / `verify` / `fix` / `uninstall` are **one verb-parameterized loop** over
+a resource registry — siblings, not separate scripts.
+
+```sh
+botu apply              # make it so: symlink / copy / install / run from botufile.toml
+botu apply --dry-run    # preview every change; touch nothing
+botu apply --skip       # skip conflicting targets instead of overwriting them
+botu apply --commit     # commit local config-repo edits before pulling
+botu apply --resume     # continue an interrupted apply (skips completed steps)
+
+botu verify             # check for drift — exit 0 ok / 2 warn / 1 fail
+botu verify --json      # …as a structured drift report
+botu fix                # repair drift (apply, overwriting conflicts)
+botu rollback           # undo the most recent apply (restores backed-up files)
+```
+
+`apply`/`fix` sync the config repo against its remote first (`pull --rebase
+--autostash`, so local edits ride along and land back on top). `verify` reports
+"N commits behind" as drift — plus separate warnings for uncommitted or unpushed
+local changes — without touching the working tree. A failed pull is *reported* but
+never blocks reconciling from the last-known-good local clone. A conflicting
+(non-botu-owned) file at a `link` destination is **overwritten by default**; pass
+`--skip` to leave it alone.
+
+### Config-repo git, without leaving botu
+
+```sh
+botu commit             # commit local changes in the config repo
+botu push               # push the config repo's local commits upstream
+botu reset              # discard local changes, reset to origin
+botu reset --force      # …including commits no remote has (refused otherwise)
+```
+
+### Housekeeping
+
+```sh
+botu validate           # parse + schema-check the botufile; change nothing
+botu doctor             # check botu's own preconditions (tools, keychain, state)
+botu where config|code|engine   # resolve where botu keeps things
+botu upgrade            # upgrade the botu binary itself
+botu completions bash|zsh|fish  # shell completions
+botu man                # the man page
+```
 
 ## The `botufile.toml`
 
@@ -79,30 +118,29 @@ name = "Secrets"
 hook = [{ name = "op-agent", with = { vault = "claude-agent" } }]   # → hooks/op-agent.ts
 ```
 
-Imperative escapes are `run` steps (a shell command) or a **hook**: a
-`hooks/<name>.ts` module exporting `apply`/`verify`/`fix` functions — the
-extension point for anything the declarative resources can't express.
-Multi-machine setups gate sections with `when`, or layer overlay files
+Imperative escapes are `run` steps (a shell command) or a **hook** — a
+`hooks/<name>.ts` module exporting `apply`/`verify`/`fix` that receives a typed
+`HookApi`. That's the extension point for anything the declarative resources can't
+express. Multi-machine setups gate sections with `when`, or layer overlay files
 (`botufile.<os|host|profile>.toml`).
 
 Coming from the old bash `botufile`? See
 [`docs/migration-prompt.md`](docs/migration-prompt.md) — a prompt that converts it
 to `botufile.toml` and ports bash hooks to TypeScript.
 
-## Install
+## Code portals
+
+`botu code` opens portals to the repos under your code dir (default `~/Code`):
 
 ```sh
-# curl installer — downloads the binary for your platform, puts `botu` on PATH
-curl -fsSL https://raw.githubusercontent.com/alxjrvs/botu/main/install.sh | sh
-
-# …or Homebrew (this repo doubles as the tap)
-brew tap alxjrvs/botu https://github.com/alxjrvs/botu
-brew install botu
+botu code init ~/Code    # record your code dir
+botu code claude         # symlink every repo into one dir, open `claude agents` there
+botu code cmux           # one cmux workspace per repo
 ```
 
-botu ships as one self-contained executable (macOS arm64/x64, Linux x64); the
-binary embeds the Bun runtime, so nothing else is required. Override the install
-prefix with `BOTU_PREFIX`.
+`code claude` flattens every repo into a symlink farm so each is `@`-taggable for
+agent dispatch even with no running agents; `code cmux` opens one workspace per
+repo. Both honor `--dry-run` and only spawn the backend tool when it's present.
 
 ## Develop
 

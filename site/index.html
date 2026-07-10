@@ -1,0 +1,865 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BoomTube — botu</title>
+<meta name="description" content="BoomTube (botu) — an installable dotfiles + workspace engine. One self-contained binary that reconciles your machine from a declarative botufile.toml: apply, verify, fix, rollback — and opens portals to your code. Named for Jack Kirby's Boom Tube.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='48' fill='%230b0a12'/%3E%3Ccircle cx='50' cy='50' r='36' fill='%237a1fa2'/%3E%3Ccircle cx='50' cy='50' r='27' fill='%23e2231a'/%3E%3Ccircle cx='50' cy='50' r='18' fill='%23ffcf00'/%3E%3Ccircle cx='50' cy='50' r='9' fill='%23fff8e7'/%3E%3C/svg%3E">
+<style>
+/* ============================================================
+   BOOMTUBE — a Jack Kirby / Fourth World comic page, ca. 1971.
+   Flat saturated inks, heavy black borders, Ben-Day dots,
+   Kirby krackle, cream newsprint gutters. No soft gradients.
+   ============================================================ */
+:root {
+  --ink:    #000000;
+  --space:  #0b0a12;   /* deep-space near-black          */
+  --red:    #e2231a;   /* Kirby red                      */
+  --gold:   #ffcf00;   /* cosmic gold                    */
+  --blue:   #0a8bd6;   /* electric blue                  */
+  --cyan:   #22d3ff;   /* hotter electric blue           */
+  --mag:    #b5179e;   /* Apokolips magenta              */
+  --purp:   #7a1fa2;   /* Apokolips purple               */
+  --cream:  #f3e9cf;   /* newsprint cream                */
+  --text:   #17131f;
+
+  --display: Impact, 'Arial Narrow Bold', Haettenschweiler, 'Franklin Gothic Bold', sans-serif;
+  --mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --body: 'Trebuchet MS', Verdana, Tahoma, system-ui, sans-serif;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { scroll-padding-top: 5.2rem; }
+html, body { overflow-x: hidden; }
+body {
+  margin: 0;
+  color: var(--text);
+  font-family: var(--body);
+  line-height: 1.55;
+  background-color: var(--cream);
+  /* Ben-Day halftone on the newsprint gutters */
+  background-image: radial-gradient(rgba(0,0,0,.07) 1.4px, transparent 1.5px);
+  background-size: 13px 13px;
+}
+
+img, svg { max-width: 100%; }
+a { color: var(--red); text-decoration-thickness: 2px; text-underline-offset: 2px; }
+a:hover { color: var(--mag); }
+
+.skip {
+  position: absolute; left: -999px; top: 0; z-index: 100;
+  background: var(--gold); color: #000; padding: .6rem 1rem;
+  border: 3px solid var(--ink); font-weight: 800;
+}
+.skip:focus { left: .5rem; top: .5rem; }
+
+.wrap { max-width: 1100px; margin-inline: auto; padding-inline: clamp(14px, 4vw, 34px); }
+
+/* ---------- display lettering ---------- */
+.display {
+  font-family: var(--display);
+  font-weight: 400;               /* Impact carries its own weight */
+  text-transform: uppercase;
+  letter-spacing: .015em;
+  line-height: .92;
+  margin: 0;
+}
+.shout {
+  -webkit-text-stroke: 2.5px var(--ink);
+  paint-order: stroke fill;
+  text-shadow: .1em .1em 0 var(--ink);
+}
+
+/* ---------- header ---------- */
+.masthead {
+  position: sticky; top: 0; z-index: 50;
+  background: var(--space);
+  border-bottom: 4px solid var(--ink);
+  box-shadow: 0 4px 0 var(--gold), 0 8px 0 var(--ink);
+}
+.masthead .wrap {
+  display: flex; align-items: center; gap: .9rem; flex-wrap: wrap;
+  padding-block: .55rem;
+}
+.logo {
+  font-family: var(--display); text-transform: uppercase;
+  font-size: 1.7rem; line-height: 1; text-decoration: none;
+  color: var(--gold);
+  -webkit-text-stroke: 1px var(--ink);
+  text-shadow: 3px 3px 0 var(--red);
+  letter-spacing: .02em;
+}
+.logo .bang { color: var(--cyan); }
+.logo:hover { color: var(--cream); }
+.masthead nav { display: flex; flex-wrap: wrap; gap: .1rem .15rem; margin-left: auto; }
+.masthead nav a {
+  color: var(--cream); text-decoration: none;
+  font-size: .68rem; font-weight: 800; text-transform: uppercase;
+  letter-spacing: .09em; padding: .3rem .45rem; border: 2px solid transparent;
+}
+.masthead nav a:hover { color: var(--gold); border-color: var(--gold); }
+.masthead .btn { font-size: .78rem; padding: .3rem .7rem; }
+
+/* ---------- buttons ---------- */
+.btn {
+  display: inline-block;
+  font-family: var(--display); text-transform: uppercase;
+  font-size: 1rem; letter-spacing: .05em; text-decoration: none;
+  background: var(--red); color: #fff;
+  border: 3px solid var(--ink);
+  box-shadow: 4px 4px 0 var(--ink);
+  padding: .45rem 1rem;
+}
+.btn:hover { transform: translate(-2px,-2px); box-shadow: 6px 6px 0 var(--ink); color: #fff; }
+.btn:active { transform: translate(2px,2px); box-shadow: 1px 1px 0 var(--ink); }
+.btn.gold { background: var(--gold); color: #000; }
+.btn.gold:hover { color: #000; }
+.btn.blue { background: var(--blue); }
+
+/* ---------- kirby caption boxes ---------- */
+.caption {
+  display: inline-block;
+  background: var(--gold); color: #000;
+  border: 3px solid var(--ink);
+  box-shadow: 5px 5px 0 var(--ink);
+  padding: .5rem 1rem;
+  font-weight: 800; text-transform: uppercase; letter-spacing: .05em;
+  font-size: clamp(.78rem, 2.4vw, .95rem);
+  transform: rotate(-1.4deg);
+  max-width: 100%;
+}
+.caption.right { transform: rotate(1.2deg); }
+
+/* ---------- panels (inked comic panels on newsprint) ---------- */
+.panel {
+  background-color: var(--cream);
+  background-image: radial-gradient(rgba(0,0,0,.10) 1.3px, transparent 1.4px);
+  background-size: 11px 11px;
+  border: 4px solid var(--ink);
+  box-shadow: 10px 10px 0 var(--ink);
+  padding: clamp(1rem, 3.2vw, 1.8rem);
+}
+.panel > :first-child { margin-top: 0; }
+.panel > :last-child { margin-bottom: 0; }
+.panel h3 { font-family: var(--display); text-transform: uppercase; font-size: 1.5rem; margin: 0 0 .6rem; letter-spacing: .03em; }
+
+/* tabbed comic panels for the reconcile page */
+.kpanel {
+  background-color: var(--cream);
+  background-image: radial-gradient(rgba(0,0,0,.10) 1.3px, transparent 1.4px);
+  background-size: 11px 11px;
+  border: 5px solid var(--ink);
+  box-shadow: 10px 10px 0 var(--ink);
+  display: flex; flex-direction: column;
+}
+.kpanel > header {
+  font-family: var(--display); text-transform: uppercase;
+  font-size: clamp(1.3rem, 3.4vw, 1.9rem); letter-spacing: .04em;
+  color: #fff; background: var(--red);
+  border-bottom: 5px solid var(--ink);
+  padding: .45rem .9rem;
+  text-shadow: 2px 2px 0 var(--ink);
+}
+.kpanel > header .ep { float: right; font-size: .62em; opacity: .95; }
+.kpanel .kbody { padding: clamp(.9rem, 2.6vw, 1.3rem); flex: 1; }
+.kpanel .kbody > :first-child { margin-top: 0; }
+.kpanel .kbody > :last-child { margin-bottom: 0; }
+.kpanel.blue  > header { background: var(--blue); }
+.kpanel.goldh > header { background: var(--gold); color: #000; text-shadow: none; }
+.kpanel.mag   > header { background: var(--mag); }
+
+/* ---------- code ---------- */
+.codebox {
+  position: relative;
+  background: var(--space);
+  border: 4px solid var(--ink);
+  box-shadow: 8px 8px 0 var(--ink);
+  margin: 1.1rem 0;
+}
+.codebox pre {
+  margin: 0;
+  padding: 1.05rem 1.2rem;
+  overflow-x: auto;
+  font-family: var(--mono);
+  font-size: .855rem;
+  line-height: 1.7;
+  color: var(--cream);
+}
+.codebox .c   { color: #9aa3c0; }                      /* comments   */
+.codebox .k   { color: var(--gold); font-weight: 700; } /* botu       */
+.codebox .f   { color: var(--cyan); }                   /* flags      */
+.codebox .sec { color: #ff6a5e; font-weight: 700; }     /* [[section]]*/
+.codebox .key { color: var(--gold); }                   /* toml keys  */
+.codebox .s   { color: #7fe3ff; }                       /* strings    */
+.copybtn {
+  position: absolute; top: 8px; right: 8px;
+  font-family: var(--mono); font-size: .62rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .08em;
+  background: var(--gold); color: #000;
+  border: 2px solid var(--ink); box-shadow: 3px 3px 0 var(--ink);
+  padding: .28rem .55rem; cursor: pointer;
+}
+.copybtn:active { transform: translate(2px,2px); box-shadow: 0 0 0 var(--ink); }
+
+code {
+  font-family: var(--mono); font-size: .88em;
+  background: rgba(0,0,0,.08);
+  border: 1.5px solid rgba(0,0,0,.55);
+  padding: .04em .32em;
+}
+.cosmic code { background: rgba(255,255,255,.1); border-color: rgba(243,233,207,.4); }
+
+/* ---------- sections ---------- */
+.section { padding-block: clamp(3rem, 7vw, 5.5rem); position: relative; }
+.section h2 {
+  font-size: clamp(2.3rem, 6.5vw, 4.2rem);
+  margin: .9rem 0 1.4rem;
+  transform: rotate(-1.1deg);
+  color: var(--ink);
+  text-shadow: .09em .09em 0 var(--gold);
+}
+.sec-head { position: relative; z-index: 2; }
+
+.cosmic {
+  background-color: var(--space);
+  background-image:
+    radial-gradient(rgba(243,233,207,.14) 1px, transparent 1.6px),
+    radial-gradient(rgba(243,233,207,.09) 1px, transparent 1.6px);
+  background-size: 90px 90px, 140px 140px;
+  background-position: 0 0, 45px 60px;
+  color: var(--cream);
+  border-top: 6px solid var(--ink);
+  border-bottom: 6px solid var(--ink);
+  overflow: hidden;
+}
+.cosmic h2 { color: var(--gold); text-shadow: .09em .09em 0 var(--red); -webkit-text-stroke: 1.5px var(--ink); paint-order: stroke fill; }
+.cosmic a { color: var(--cyan); }
+.cosmic a:hover { color: var(--gold); }
+
+/* absolutely-positioned krackle decorations in cosmic sections */
+.kdeco { position: absolute; pointer-events: none; z-index: 0; opacity: .9; }
+.section .wrap { position: relative; z-index: 1; }
+
+/* ---------- greeble machine-strip dividers ---------- */
+.greeble {
+  height: 28px;
+  border-block: 4px solid var(--ink);
+  background:
+    radial-gradient(circle at 10px 50%, var(--gold) 4px, transparent 5px),
+    repeating-linear-gradient(90deg, var(--space) 0 20px, var(--red) 20px 26px, var(--space) 26px 46px, var(--blue) 46px 52px, var(--space) 52px 72px);
+  background-size: 24px 100%, auto;
+}
+.greeble.alt {
+  background:
+    repeating-linear-gradient(90deg, var(--gold) 0 14px, var(--space) 14px 34px, var(--mag) 34px 40px, var(--space) 40px 60px);
+}
+
+/* ---------- bursts (starburst badges) ---------- */
+.burst {
+  position: absolute;
+  width: clamp(92px, 16vw, 160px);
+  aspect-ratio: 1;
+  display: grid; place-items: center;
+  filter: drop-shadow(4px 4px 0 var(--ink));
+  z-index: 3;
+}
+.burst svg { width: 100%; height: 100%; grid-area: 1/1; }
+.burst span {
+  grid-area: 1/1;
+  font-family: var(--display); text-transform: uppercase;
+  text-align: center; line-height: .95;
+  font-size: clamp(.72rem, 2vw, 1.05rem);
+  transform: rotate(var(--rot, -7deg));
+  padding-inline: 14%;
+}
+.burst.goldb span { color: #000; }
+.burst.redb  span { color: var(--cream); text-shadow: 1.5px 1.5px 0 var(--ink); }
+.burst.cyanb span { color: #002; }
+
+/* ---------- hero ---------- */
+.hero { padding-block: clamp(2.6rem, 6vw, 4.6rem) 0; text-align: center; }
+.hero h1 {
+  font-size: clamp(3.2rem, 13vw, 8.4rem);
+  margin: 1.1rem 0 .3rem;
+  color: var(--gold);
+  transform: rotate(-2deg);
+  position: relative; z-index: 2;
+}
+.hero h1 .tube { color: var(--cyan); }
+.kicker {
+  font-weight: 800; text-transform: uppercase; letter-spacing: .14em;
+  font-size: clamp(.72rem, 2.4vw, .95rem);
+  color: var(--gold); margin: 0 0 .4rem;
+  /* Lift above the portal (which has a negative top-margin) and ink an outline
+     so the caption stays legible over the bright energy art behind it. */
+  position: relative; z-index: 3;
+  text-shadow: -1.5px -1.5px 0 #000, 1.5px -1.5px 0 #000, -1.5px 1.5px 0 #000,
+    1.5px 1.5px 0 #000, 0 2px 0 #000;
+}
+.kicker code { color: var(--cyan); background: rgba(0,0,0,.55); }
+.portal-wrap { position: relative; margin: -1.2rem auto 0; max-width: 880px; }
+.portal-wrap .portal { display: block; width: 100%; height: auto; }
+.burst.b1 { top: 2%; left: -1%; }
+.burst.b2 { bottom: 8%; right: -1%; }
+.lede {
+  max-width: 62ch; margin: 1.4rem auto .4rem;
+  font-size: clamp(.98rem, 2.6vw, 1.13rem);
+  color: var(--cream);
+}
+.lede strong { color: var(--gold); }
+.hero .codebox { max-width: 780px; margin: 1.4rem auto; text-align: left; }
+.cta { display: flex; flex-wrap: wrap; gap: .9rem 1rem; justify-content: center; padding-bottom: 2.6rem; }
+
+.status-strip {
+  background: var(--gold); color: #000;
+  border-top: 5px solid var(--ink);
+  font-family: var(--display); text-transform: uppercase;
+  letter-spacing: .06em;
+  font-size: clamp(.8rem, 2.6vw, 1.05rem);
+  padding: .5rem clamp(10px, 3vw, 24px);
+  text-align: center;
+}
+
+/* ---------- grids ---------- */
+.grid2 { display: grid; gap: clamp(18px, 3vw, 30px); grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr)); align-items: stretch; }
+.gridloop { display: grid; gap: clamp(20px, 3.4vw, 34px); grid-template-columns: repeat(auto-fit, minmax(min(100%, 430px), 1fr)); align-items: stretch; }
+.gridloop .kpanel:nth-child(odd)  { transform: rotate(-.45deg); }
+.gridloop .kpanel:nth-child(even) { transform: rotate(.45deg); }
+
+/* ---------- chips / phases ---------- */
+.chips { display: flex; flex-wrap: wrap; gap: .55rem; margin: .8rem 0 0; }
+.chip {
+  font-family: var(--mono); font-size: .74rem; font-weight: 700;
+  border: 3px solid var(--ink); box-shadow: 3px 3px 0 var(--ink);
+  padding: .22rem .6rem; text-transform: uppercase; letter-spacing: .04em;
+}
+.chip.ok   { background: var(--blue); color: #fff; }
+.chip.warn { background: var(--gold); color: #000; }
+.chip.fail { background: var(--red);  color: #fff; }
+
+.phases { display: flex; flex-wrap: wrap; gap: .5rem .6rem; align-items: center; margin: 1rem 0 .2rem; }
+.phase {
+  font-family: var(--display); text-transform: uppercase; letter-spacing: .05em;
+  background: var(--blue); color: #fff;
+  border: 3px solid var(--ink); box-shadow: 3px 3px 0 var(--ink);
+  padding: .22rem .65rem; font-size: .95rem;
+}
+.phase:nth-child(4n+3) { background: var(--red); }
+.phase:nth-child(4n+5) { background: var(--mag); }
+.phases .arr { font-weight: 900; font-size: 1.15rem; }
+
+/* ---------- misc ---------- */
+.note-cap {
+  background: var(--cream); border: 4px solid var(--ink); box-shadow: 8px 8px 0 var(--ink);
+  background-image: radial-gradient(rgba(0,0,0,.10) 1.3px, transparent 1.4px);
+  background-size: 11px 11px;
+  color: var(--text);
+  padding: clamp(1rem, 3vw, 1.5rem);
+  margin-top: clamp(20px, 3.4vw, 34px);
+}
+.note-cap .caption { margin-top: -2.4rem; margin-bottom: .7rem; }
+.tilt-l { transform: rotate(-.6deg); }
+.tilt-r { transform: rotate(.6deg); }
+
+.miniportals { display: flex; gap: 1.2rem; justify-content: center; flex-wrap: wrap; margin: 1.4rem 0 .4rem; }
+.miniportals svg { width: clamp(70px, 12vw, 110px); height: auto; filter: drop-shadow(4px 4px 0 var(--ink)); }
+
+footer.cosmic { text-align: center; padding-block: clamp(3rem, 7vw, 5rem); border-bottom: 0; }
+footer .big { font-size: clamp(2.4rem, 8vw, 5rem); color: var(--gold); transform: rotate(-1.6deg); margin-bottom: 1.6rem; }
+footer .links { display: flex; flex-wrap: wrap; gap: .9rem 1.1rem; justify-content: center; margin: 1.2rem 0 1.6rem; }
+footer .credits { font-size: .85rem; color: #cfc6ae; max-width: 60ch; margin: 0 auto; }
+footer .credits strong { color: var(--gold); }
+
+/* ---------- motion (only if welcome) ---------- */
+@media (prefers-reduced-motion: no-preference) {
+  html { scroll-behavior: smooth; }
+  @keyframes portalPulse { from { transform: scale(1); } to { transform: scale(1.025); } }
+  .portal-wrap .portal { animation: portalPulse 5.5s ease-in-out infinite alternate; transform-origin: 50% 52%; }
+  @keyframes burstWiggle { from { rotate: -2.5deg; } to { rotate: 2.5deg; } }
+  .burst { animation: burstWiggle 3.2s ease-in-out infinite alternate; }
+  @keyframes krakTwinkle { from { opacity: .55; } to { opacity: 1; } }
+  .twinkle { animation: krakTwinkle 2.8s ease-in-out infinite alternate; }
+}
+
+@media (max-width: 560px) {
+  .masthead nav a { font-size: .6rem; padding: .22rem .3rem; }
+  .kpanel > header .ep { display: none; }
+  .burst.b1 { top: -3%; }
+  .burst.b2 { bottom: 2%; }
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<!-- ====== shared SVG symbols: krackle, bursts, bolts, sparkles ====== -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <!-- Kirby krackle: a clumpy field of solid energy blobs, dense to sparse -->
+    <symbol id="krak1" viewBox="0 0 240 120">
+      <g fill="currentColor">
+        <circle cx="60" cy="60" r="16"/><circle cx="84" cy="52" r="12"/>
+        <circle cx="44" cy="44" r="10"/><circle cx="104" cy="64" r="9"/>
+        <circle cx="70" cy="84" r="10"/><circle cx="28" cy="60" r="7"/>
+        <circle cx="120" cy="50" r="6"/><circle cx="96" cy="86" r="6"/>
+        <circle cx="52" cy="24" r="5"/><circle cx="132" cy="70" r="5"/>
+        <circle cx="16" cy="40" r="4"/><circle cx="140" cy="86" r="4"/>
+        <circle cx="110" cy="26" r="5"/><circle cx="150" cy="60" r="3"/>
+        <circle cx="160" cy="44" r="2.5"/><circle cx="170" cy="72" r="2"/>
+        <circle cx="8" cy="74" r="3"/><circle cx="24" cy="88" r="2.5"/>
+        <circle cx="36" cy="10" r="2"/><circle cx="80" cy="10" r="3"/>
+        <circle cx="126" cy="14" r="2"/><circle cx="152" cy="20" r="2"/>
+        <circle cx="182" cy="54" r="1.5"/><circle cx="192" cy="66" r="2"/>
+        <circle cx="200" cy="48" r="1.2"/><circle cx="12" cy="20" r="2"/>
+        <circle cx="146" cy="100" r="2"/><circle cx="166" cy="92" r="1.5"/>
+        <circle cx="94" cy="108" r="2"/><circle cx="60" cy="104" r="2.5"/>
+        <circle cx="118" cy="98" r="2"/><circle cx="206" cy="80" r="1.5"/>
+        <circle cx="214" cy="60" r="1"/>
+      </g>
+    </symbol>
+    <symbol id="krak2" viewBox="0 0 120 80">
+      <g fill="currentColor">
+        <circle cx="30" cy="40" r="12"/><circle cx="50" cy="32" r="8"/>
+        <circle cx="18" cy="26" r="6"/><circle cx="44" cy="54" r="6"/>
+        <circle cx="64" cy="44" r="5"/><circle cx="12" cy="52" r="4"/>
+        <circle cx="60" cy="20" r="4"/><circle cx="76" cy="52" r="3"/>
+        <circle cx="84" cy="34" r="3"/><circle cx="26" cy="64" r="3"/>
+        <circle cx="70" cy="66" r="2.5"/><circle cx="92" cy="44" r="2"/>
+        <circle cx="98" cy="58" r="1.5"/><circle cx="6" cy="36" r="2"/>
+        <circle cx="40" cy="12" r="2.5"/><circle cx="88" cy="22" r="1.5"/>
+        <circle cx="104" cy="40" r="1.2"/><circle cx="54" cy="70" r="2"/>
+      </g>
+    </symbol>
+    <!-- 12-spike starburst -->
+    <symbol id="burst" viewBox="0 0 100 100">
+      <polygon fill="currentColor" stroke="#000" stroke-width="2.5"
+        points="100,50 79,57.8 93.3,75 71.2,71.2 75,93.3 57.8,79 50,100 42.2,79 25,93.3 28.8,71.2 6.7,75 21,57.8 0,50 21,42.2 6.7,25 28.8,28.8 25,6.7 42.2,21 50,0 57.8,21 75,6.7 71.2,28.8 93.3,25 79,42.2"/>
+    </symbol>
+    <!-- energy bolt -->
+    <symbol id="bolt" viewBox="0 0 80 110">
+      <path fill="currentColor" stroke="#000" stroke-width="4" stroke-linejoin="round"
+        d="M14 2 L66 2 L44 38 L72 38 L12 106 L30 52 L4 52 Z"/>
+    </symbol>
+    <!-- four-point sparkle -->
+    <symbol id="spark" viewBox="0 0 40 40">
+      <path fill="currentColor" d="M20 0 L24 16 L40 20 L24 24 L20 40 L16 24 L0 20 L16 16 Z"/>
+    </symbol>
+    <!-- a small head-on boom tube, for repeat use -->
+    <symbol id="miniportal" viewBox="0 0 100 100">
+      <circle cx="50" cy="50" r="48" fill="#7a1fa2" stroke="#000" stroke-width="4"/>
+      <circle cx="50" cy="50" r="38" fill="#b5179e" stroke="#000" stroke-width="3"/>
+      <circle cx="50" cy="50" r="29" fill="#0a8bd6" stroke="#000" stroke-width="3"/>
+      <circle cx="50" cy="50" r="21" fill="#22d3ff" stroke="#000" stroke-width="2.5"/>
+      <circle cx="50" cy="50" r="14" fill="#e2231a" stroke="#000" stroke-width="2.5"/>
+      <circle cx="50" cy="50" r="8" fill="#ffcf00" stroke="#000" stroke-width="2"/>
+      <circle cx="50" cy="50" r="3.5" fill="#fff8e7"/>
+    </symbol>
+  </defs>
+</svg>
+
+<!-- ============================== MASTHEAD ============================== -->
+<header class="masthead">
+  <div class="wrap">
+    <a class="logo" href="#top">BOTU<span class="bang">!</span></a>
+    <nav aria-label="Sections">
+      <a href="#install">Install</a>
+      <a href="#bootstrap">Bootstrap</a>
+      <a href="#reconcile">Reconcile</a>
+      <a href="#botufile">Botufile</a>
+      <a href="#git">Git</a>
+      <a href="#portals">Portals</a>
+      <a href="#housekeeping">Housekeeping</a>
+    </nav>
+    <a class="btn gold" href="https://github.com/alxjrvs/botu">Source</a>
+  </div>
+</header>
+
+<main id="main">
+
+<!-- ============================== HERO ============================== -->
+<section class="hero cosmic" id="top">
+  <svg class="kdeco" style="color:#f3e9cf; top:30px; left:-40px; width:260px" viewBox="0 0 240 120" aria-hidden="true"><use href="#krak1"/></svg>
+  <svg class="kdeco twinkle" style="color:#f3e9cf; top:80px; right:-30px; width:200px; transform:rotate(160deg)" viewBox="0 0 240 120" aria-hidden="true"><use href="#krak1"/></svg>
+  <div class="wrap">
+    <p class="caption">In a blaze of sound and light — a portal tears open on your machine!</p>
+    <h1 class="display shout">BOOM<span class="tube">TUBE</span></h1>
+    <p class="kicker">The dotfiles + workspace engine &middot; one binary: <code>botu</code></p>
+
+    <div class="portal-wrap">
+      <div class="burst b1 goldb" style="color:var(--gold); --rot:-8deg">
+        <svg aria-hidden="true"><use href="#burst"/></svg>
+        <span>One<br>Binary!</span>
+      </div>
+      <div class="burst b2 redb" style="color:var(--red); --rot:7deg">
+        <svg aria-hidden="true"><use href="#burst"/></svg>
+        <span>Zero<br>Deps!</span>
+      </div>
+
+      <!-- THE BOOM TUBE — a tunnel of energy receding to a white-hot point -->
+      <svg class="portal" viewBox="0 0 900 620" role="img" aria-label="A Boom Tube: concentric rings of cosmic energy receding to a bright vanishing point, surrounded by Kirby krackle">
+        <!-- radiating speed lines -->
+        <g stroke="#ffcf00" stroke-width="2" opacity=".55">
+          <line x1="450" y1="310" x2="940" y2="310"/>
+          <line x1="450" y1="310" x2="900" y2="470"/>
+          <line x1="450" y1="310" x2="780" y2="590"/>
+          <line x1="450" y1="310" x2="560" y2="620"/>
+          <line x1="450" y1="310" x2="330" y2="615"/>
+          <line x1="450" y1="310" x2="150" y2="560"/>
+          <line x1="450" y1="310" x2="10"  y2="440"/>
+          <line x1="450" y1="310" x2="-20" y2="300"/>
+          <line x1="450" y1="310" x2="30"  y2="160"/>
+          <line x1="450" y1="310" x2="150" y2="50"/>
+          <line x1="450" y1="310" x2="320" y2="-10"/>
+          <line x1="450" y1="310" x2="520" y2="-15"/>
+          <line x1="450" y1="310" x2="700" y2="30"/>
+          <line x1="450" y1="310" x2="860" y2="120"/>
+          <line x1="450" y1="310" x2="920" y2="200"/>
+          <line x1="450" y1="310" x2="880" y2="400"/>
+        </g>
+        <g stroke="#22d3ff" stroke-width="1.5" opacity=".4">
+          <line x1="450" y1="310" x2="820" y2="30"/>
+          <line x1="450" y1="310" x2="60" y2="580"/>
+          <line x1="450" y1="310" x2="905" y2="540"/>
+          <line x1="450" y1="310" x2="-10" y2="90"/>
+        </g>
+
+        <!-- the tube: filled ellipses layered outside-in -->
+        <ellipse cx="450" cy="310" rx="430" ry="270" fill="#7a1fa2" stroke="#000" stroke-width="7"/>
+        <ellipse cx="445" cy="307" rx="364" ry="228" fill="#b5179e" stroke="#000" stroke-width="6"/>
+        <ellipse cx="440" cy="304" rx="306" ry="191" fill="#0b0a12" stroke="#000" stroke-width="6"/>
+        <ellipse cx="436" cy="301" rx="254" ry="158" fill="#0a8bd6" stroke="#000" stroke-width="5"/>
+        <ellipse cx="432" cy="298" rx="208" ry="129" fill="#22d3ff" stroke="#000" stroke-width="5"/>
+        <ellipse cx="428" cy="296" rx="168" ry="104" fill="#0b0a12" stroke="#000" stroke-width="4"/>
+        <ellipse cx="425" cy="294" rx="132" ry="82"  fill="#e2231a" stroke="#000" stroke-width="4"/>
+        <ellipse cx="422" cy="292" rx="102" ry="63"  fill="#ffcf00" stroke="#000" stroke-width="4"/>
+        <ellipse cx="419" cy="290" rx="76"  ry="47"  fill="#0b0a12" stroke="#000" stroke-width="3"/>
+        <ellipse cx="417" cy="288" rx="54"  ry="33"  fill="#e2231a" stroke="#000" stroke-width="3"/>
+        <ellipse cx="415" cy="287" rx="36"  ry="22"  fill="#ffcf00" stroke="#000" stroke-width="2.5"/>
+        <ellipse cx="414" cy="286" rx="20"  ry="12"  fill="#fff8e7" stroke="#000" stroke-width="2"/>
+
+        <!-- krackle spilling over the rim (black over color) -->
+        <g style="color:#000">
+          <use href="#krak1" transform="translate(28,26) scale(1.15)"/>
+          <use href="#krak1" transform="translate(700,90) rotate(24) scale(.95)"/>
+          <use href="#krak1" transform="translate(690,520) rotate(196) scale(1.05)"/>
+          <use href="#krak1" transform="translate(120,545) rotate(168) scale(.9)"/>
+          <use href="#krak2" transform="translate(430,8) scale(1.1)"/>
+          <use href="#krak2" transform="translate(300,555) rotate(-14) scale(1)"/>
+        </g>
+        <!-- cream krackle floating in space (negative energy inverted) -->
+        <g style="color:#f3e9cf" opacity=".85">
+          <use href="#krak2" transform="translate(806,300) scale(.8)"/>
+          <use href="#krak2" transform="translate(6,180) rotate(12) scale(.7)"/>
+        </g>
+
+        <!-- energy bolts -->
+        <use href="#bolt" style="color:#ffcf00" transform="translate(108,84) rotate(-28) scale(1.05)"/>
+        <use href="#bolt" style="color:#22d3ff" transform="translate(768,430) rotate(142) scale(1.15)"/>
+        <use href="#bolt" style="color:#e2231a" transform="translate(206,470) rotate(-160) scale(.8)"/>
+
+        <!-- sparkles -->
+        <g style="color:#fff8e7">
+          <use href="#spark" transform="translate(842,60) scale(.9)"/>
+          <use href="#spark" transform="translate(60,520) scale(.7)"/>
+          <use href="#spark" transform="translate(870,470) scale(.55)"/>
+          <use href="#spark" transform="translate(120,140) scale(.5)"/>
+        </g>
+        <g style="color:#ffcf00">
+          <use href="#spark" transform="translate(770,180) scale(.6)"/>
+          <use href="#spark" transform="translate(210,30) scale(.75)"/>
+        </g>
+      </svg>
+    </div>
+
+    <p class="lede"><strong>BoomTube</strong> is an installable <strong>dotfiles&nbsp;+&nbsp;workspace engine</strong>. Its executable, <code>botu</code>, reconciles your machine from a declarative <code>botufile.toml</code> — apply / verify / fix — rolls back any change, and opens portals to your code workspaces. One self-contained binary, compiled from TypeScript on Bun, with <strong>zero runtime dependencies</strong> on your machine.</p>
+    <p class="lede">Named for Jack Kirby&rsquo;s <strong>Boom&nbsp;Tube</strong> — the Fourth World portal: <code>botu</code> opens a portal to your machine&rsquo;s ideal state, and to your code.</p>
+
+    <div class="codebox">
+      <pre><span class="c"># open the portal:</span>
+curl -fsSL https://raw.githubusercontent.com/alxjrvs/botu/main/install.sh | sh</pre>
+    </div>
+
+    <div class="cta">
+      <a class="btn" href="https://github.com/alxjrvs/botu">Source on GitHub</a>
+      <a class="btn gold" href="https://github.com/alxjrvs/botu/blob/main/SPEC.md">Read the Spec</a>
+      <a class="btn blue" href="#install">Install &darr;</a>
+    </div>
+  </div>
+  <div class="status-strip">Status: early — a TypeScript-on-Bun rewrite of the original bash engine. The saga has just begun!</div>
+</section>
+
+<!-- ============================== INSTALL ============================== -->
+<section class="section" id="install">
+  <div class="wrap">
+    <div class="sec-head">
+      <p class="caption">Meanwhile, on your machine&hellip;</p>
+      <h2 class="display">Install the Engine</h2>
+    </div>
+    <div class="panel tilt-l">
+      <div class="codebox">
+        <pre><span class="c"># curl installer — downloads the binary for your platform, puts botu on PATH</span>
+curl -fsSL https://raw.githubusercontent.com/alxjrvs/botu/main/install.sh | sh
+
+<span class="c"># …or Homebrew (this repo doubles as the tap)</span>
+brew tap alxjrvs/botu https://github.com/alxjrvs/botu
+brew install botu</pre>
+      </div>
+      <p>One self-contained executable — <strong>macOS arm64/x64, Linux x64</strong>. The binary embeds the Bun runtime, so nothing else is required. Override the install prefix with <code>BOTU_PREFIX</code>.</p>
+    </div>
+  </div>
+</section>
+
+<div class="greeble" aria-hidden="true"></div>
+
+<!-- ============================== BOOTSTRAP ============================== -->
+<section class="section" id="bootstrap">
+  <div class="wrap">
+    <div class="sec-head">
+      <p class="caption right">A new world awaits — bring the file!</p>
+      <h2 class="display">Bootstrap a Machine</h2>
+    </div>
+    <div class="panel tilt-r">
+      <div class="codebox">
+        <pre><span class="k">botu</span> init alxjrvs/dotfiles   <span class="c"># clone your remote dotfiles repo and apply it — one-shot bootstrap</span>
+<span class="k">botu</span> apply                   <span class="c"># thereafter: reconcile from the recorded config repo</span></pre>
+      </div>
+      <p><code>init</code>/<code>link</code> take a <strong>remote reference</strong> — <code>owner/repo</code>, <code>github:owner/repo</code>, a git URL, optionally <code>@ref</code> — never an arbitrary local path. botu clones it into a managed cache dir and records a breadcrumb. <code>init</code> clones <em>and</em> applies; <code>link</code> clones and records only.</p>
+      <p style="margin-bottom:.4rem"><strong>The fresh-machine one-liner:</strong></p>
+      <div class="codebox">
+        <pre>curl install.sh | sh &amp;&amp; <span class="k">botu</span> init owner/repo</pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== RECONCILE LOOP ============================== -->
+<section class="section cosmic" id="reconcile">
+  <svg class="kdeco" style="color:#f3e9cf; top:16px; right:-50px; width:280px; transform:rotate(190deg)" viewBox="0 0 240 120" aria-hidden="true"><use href="#krak1"/></svg>
+  <svg class="kdeco twinkle" style="color:#f3e9cf; bottom:10px; left:-60px; width:300px" viewBox="0 0 240 120" aria-hidden="true"><use href="#krak1"/></svg>
+  <div class="wrap">
+    <div class="sec-head">
+      <p class="caption">Four verbs. One loop. No mercy for drift!</p>
+      <h2 class="display">The Reconcile Loop</h2>
+      <p style="max-width:70ch"><code>apply</code> / <code>verify</code> / <code>fix</code> / <code>uninstall</code> are <strong>one verb-parameterized loop</strong> over a resource registry — <strong>siblings, not separate scripts</strong>. Same walk over the same resources, every time; only the verb changes.</p>
+    </div>
+
+    <div class="gridloop">
+      <article class="kpanel">
+        <header>Apply! <span class="ep">panel one</span></header>
+        <div class="kbody">
+          <div class="codebox">
+            <pre><span class="k">botu</span> apply              <span class="c"># make it so: symlink / copy / install / run from botufile.toml</span>
+<span class="k">botu</span> apply <span class="f">--dry-run</span>    <span class="c"># preview every change; touch nothing</span>
+<span class="k">botu</span> apply <span class="f">--skip</span>       <span class="c"># skip conflicting targets instead of overwriting them</span>
+<span class="k">botu</span> apply <span class="f">--commit</span>     <span class="c"># commit local config-repo edits before pulling</span>
+<span class="k">botu</span> apply <span class="f">--resume</span>     <span class="c"># continue an interrupted apply (skips completed steps)</span></pre>
+          </div>
+          <p><strong>MAKE IT SO.</strong> The machine bends to the file.</p>
+        </div>
+      </article>
+
+      <article class="kpanel blue">
+        <header>Verify! <span class="ep">panel two</span></header>
+        <div class="kbody">
+          <div class="codebox">
+            <pre><span class="k">botu</span> verify             <span class="c"># check for drift — exit 0 ok / 2 warn / 1 fail</span>
+<span class="k">botu</span> verify <span class="f">--json</span>      <span class="c"># …as a structured drift report</span></pre>
+          </div>
+          <div class="chips">
+            <span class="chip ok">exit 0 &middot; OK</span>
+            <span class="chip warn">exit 2 &middot; WARN</span>
+            <span class="chip fail">exit 1 &middot; FAIL</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="kpanel goldh">
+        <header>Fix! <span class="ep">panel three</span></header>
+        <div class="kbody">
+          <div class="codebox">
+            <pre><span class="k">botu</span> fix                <span class="c"># repair drift (apply, overwriting conflicts)</span></pre>
+          </div>
+          <p>Drift detected? Drift <strong>destroyed</strong>. <code>fix</code> is the loop again, with the gloves off.</p>
+        </div>
+      </article>
+
+      <article class="kpanel mag">
+        <header>Rollback! <span class="ep">panel four</span></header>
+        <div class="kbody">
+          <div class="codebox">
+            <pre><span class="k">botu</span> rollback           <span class="c"># undo the most recent apply (restores backed-up files)</span></pre>
+          </div>
+          <p>Every mutating run <strong>journals</strong> its changes and backs up displaced files. Rollback replays the journal — the portal works in both directions.</p>
+        </div>
+      </article>
+    </div>
+
+    <div class="note-cap tilt-l">
+      <p class="caption right">Editor&rsquo;s note!</p>
+      <p><code>apply</code>/<code>fix</code> sync the config repo against its remote first (<code>pull --rebase --autostash</code>, so local edits ride along and land back on top). <code>verify</code> reports <em>&ldquo;N commits behind&rdquo;</em> as drift — plus separate warnings for uncommitted or unpushed local changes — without touching the working tree. A conflicting (non-botu-owned) file at a link destination is <strong>overwritten by default</strong>; pass <code>--skip</code> to leave it alone.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== BOTUFILE ============================== -->
+<section class="section" id="botufile">
+  <div class="wrap">
+    <div class="sec-head">
+      <p class="caption">One file to declare it all — and it pings!</p>
+      <h2 class="display">The botufile.toml</h2>
+    </div>
+    <div class="panel">
+      <div class="codebox">
+        <pre><span class="sec">[[section]]</span>
+<span class="key">name</span> = <span class="s">"Shell + git"</span>
+<span class="key">link</span> = [
+  { <span class="key">src</span> = <span class="s">".zshrc"</span>,     <span class="key">dst</span> = <span class="s">"~/.zshrc"</span> },
+  { <span class="key">src</span> = <span class="s">"ssh/config"</span>, <span class="key">dst</span> = <span class="s">"~/.ssh/config"</span>, <span class="key">mode</span> = <span class="s">"600"</span> },
+]
+<span class="key">glob</span> = [{ <span class="key">pattern</span> = <span class="s">"zsh/[0-9]*.zsh"</span>, <span class="key">into</span> = <span class="s">"~/.config/zsh/"</span> }]
+
+<span class="sec">[[section]]</span>
+<span class="key">name</span> = <span class="s">"Packages"</span>
+<span class="key">brewfile</span> = <span class="s">"Brewfile"</span>
+<span class="key">mise</span> = true
+
+<span class="sec">[[section]]</span>
+<span class="key">name</span> = <span class="s">"macOS only"</span>
+<span class="key">when</span> = { <span class="key">os</span> = <span class="s">"darwin"</span> }          <span class="c"># gate by os / host / profile</span>
+<span class="key">run</span>  = [{ <span class="key">on</span> = <span class="s">"apply"</span>, <span class="key">cmd</span> = <span class="s">"defaults write com.apple.dock autohide -bool true"</span> }]
+
+<span class="sec">[[section]]</span>
+<span class="key">name</span> = <span class="s">"Secrets"</span>
+<span class="key">hook</span> = [{ <span class="key">name</span> = <span class="s">"op-agent"</span>, <span class="key">with</span> = { <span class="key">vault</span> = <span class="s">"claude-agent"</span> } }]   <span class="c"># → hooks/op-agent.ts</span></pre>
+      </div>
+
+      <p><strong>Sections run in phase order:</strong></p>
+      <div class="phases" role="list" aria-label="Phase order">
+        <span class="phase" role="listitem">link</span><span class="arr" aria-hidden="true">&rarr;</span>
+        <span class="phase" role="listitem">copy</span><span class="arr" aria-hidden="true">&rarr;</span>
+        <span class="phase" role="listitem">glob</span><span class="arr" aria-hidden="true">&rarr;</span>
+        <span class="phase" role="listitem">packages</span><span class="arr" aria-hidden="true">&rarr;</span>
+        <span class="phase" role="listitem">run</span><span class="arr" aria-hidden="true">&rarr;</span>
+        <span class="phase" role="listitem">hook</span>
+      </div>
+      <p>Imperative escapes are <code>run</code> steps (a shell command) or a <strong>hook</strong> — a <code>hooks/&lt;name&gt;.ts</code> module exporting <code>apply</code>/<code>verify</code>/<code>fix</code> that receives a typed <code>HookApi</code> — the extension point for anything the declarative resources can&rsquo;t express. Multi-machine setups gate sections with <code>when</code>, or layer overlay files (<code>botufile.&lt;os|host|profile&gt;.toml</code>).</p>
+    </div>
+  </div>
+</section>
+
+<div class="greeble alt" aria-hidden="true"></div>
+
+<!-- ============================== CONFIG-REPO GIT ============================== -->
+<section class="section" id="git">
+  <div class="wrap">
+    <div class="sec-head">
+      <p class="caption right">The repo remembers!</p>
+      <h2 class="display">Config-Repo Git, Without Leaving botu</h2>
+    </div>
+    <div class="panel tilt-l">
+      <div class="codebox">
+        <pre><span class="k">botu</span> commit             <span class="c"># commit local changes in the config repo</span>
+<span class="k">botu</span> push               <span class="c"># push the config repo's local commits upstream</span>
+<span class="k">botu</span> reset              <span class="c"># discard local changes, reset to origin</span>
+<span class="k">botu</span> reset <span class="f">--force</span>      <span class="c"># …including commits no remote has (refused otherwise)</span></pre>
+      </div>
+      <p>Your dotfiles repo is the source of truth — botu speaks git for it so you never have to <code>cd</code> into the cache dir yourself.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== CODE PORTALS ============================== -->
+<section class="section cosmic" id="portals">
+  <svg class="kdeco" style="color:#f3e9cf; top:24px; left:-40px; width:240px; transform:rotate(-10deg)" viewBox="0 0 240 120" aria-hidden="true"><use href="#krak1"/></svg>
+  <svg class="kdeco twinkle" style="color:#f3e9cf; bottom:20px; right:-40px; width:220px; transform:rotate(200deg)" viewBox="0 0 240 120" aria-hidden="true"><use href="#krak1"/></svg>
+  <div class="wrap">
+    <div class="sec-head">
+      <p class="caption">Portals within portals!</p>
+      <h2 class="display">Code Portals</h2>
+      <p style="max-width:70ch"><code>botu code</code> opens portals to the repos under your code dir (default <code>~/Code</code>).</p>
+    </div>
+
+    <div class="miniportals" aria-hidden="true">
+      <svg viewBox="0 0 100 100"><use href="#miniportal"/></svg>
+      <svg viewBox="0 0 100 100" style="transform:scale(.85) rotate(8deg)"><use href="#miniportal"/></svg>
+      <svg viewBox="0 0 100 100" style="transform:scale(.7) rotate(-10deg)"><use href="#miniportal"/></svg>
+    </div>
+
+    <div class="kpanel tilt-r" style="max-width:860px; margin-inline:auto">
+      <header>Every repo, one step through the tube</header>
+      <div class="kbody">
+        <div class="codebox">
+          <pre><span class="k">botu</span> code init ~/Code    <span class="c"># record your code dir</span>
+<span class="k">botu</span> code claude         <span class="c"># symlink every repo into one dir, open `claude agents` there</span>
+<span class="k">botu</span> code cmux           <span class="c"># one cmux workspace per repo</span></pre>
+        </div>
+        <p><code>code claude</code> flattens every repo into a <strong>symlink farm</strong> so each is <code>@</code>-taggable for agent dispatch even with no running agents; <code>code cmux</code> opens one workspace per repo. Both honor <code>--dry-run</code> and only spawn the backend tool when it&rsquo;s present.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== HOUSEKEEPING ============================== -->
+<section class="section" id="housekeeping">
+  <div class="wrap">
+    <div class="sec-head">
+      <p class="caption">Even gods do chores.</p>
+      <h2 class="display">Housekeeping</h2>
+    </div>
+    <div class="panel tilt-r">
+      <div class="codebox">
+        <pre><span class="k">botu</span> validate           <span class="c"># parse + schema-check the botufile; change nothing</span>
+<span class="k">botu</span> doctor             <span class="c"># check botu's own preconditions (tools, keychain, state)</span>
+<span class="k">botu</span> where config|code|engine   <span class="c"># resolve where botu keeps things</span>
+<span class="k">botu</span> upgrade            <span class="c"># upgrade the botu binary itself</span>
+<span class="k">botu</span> completions bash|zsh|fish  <span class="c"># shell completions</span>
+<span class="k">botu</span> man                <span class="c"># the man page</span></pre>
+      </div>
+      <p>The maintenance bay: check the file, check the engine, find where everything lives, keep the binary fresh.</p>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<!-- ============================== FOOTER ============================== -->
+<footer class="cosmic section">
+  <svg class="kdeco" style="color:#f3e9cf; top:10px; left:-50px; width:260px" viewBox="0 0 240 120" aria-hidden="true"><use href="#krak1"/></svg>
+  <svg class="kdeco twinkle" style="color:#f3e9cf; bottom:0; right:-50px; width:260px; transform:rotate(180deg)" viewBox="0 0 240 120" aria-hidden="true"><use href="#krak1"/></svg>
+  <div class="wrap">
+    <p class="display big shout">The Portal Is Open.</p>
+    <div class="links">
+      <a class="btn" href="https://github.com/alxjrvs/botu">GitHub &middot; alxjrvs/botu</a>
+      <a class="btn gold" href="https://github.com/alxjrvs/botu/blob/main/SPEC.md">SPEC.md — the design of record</a>
+    </div>
+    <p class="credits">Built with <strong>TypeScript on Bun</strong> &middot; @stricli/core &middot; valibot &middot; smol-toml.</p>
+    <p class="credits">Named for Jack Kirby&rsquo;s <strong>Boom Tube</strong> — the Fourth World teleportation portal (<em>New Gods</em>, 1971). Drawn in his honor: krackle, Ben-Day dots, and all.</p>
+  </div>
+</footer>
+
+<script>
+/* Progressive enhancement only: copy-to-clipboard on every code panel.
+   The page is fully functional with JS disabled. */
+(function () {
+  if (!navigator.clipboard) return;
+  document.querySelectorAll('.codebox').forEach(function (box) {
+    var pre = box.querySelector('pre');
+    if (!pre) return;
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'copybtn';
+    btn.textContent = 'Copy';
+    btn.setAttribute('aria-label', 'Copy code to clipboard');
+    btn.addEventListener('click', function () {
+      navigator.clipboard.writeText(pre.textContent.trim()).then(function () {
+        btn.textContent = 'ZAKK!';
+        setTimeout(function () { btn.textContent = 'Copy'; }, 1400);
+      });
+    });
+    box.appendChild(btn);
+  });
+})();
+</script>
+</body>
+</html>

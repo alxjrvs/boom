@@ -1,0 +1,38 @@
+name: pages
+
+# Deploy the self-contained docs site (site/index.html) to GitHub Pages. The site
+# is static and dependency-free — matching botu's own ethos — so there is no build
+# step: we upload site/ verbatim and let deploy-pages publish it. Enable Pages with
+# "GitHub Actions" as the source (Settings → Pages, or the Pages API build_type=workflow)
+# for this to have somewhere to publish to.
+on:
+  push:
+    branches: [main]
+    paths: ["site/**", ".github/workflows/pages.yml"]
+  workflow_dispatch: # manual re-publish
+
+# Least privilege for the deploy: read the repo, mint the Pages OIDC token, write Pages.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One in-flight Pages deploy at a time; don't cancel a running publish mid-flight.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4
