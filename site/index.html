@@ -85,9 +85,8 @@
       <a href="guide.html">Guide</a>
       <a href="spec.html">Spec</a>
       <a href="migration.html">Migrate</a>
-      <a href="retrospective.html">History</a>
     </nav>
-    <a class="btn gold" href="https://github.com/alxjrvs/botu">Source</a>
+    <a class="btn gold" href="https://github.com/alxjrvs/botu">GitHub</a>
   </div>
 </header>
 
@@ -95,20 +94,20 @@
 
 <!-- ============================== HERO ============================== -->
 <section class="hero cosmic" id="top">
-  <svg class="kdeco" style="color:#f3e9cf; top:30px; left:-40px; width:260px" viewBox="0 0 240 120" aria-hidden="true"><use href="#krak1"/></svg>
-  <svg class="kdeco twinkle" style="color:#f3e9cf; top:80px; right:-30px; width:200px; transform:rotate(160deg)" viewBox="0 0 240 120" aria-hidden="true"><use href="#krak1"/></svg>
-  <div class="wrap">
-    <p class="caption">In a blaze of sound and light — a portal opens on your machine!</p>
-    <h1 class="display shout">BOOM<span class="tube">TUBE</span></h1>
-    <p class="kicker">The dotfiles + workspace engine &middot; one binary: <code>botu</code></p>
-  </div>
-
-  <!-- THE BOOM TUBE — full-bleed. Rings recede to a white-hot point; krackle,
-       bolts and sparkles spill over the rim. Each decorative <use> carries its
+  <!-- Full-screen stage: the portal is drawn WHOLE (meet — never hard-cropped) and
+       fills the viewport; the section's cosmic star-field shows through the letterbox
+       margins, dressed with floating krackle and sparkles. A Kirby caption card carries
+       the title over the art. Each decorative <use> in the portal below carries its
        symbol's native width/height so it renders at the authored size instead of
-       stretching to fill the 900×620 host viewport. -->
-  <div class="portal-wrap">
-    <svg class="portal" viewBox="0 0 900 620" preserveAspectRatio="xMidYMid slice" role="img" aria-label="A Boom Tube: concentric rings of cosmic energy receding to a bright vanishing point, surrounded by Kirby krackle">
+       stretching to fill the 900×620 host. -->
+  <div class="hero-stage">
+    <svg class="kdeco" style="color:#f3e9cf; top:7%; left:1%; width:clamp(140px,15vw,240px)" viewBox="0 0 240 120" aria-hidden="true"><use href="#krak1"/></svg>
+    <svg class="kdeco twinkle" style="color:#f3e9cf; bottom:9%; right:1%; width:clamp(150px,16vw,260px); transform:rotate(180deg)" viewBox="0 0 240 120" aria-hidden="true"><use href="#krak1"/></svg>
+    <svg class="hero-deco twinkle" style="color:#ffcf00; top:13%; right:11%; width:46px" viewBox="0 0 40 40" aria-hidden="true"><use href="#spark"/></svg>
+    <svg class="hero-deco" style="color:#fff8e7; bottom:17%; left:9%; width:34px" viewBox="0 0 40 40" aria-hidden="true"><use href="#spark"/></svg>
+    <svg class="hero-deco twinkle" style="color:#22d3ff; top:22%; left:13%; width:30px" viewBox="0 0 40 40" aria-hidden="true"><use href="#spark"/></svg>
+
+    <svg class="portal" viewBox="0 0 900 620" preserveAspectRatio="xMidYMid meet" role="img" aria-label="A Boom Tube: concentric rings of cosmic energy receding to a bright vanishing point, surrounded by Kirby krackle">
       <!-- radiating speed lines -->
       <g stroke="#ffcf00" stroke-width="2" opacity=".55">
         <line x1="450" y1="310" x2="940" y2="310"/>
@@ -182,8 +181,7 @@
       </g>
     </svg>
 
-    <!-- centered content-column overlay so the badges hang off the column edges,
-         not the full-bleed viewport corners -->
+    <!-- starburst badges, hung off a centered column over the portal -->
     <div class="portal-frame">
       <div class="burst b1 goldb" style="color:var(--gold); --rot:-8deg">
         <svg aria-hidden="true"><use href="#burst"/></svg>
@@ -194,15 +192,17 @@
         <span>Zero<br>Deps!</span>
       </div>
     </div>
-  </div>
 
-  <div class="wrap">
-    <p class="lede"><strong>BoomTube</strong> is a <strong>dotfiles&nbsp;+&nbsp;workspace engine</strong> in one binary: <code>botu</code>. It reconciles your machine from a declarative <code>botufile.toml</code> — apply, verify, fix, roll&nbsp;back — and opens portals to your code. Compiled from TypeScript on Bun, with <strong>zero runtime dependencies</strong>.</p>
-
-    <div class="cta">
-      <a class="btn gold" href="#quickstart">Quick Start &darr;</a>
-      <a class="btn blue" href="guide.html">Read the Guide</a>
-      <a class="btn" href="https://github.com/alxjrvs/botu">Source on GitHub</a>
+    <!-- title callout: the "Boom Tube" logotype + subtitle live over the art, in a
+         bold Kirby caption card so the text stays legible against the energy field -->
+    <div class="hero-card">
+      <p class="caption">In a blaze of sound and light — a portal tears open!</p>
+      <h1 class="display shout">BOOM<span class="tube">TUBE</span></h1>
+      <p class="kicker">The dotfiles + workspace engine &middot; one binary: <code>botu</code></p>
+      <div class="cta">
+        <a class="btn gold" href="#quickstart">Quick Start &darr;</a>
+        <a class="btn blue" href="guide.html">Read the Guide</a>
+      </div>
     </div>
   </div>
   <div class="status-strip">Status: early — a TypeScript-on-Bun rewrite of the original bash engine. The saga has just begun!</div>
@@ -213,9 +213,11 @@
   <svg class="kdeco" style="color:#f3e9cf; top:16px; right:-50px; width:260px; transform:rotate(190deg)" viewBox="0 0 240 120" aria-hidden="true"><use href="#krak1"/></svg>
   <div class="wrap">
     <div class="sec-head">
-      <p class="caption">The whole idea, in one panel!</p>
+      <p class="caption">The whole saga, in one panel!</p>
       <h2 class="display">The File Goes In &mdash; The Machine Comes Out</h2>
     </div>
+
+    <p class="lede">One file declares your machine — your shell, your packages, your macOS defaults, your secrets. <code>botu</code> makes reality match it, and can prove it.</p>
 
     <div class="concept">
       <div class="cnode repo">
@@ -262,7 +264,7 @@
       </div>
     </div>
 
-    <p class="concept-note lede">Point <code>botu</code> at your repo and step through: <strong>apply</strong> makes the machine match the file, <strong>verify</strong> proves it, <strong>fix</strong> repairs drift — and <strong>rollback</strong> walks it all back. The portal works in both directions.</p>
+    <p class="concept-note lede">Point <code>botu</code> at your repo and step through: <strong>apply</strong> makes the machine match the file, <strong>verify</strong> proves it, <strong>fix</strong> repairs drift — and <strong>rollback</strong> walks it all back, every journaled step retraced.</p>
   </div>
 </section>
 
@@ -272,7 +274,7 @@
 <section class="section" id="quickstart">
   <div class="wrap">
     <div class="sec-head">
-      <p class="caption">From bare metal to home turf — three panels!</p>
+      <p class="caption">From bare metal to homeworld — three panels!</p>
       <h2 class="display">Quick Start</h2>
     </div>
 
@@ -306,7 +308,7 @@ curl -fsSL https://raw.githubusercontent.com/alxjrvs/botu/main/install.sh | sh</
             <pre tabindex="0" role="region" aria-label="Keep the machine in sync"><span class="k">botu</span> apply    <span class="c"># pull the repo, reconcile</span>
 <span class="k">botu</span> verify   <span class="c"># hunt for drift</span></pre>
           </div>
-          <p>The repo is the source of truth. <code>apply</code> pulls and reconciles; <code>verify</code> tattles (exit 0/2/1); <code>fix</code> takes the gloves off. <code>apply</code> overwrites conflicting files by default — pass <code>--skip</code> to spare them.</p>
+          <p>The repo is the source of truth. <code>verify</code> reports drift as exit 0 / 2 / 1 — ok / warn / fail; <code>fix</code> repairs it. <code>apply</code> overwrites conflicting files by default — pass <code>--skip</code> to spare them.</p>
         </div>
       </article>
     </div>
@@ -326,7 +328,7 @@ curl -fsSL https://raw.githubusercontent.com/alxjrvs/botu/main/install.sh | sh</
     <div class="cards">
       <a class="card" href="guide.html#reconcile">
         <h3>The Reconcile Loop</h3>
-        <p><code>apply</code> / <code>verify</code> / <code>fix</code> — one loop over your resources, plus <code>rollback</code>.</p>
+        <p><code>apply</code> / <code>verify</code> / <code>fix</code> — one loop over every resource. And <code>rollback</code>, for the way back.</p>
         <span class="go">Open &rarr;</span>
       </a>
       <a class="card" href="guide.html#botufile">
@@ -346,7 +348,7 @@ curl -fsSL https://raw.githubusercontent.com/alxjrvs/botu/main/install.sh | sh</
       </a>
       <a class="card" href="guide.html#housekeeping">
         <h3>Housekeeping</h3>
-        <p><code>validate</code>, <code>doctor</code>, <code>upgrade</code>, <code>completions</code>, <code>man</code>.</p>
+        <p><code>validate</code>, <code>doctor</code>, <code>where</code>, <code>upgrade</code>, <code>completions</code>, <code>man</code>.</p>
         <span class="go">Open &rarr;</span>
       </a>
       <a class="card" href="guide.html">

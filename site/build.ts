@@ -83,9 +83,8 @@ const masthead = (active: string): string => `<header class="masthead">
       ${navItem("guide.html", "guide", "Guide", active)}
       ${navItem("spec.html", "spec", "Spec", active)}
       ${navItem("migration.html", "migration", "Migrate", active)}
-      ${navItem("retrospective.html", "retrospective", "History", active)}
     </nav>
-    <a class="btn gold" href="https://github.com/alxjrvs/botu">Source</a>
+    <a class="btn gold" href="https://github.com/alxjrvs/botu">GitHub</a>
   </div>
 </header>`;
 

@@ -305,50 +305,62 @@ code {
 .burst.redb  span { color: var(--cream); text-shadow: -1.5px -1.5px 0 var(--ink), 1.5px -1.5px 0 var(--ink), -1.5px 1.5px 0 var(--ink), 1.5px 1.5px 0 var(--ink); }
 .burst.cyanb span { color: #002; }
 
-/* ---------- hero ---------- */
-/* position:relative so the absolutely-positioned .kdeco krackles resolve against the
-   hero (and get clipped by .cosmic's overflow:hidden) instead of escaping onto the
-   masthead. The hero isn't a .section, so it doesn't inherit that positioning. */
-.hero { position: relative; padding-block: clamp(2.6rem, 6vw, 4.6rem) 0; text-align: center; }
-.hero h1 {
-  font-size: clamp(3.2rem, 13vw, 8.4rem);
-  margin: 1.1rem 0 .3rem;
-  color: var(--gold);
-  transform: rotate(-2deg);
-  position: relative; z-index: 2;
+/* ---------- hero (full-screen portal stage + title callout) ---------- */
+.hero { position: relative; text-align: center; }
+
+/* The stage fills the viewport. The portal is drawn WHOLE (meet — never sliced), so
+   the section's cosmic star-field shows through the letterbox margins instead of the
+   art being hard-cropped at any aspect ratio. */
+.hero-stage {
+  position: relative;
+  width: 100vw; margin-inline: calc(50% - 50vw);
+  min-height: 100vh; min-height: 100svh;
+  display: grid; place-items: center;
+  overflow: hidden;
+  padding: clamp(4.5rem, 12vh, 8rem) clamp(14px, 4vw, 34px);
 }
+.hero-stage .portal { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.hero h1 { color: var(--gold); transform: rotate(-2deg); }
 .hero h1 .tube { color: var(--cyan); }
+
+/* sparkles floating in the cosmic margins around the portal */
+.hero-deco { position: absolute; pointer-events: none; }
+
+/* the title callout — a bold Kirby caption card over the portal. Kept mostly opaque so
+   the gold/cyan title stays high-contrast no matter what energy is behind it. */
+.hero-card {
+  position: relative; z-index: 4;
+  max-width: min(92vw, 600px);
+  padding: clamp(1.2rem, 3.5vw, 2.3rem) clamp(1.3rem, 4vw, 2.6rem);
+  background: rgba(11, 10, 18, .86);
+  border: 5px solid var(--ink);
+  box-shadow: 12px 12px 0 var(--ink);
+  -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
+}
+.hero-card .caption { transform: rotate(-1.4deg); margin-bottom: .2rem; }
+.hero-card h1 { font-size: clamp(2.8rem, 10vw, 5.4rem); margin: .3rem 0 .5rem; }
+.hero-card .cta { display: flex; flex-wrap: wrap; gap: .7rem .9rem; justify-content: center; margin-top: 1.3rem; }
+
 .kicker {
   font-weight: 800; text-transform: uppercase; letter-spacing: .14em;
-  font-size: clamp(.72rem, 2.4vw, .95rem);
-  color: var(--gold); margin: 0 0 .4rem;
-  /* Lift above the portal (which has a negative top-margin) and ink an outline
-     so the caption stays legible over the bright energy art behind it. */
-  position: relative; z-index: 3;
-  text-shadow: -1.5px -1.5px 0 #000, 1.5px -1.5px 0 #000, -1.5px 1.5px 0 #000,
-    1.5px 1.5px 0 #000, 0 2px 0 #000;
+  font-size: clamp(.72rem, 2.4vw, .98rem);
+  color: var(--gold); margin: 0;
 }
 .kicker code { color: var(--cyan); background: rgba(0,0,0,.55); }
-/* Full-bleed portal: break out of .wrap to the full viewport width (html/body already
-   clip overflow-x). Cap the height and let the art crop (slice) rather than balloon to
-   a 992px-tall band on wide screens; the outer purple ring bleeding off the edges over
-   the shared cosmic star-field reads as intentional. */
-.portal-wrap { position: relative; width: 100vw; max-width: none; margin: -1rem 0 0; margin-inline: calc(50% - 50vw); }
-.portal-wrap .portal { display: block; width: 100%; height: clamp(320px, 44vw, 620px); }
-/* A centered content-column overlay so the starburst badges hang off the *column*
-   edges (overlapping the art like stickers) instead of flying to the viewport corners
-   when the art goes full-bleed. */
-.portal-frame { position: absolute; inset: 0; max-width: 1040px; margin-inline: auto; pointer-events: none; }
-.burst.b1 { top: 4%; left: 0; }
-.burst.b2 { bottom: 6%; right: 0; }
+
+/* a centered content-column so the starburst badges hang near the portal's edges,
+   not flung to the viewport corners */
+.portal-frame { position: absolute; inset: 0; max-width: min(94vw, 1000px); margin: auto; pointer-events: none; z-index: 3; }
+.burst.b1 { top: 6%; left: 0; }
+.burst.b2 { bottom: 8%; right: 0; }
+
+/* long-form lede (concept note, guide intro) */
 .lede {
   max-width: 62ch; margin: 1.4rem auto .4rem;
   font-size: clamp(.98rem, 2.6vw, 1.13rem);
   color: var(--cream);
 }
 .lede strong { color: var(--gold); }
-.hero .codebox { max-width: 780px; margin: 1.4rem auto; text-align: left; }
-.cta { display: flex; flex-wrap: wrap; gap: .9rem 1rem; justify-content: center; padding-bottom: 2.6rem; }
 
 .status-strip {
   background: var(--gold); color: #000;
@@ -418,7 +430,7 @@ footer .credits strong { color: var(--gold); }
 @media (prefers-reduced-motion: no-preference) {
   html { scroll-behavior: smooth; }
   @keyframes portalPulse { from { transform: scale(1); } to { transform: scale(1.025); } }
-  .portal-wrap .portal { animation: portalPulse 5.5s ease-in-out infinite alternate; transform-origin: 50% 52%; }
+  .hero-stage .portal { animation: portalPulse 5.5s ease-in-out infinite alternate; transform-origin: 50% 50%; }
   @keyframes burstWiggle { from { rotate: -2.5deg; } to { rotate: 2.5deg; } }
   .burst { animation: burstWiggle 3.2s ease-in-out infinite alternate; }
   @keyframes krakTwinkle { from { opacity: .55; } to { opacity: 1; } }
@@ -473,8 +485,11 @@ footer .credits strong { color: var(--gold); }
    break, or a single un-wrappable <code> pushes the whole column past the viewport. */
 .doc { font-size: clamp(1rem, 2.5vw, 1.08rem); line-height: 1.62; color: var(--text); overflow-wrap: anywhere; }
 .doc > :first-child { margin-top: 0; }
-.doc h1, .doc h2, .doc h3, .doc h4 { font-family: var(--display); text-transform: uppercase; letter-spacing: .02em; line-height: 1; }
-.doc h1 { font-size: clamp(2.2rem, 8vw, 3.6rem); margin: .2rem 0 .8rem; color: var(--space); text-shadow: .045em .045em 0 var(--gold); }
+/* Reading-page headings stay flat: no offset drop-shadow (it doubled into a muddy
+   ghost layer, esp. red h2 over a gold shadow) and no rotate. The comic shadow lives
+   only on the landing's display headlines. */
+.doc h1, .doc h2, .doc h3, .doc h4 { font-family: var(--display); text-transform: uppercase; letter-spacing: .02em; line-height: 1; text-shadow: none; transform: none; }
+.doc h1 { font-size: clamp(2.2rem, 8vw, 3.6rem); margin: .2rem 0 .8rem; color: var(--space); }
 .doc h2 { font-size: clamp(1.55rem, 5.5vw, 2.3rem); margin: 2rem 0 .7rem; color: var(--red); border-bottom: 4px solid var(--ink); padding-bottom: .2rem; }
 .doc h3 { font-size: clamp(1.25rem, 4vw, 1.5rem); margin: 1.5rem 0 .5rem; color: var(--purp); }
 .doc h4 { font-size: 1.05rem; margin: 1.2rem 0 .4rem; color: var(--space); letter-spacing: .06em; }
