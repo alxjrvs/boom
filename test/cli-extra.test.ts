@@ -1,9 +1,11 @@
 // Coverage for the commands added alongside the watchtower removal: completions, man,
 // the shared command catalog, and the read-only doctor / validate engines.
 import { expect, test } from "bun:test";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { run } from "@stricli/core";
+import { app } from "../src/cli.ts";
 import { COMMAND_NAMES, COMMANDS } from "../src/commands/catalog.ts";
 import { completionScript } from "../src/commands/completions.ts";
 import { manPage } from "../src/commands/man.ts";
@@ -78,6 +80,15 @@ test("skill doc is a SKILL.md with frontmatter naming every command", () => {
   expect(s).toContain("--dry-run");
   expect(s).toContain("--json");
   expect(s).toContain("source reset --force");
+});
+
+test("skill --install writes SKILL.md under the Claude config dir", async () => {
+  const cfg = await base(); // stand in for ~/.claude via CLAUDE_CONFIG_DIR
+  const { ctx, out } = ctxFor({ CLAUDE_CONFIG_DIR: cfg, NO_COLOR: "1" }, cfg);
+  await run(app, ["skill", "--install"], ctx);
+  const file = join(cfg, "skills", "botu", "SKILL.md");
+  expect(await readFile(file, "utf8")).toStartWith("---\nname: botu\n");
+  expect(out()).toContain(`installed skill → ${file}`);
 });
 
 // ---- validate ----------------------------------------------------------------

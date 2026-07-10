@@ -1,11 +1,20 @@
-// `botu skill` — emit a Claude Code SKILL.md to stdout so an agent can drive botu
-// correctly. Install:  botu skill > ~/.claude/skills/botu/SKILL.md. Like `botu man` and
-// `botu completions`, the command reference is generated from the catalog so it can never
-// document a command that doesn't exist; the guidance around it is hand-written.
+// `botu skill` — emit a Claude Code SKILL.md so an agent can drive botu correctly. Prints
+// to stdout by default; `--install` writes it to <claude-config>/skills/botu/SKILL.md.
+// Like `botu man` and `botu completions`, the command reference is generated from the
+// catalog so it can never document a command that doesn't exist; the guidance is hand-written.
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { buildCommand } from "@stricli/core";
 import type { BotuContext } from "../context.ts";
 import { VERSION } from "../lib/version.ts";
 import { COMMANDS } from "./catalog.ts";
+
+// Where Claude Code keeps user skills: $CLAUDE_CONFIG_DIR (if the user relocated ~/.claude),
+// else ~/.claude. Returns undefined only when neither HOME nor CLAUDE_CONFIG_DIR is set.
+function skillInstallPath(env: Record<string, string | undefined>): string | undefined {
+  const configDir = env.CLAUDE_CONFIG_DIR ?? (env.HOME ? join(env.HOME, ".claude") : undefined);
+  return configDir ? join(configDir, "skills", "botu", "SKILL.md") : undefined;
+}
 
 export function skillDoc(version: string): string {
   const commands = COMMANDS.map((c) => `- \`botu ${c.name}\` — ${c.brief}`).join("\n");
@@ -61,10 +70,33 @@ botu source set owner/repo --no-apply   # …or clone + record only
 `;
 }
 
-export const skillCommand = buildCommand<Record<never, never>, [], BotuContext>({
+export const skillCommand = buildCommand<{ install?: boolean }, [], BotuContext>({
   docs: { brief: "Emit a Claude Code SKILL.md for driving botu (agentic use)" },
-  parameters: {},
-  func() {
-    this.process.stdout.write(skillDoc(VERSION));
+  parameters: {
+    flags: {
+      install: {
+        kind: "boolean",
+        optional: true,
+        brief: "Write it to <claude-config>/skills/botu/SKILL.md instead of stdout",
+      },
+    },
+  },
+  async func(flags) {
+    const doc = skillDoc(VERSION);
+    if (!flags.install) {
+      this.process.stdout.write(doc);
+      return;
+    }
+    const file = skillInstallPath(this.env);
+    if (!file) {
+      this.process.stderr.write(
+        "botu: can't resolve the Claude config dir — set HOME or CLAUDE_CONFIG_DIR\n",
+      );
+      this.process.exitCode = 1;
+      return;
+    }
+    await mkdir(join(file, ".."), { recursive: true });
+    await writeFile(file, doc);
+    this.process.stdout.write(`botu: installed skill → ${file}\n`);
   },
 });
