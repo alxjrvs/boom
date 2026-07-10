@@ -1,10 +1,11 @@
 # BoomTube — design spec
 
-**BoomTube** is an **installable dotfiles + workspace engine**: a single
-self-contained binary (executable: **`botu`**), compiled from **TypeScript on
-Bun**, that reconciles a machine from a declarative `botufile.toml` and opens
-portals to code workspaces. Named for Kirby's **Boom Tube** — it opens portals to
-your machine's ideal state, and to your code.
+**BoomTube** is a **workspace manager**: a single self-contained binary
+(executable: **`botu`**), compiled from **TypeScript on Bun**, that reconciles a
+machine from a declarative `botufile.toml` and opens portals to code workspaces —
+provisioning your workspace fast, then getting out of your way so you can work.
+Named for Kirby's **Boom Tube** — it opens portals to your machine's ideal state,
+and to your code.
 
 It began as a bash prototype (extracted from `alxjrvs/dotFiles`) and was rewritten
 to TypeScript; this document is the design of record for that engine.
