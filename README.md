@@ -1,6 +1,7 @@
 # BoomTube
 
-**BoomTube** is an installable **dotfiles + workspace engine**. Its executable,
+**BoomTube** is a **workspace manager** — it provisions your machine and your
+code workspaces fast, then gets out of your way so you can work. Its executable,
 **`botu`**, reconciles your machine from a declarative `botufile.toml` —
 `apply` / `verify` / `repair` — rolls back any change, and opens portals to your
 code workspaces. One self-contained binary, compiled from **TypeScript on

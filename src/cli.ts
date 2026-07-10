@@ -33,7 +33,9 @@ const routes = buildRouteMap({
     man: manCommand,
     skill: skillCommand,
   },
-  docs: { brief: "botu — a dotfiles + workspace engine. Reconcile your machine from a botufile.toml." },
+  docs: {
+    brief: "botu — a workspace manager. Provision your machine and code workspaces from a botufile.toml.",
+  },
 });
 
 export const app = buildApplication(routes, {

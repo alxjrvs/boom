@@ -1,7 +1,7 @@
 {
   "name": "botu",
   "version": "0.2.1",
-  "description": "BoomTube — an installable dotfiles + workspace engine (executable: botu). apply/verify/fix your machine from a declarative botufile.toml, and open portals to your code workspaces.",
+  "description": "BoomTube — a workspace manager (executable: botu). Provision your machine and code workspaces from a declarative botufile.toml (apply/verify/fix), open portals to your code, and get out of the way so you can work.",
   "type": "module",
   "private": true,
   "bin": {
