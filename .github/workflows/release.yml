@@ -3,11 +3,19 @@ name: release
 # Version-driven continuous release. A push to main that changes package.json cuts a
 # GitHub release for that version — the cross-compiled binary matrix + checksums are
 # attached and the tag is created — unless that version already shipped. So the flow is
-# just: bump the version in a PR, merge, and the binary install.sh / the Formula pull is
-# built here by CI. The release is gated on the same checks ci runs, so a red tree never
+# just: bump the version in a PR, merge, and install.sh / the Homebrew formula are both
+# updated here by CI. The release is gated on the same checks ci runs, so a red tree never
 # ships. Bun compiles every target from one Linux host (job: build); the macOS binaries
 # are then signed + notarized on a real macOS host (job: sign-macos) before the release
-# is assembled and the checksums computed over the *final* binaries (job: release).
+# is assembled and the checksums computed over the *final* binaries (job: release). A
+# final job (formula) writes the shipped version + sha256s into Formula/boom.rb and opens
+# an auto-merging PR — main is protected, so the formula bump can't be pushed directly.
+#
+# Fully-automated formula bumps need a RELEASE_PAT secret (a fine-grained PAT scoped to
+# this repo with contents:write + pull-requests:write). A PR opened by the default
+# GITHUB_TOKEN does NOT trigger the required ci checks, so its auto-merge would stall;
+# a real PAT makes the checks fire and the PR self-merges. Without RELEASE_PAT the job
+# still opens the formula PR — it just waits for a human to merge it.
 #
 # macOS code-signing is opt-in via repo secrets — until they exist, the macOS binaries
 # are ad-hoc signed on the macOS runner (valid for Apple Silicon; Gatekeeper still
@@ -175,3 +183,80 @@ jobs:
           files: |
             dist/boom-*
             dist/SHA256SUMS
+
+  # The repo doubles as its own Homebrew tap, so Formula/boom.rb on main must carry the
+  # shipped version + the sha256 of each released binary. main is protected (no direct
+  # push), so we bump the formula on a branch and open an auto-merging PR. The sha256s
+  # come from the release's own SHA256SUMS — the exact bytes that shipped.
+  formula:
+    needs: [build, release]
+    if: needs.build.outputs.new == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      # Check out with RELEASE_PAT when present: a PR whose branch was pushed by the
+      # default token can't trigger the required ci checks, so it could never auto-merge.
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.RELEASE_PAT || github.token }}
+
+      - name: Fetch the release checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "${{ needs.build.outputs.tag }}" -R "${{ github.repository }}" -p SHA256SUMS -D /tmp
+
+      - name: Write version + sha256s into Formula/boom.rb
+        run: |
+          set -euo pipefail
+          tag="${{ needs.build.outputs.tag }}"; version="${tag#v}"
+          sha() { awk -v f="$1" '$2 == "*"f || $2 == f {print $1}' /tmp/SHA256SUMS; }
+          arm="$(sha boom-bun-darwin-arm64)"
+          intel="$(sha boom-bun-darwin-x64)"
+          linux="$(sha boom-bun-linux-x64)"
+          for v in "$arm" "$intel" "$linux"; do
+            [ -n "$v" ] || { echo "::error::missing sha256 in SHA256SUMS"; exit 1; }
+          done
+          # Rewrite each sha256 line by the arch of the url line just above it, so this
+          # works on the first release (placeholders) and every release after (real shas).
+          awk -v arm="$arm" -v intel="$intel" -v linux="$linux" '
+            /url .*boom-bun-darwin-arm64/ { a = "arm" }
+            /url .*boom-bun-darwin-x64/   { a = "intel" }
+            /url .*boom-bun-linux-x64/    { a = "linux" }
+            /sha256 "/ {
+              s = (a == "arm" ? arm : a == "intel" ? intel : linux)
+              sub(/sha256 "[^"]*"/, "sha256 \"" s "\"")
+            }
+            { print }
+          ' Formula/boom.rb > Formula/boom.rb.new
+          sed -E "s/^  version \"[^\"]*\"/  version \"$version\"/" Formula/boom.rb.new > Formula/boom.rb
+          rm -f Formula/boom.rb.new
+
+      - name: Open an auto-merging formula PR
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || github.token }}
+          HAS_PAT: ${{ secrets.RELEASE_PAT != '' }}
+        run: |
+          set -euo pipefail
+          tag="${{ needs.build.outputs.tag }}"
+          if git diff --quiet -- Formula/boom.rb; then
+            echo "::notice::Formula/boom.rb already current for $tag — nothing to do"
+            exit 0
+          fi
+          branch="formula/$tag"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add Formula/boom.rb
+          git commit -m "chore(formula): boom $tag"
+          git push -u origin "$branch" --force-with-lease
+          gh pr create --base main --head "$branch" \
+            --title "chore(formula): boom $tag" \
+            --body "Automated Homebrew formula bump for **$tag** — version + sha256s from the release's SHA256SUMS."
+          if [ "$HAS_PAT" = "true" ]; then
+            gh pr merge "$branch" --auto --squash --delete-branch
+          else
+            echo "::warning::RELEASE_PAT not set — formula PR opened but left for manual merge (a GITHUB_TOKEN PR does not trigger the required checks). Add a fine-grained RELEASE_PAT (contents + pull-requests write on this repo) to fully automate."
+          fi
