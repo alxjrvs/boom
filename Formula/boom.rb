@@ -6,22 +6,22 @@
 class Boom < Formula
   desc "Installable dotfiles + workspace engine — apply/verify/fix from boomfile.toml"
   homepage "https://github.com/alxjrvs/boom"
-  version "0.7.0"
+  version "0.8.0"
 
   on_macos do
     on_arm do
       url "https://github.com/alxjrvs/boom/releases/download/v#{version}/boom-bun-darwin-arm64"
-      sha256 "4379755c970014723cdc5d41d80f089ca603fd5daf942fb97addb9dc4ecdb2a3"
+      sha256 "c5bf0f632c406ffe06b06ef2a4bdbfbbd0ad436d8055469f9433bb9c9a928b9e"
     end
     on_intel do
       url "https://github.com/alxjrvs/boom/releases/download/v#{version}/boom-bun-darwin-x64"
-      sha256 "f4cec40b011c354caa77de9cd75d0bf63109515812b73840b95a0c05c0387614"
+      sha256 "524b6a0a3ab07c5829da7e4957f90d6b4c786e9d955e8e299a1ee78d62ce03d6"
     end
   end
 
   on_linux do
     url "https://github.com/alxjrvs/boom/releases/download/v#{version}/boom-bun-linux-x64"
-    sha256 "0d660c7a24f35833bd50c907d72be24e1cdd3a643a0a623632d0adaaba560075"
+    sha256 "484e39a425a2c8042d594acb755910042fca2615167ea3057ad428a43c4c068c"
   end
 
   def install
