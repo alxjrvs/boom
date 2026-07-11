@@ -212,7 +212,7 @@ button:focus-visible,
   color: var(--cream);
 }
 .codebox .c   { color: #9aa3c0; }                      /* comments   */
-.codebox .k   { color: var(--gold); font-weight: 700; } /* botu       */
+.codebox .k   { color: var(--gold); font-weight: 700; } /* boom       */
 .codebox .f   { color: var(--cyan); }                   /* flags      */
 .codebox .sec { color: #ff6a5e; font-weight: 700; }     /* [[section]]*/
 .codebox .key { color: var(--gold); }                   /* toml keys  */

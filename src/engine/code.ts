@@ -1,13 +1,13 @@
-// Code-workspace discovery: resolve the code dir (BOTU_CODE → breadcrumb → ~/Code)
+// Code-workspace discovery: resolve the code dir (BOOM_CODE → breadcrumb → ~/Code)
 // and crawl it for git repos using the leaf rule (a repo is a leaf; don't descend
 // into it or into worktrees). Ports engine/commands/code's _resolve_code + _repos.
 import type { Dirent } from "node:fs";
 import { mkdir, readdir, readFile, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
-import { botuStateDir, type Env } from "./state.ts";
+import { boomStateDir, type Env } from "./state.ts";
 
 export function codeBreadcrumbPath(env: Env): string {
-  return join(botuStateDir(env), "code");
+  return join(boomStateDir(env), "code");
 }
 
 async function isDir(p: string): Promise<boolean> {
@@ -25,7 +25,7 @@ export async function resolveCodeDir(env: Env): Promise<string | undefined> {
   } catch {
     recorded = undefined;
   }
-  for (const c of [env.BOTU_CODE, recorded, join(env.HOME ?? "", "Code")]) {
+  for (const c of [env.BOOM_CODE, recorded, join(env.HOME ?? "", "Code")]) {
     if (c && (await isDir(c))) return c;
   }
   return undefined;
@@ -63,7 +63,7 @@ export async function findRepos(root: string): Promise<string[]> {
 // single non-recursive scan of the launch cwd's immediate children (symlinks are
 // followed), so flattening the org-nested ~/Code into this dir makes every repo
 // @-taggable for dispatch — independent of any running background agent. It lives
-// outside botu's state dir (a short, memorable path you can cd into by hand) and is
+// outside boom's state dir (a short, memorable path you can cd into by hand) and is
 // rebuilt from scratch each run, so nothing else should be kept there.
 export interface FarmLink {
   readonly name: string;
@@ -99,7 +99,7 @@ export async function pruneFarmProject(env: Env, farm: string): Promise<boolean>
     if (!data.projects || !(farm in data.projects)) return false;
     delete data.projects[farm];
     // 2-space indent, no trailing newline — matches how Claude itself writes the file.
-    const tmp = `${path}.botu.${process.pid}.tmp`;
+    const tmp = `${path}.boom.${process.pid}.tmp`;
     await writeFile(tmp, JSON.stringify(data, null, 2));
     await rename(tmp, path);
     return true;

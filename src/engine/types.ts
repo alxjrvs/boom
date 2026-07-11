@@ -21,7 +21,7 @@ export interface ReconcileCtx {
   readonly upgrade: boolean;
   readonly env: Record<string, string | undefined>;
   readonly report: Reporter;
-  // Destinations botu owns this run — populated as handlers run (drives orphan
+  // Destinations boom owns this run — populated as handlers run (drives orphan
   // reaping + the persisted manifest).
   readonly declared: ManifestEntry[];
   // Transaction state (present for mutating apply/repair runs):

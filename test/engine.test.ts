@@ -6,28 +6,28 @@ import { realpathSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { BotuContext } from "../src/context.ts";
+import type { BoomContext } from "../src/context.ts";
 import { reconcile } from "../src/engine/reconcile.ts";
 import { linkTarget, pathExists } from "../src/lib/fs.ts";
 
 interface Sandbox {
   readonly home: string;
   readonly repo: string;
-  readonly ctx: BotuContext;
+  readonly ctx: BoomContext;
   out(): string;
 }
 
-async function sandbox(botufile: string): Promise<Sandbox> {
-  const base = await mkdtemp(join(tmpdir(), "botu-eng-"));
+async function sandbox(boomfile: string): Promise<Sandbox> {
+  const base = await mkdtemp(join(tmpdir(), "boom-eng-"));
   const home = join(base, "home");
   const repo = join(base, "repo");
   await mkdir(home, { recursive: true });
   await mkdir(repo, { recursive: true });
-  await writeFile(join(repo, "botufile.toml"), botufile);
+  await writeFile(join(repo, "boomfile.toml"), boomfile);
   const env: Record<string, string | undefined> = {
     HOME: home,
     XDG_STATE_HOME: join(base, "state"),
-    BOTU_CONFIG: repo,
+    BOOM_CONFIG: repo,
     NO_COLOR: "1",
     // Never let a repo's git sync (src/lib/git.ts) see this machine's real system-wide
     // git config (e.g. a global commit hook) — HOME is already sandboxed above.
@@ -48,7 +48,7 @@ async function sandbox(botufile: string): Promise<Sandbox> {
     env,
     exitCode: 0,
   };
-  const ctx = { process: proc, env, cwd: repo } as unknown as BotuContext;
+  const ctx = { process: proc, env, cwd: repo } as unknown as BoomContext;
   return { home, repo, ctx, out: () => buf.out };
 }
 
@@ -148,7 +148,7 @@ test("run step executes in the repo, independent of the invocation cwd", async (
   const sb = await sandbox(
     `[[section]]\nname = "S"\nrun = [{ on = "apply", cmd = 'pwd > "$HOME/where"' }]\n`,
   );
-  const elsewhere = await mkdtemp(join(tmpdir(), "botu-cwd-"));
+  const elsewhere = await mkdtemp(join(tmpdir(), "boom-cwd-"));
   const prev = process.cwd();
   process.chdir(elsewhere); // invoke from somewhere other than the repo
   try {

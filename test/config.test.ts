@@ -3,14 +3,14 @@ import { expect, test } from "bun:test";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BotuConfigError, loadConfig, resolveConfigDir } from "../src/config/load.ts";
+import { BoomConfigError, loadConfig, resolveConfigDir } from "../src/config/load.ts";
 
-const sandbox = () => mkdtemp(join(tmpdir(), "botu-cfg-"));
+const sandbox = () => mkdtemp(join(tmpdir(), "boom-cfg-"));
 
-test("loadConfig parses a nested-by-section botufile.toml", async () => {
+test("loadConfig parses a nested-by-section boomfile.toml", async () => {
   const dir = await sandbox();
   await writeFile(
-    join(dir, "botufile.toml"),
+    join(dir, "boomfile.toml"),
     `[[section]]
 name = "Shell"
 link = [{ src = ".zshrc", dst = "~/.zshrc" }]
@@ -24,15 +24,15 @@ run  = [{ on = "apply", cmd = "lefthook install" }]
   expect(cfg.section[0]?.run?.[0]?.on).toBe("apply");
 });
 
-test("loadConfig rejects a schema-invalid botufile.toml", async () => {
+test("loadConfig rejects a schema-invalid boomfile.toml", async () => {
   const dir = await sandbox();
   // section missing `name`; link missing `dst`.
-  await writeFile(join(dir, "botufile.toml"), `[[section]]\nlink = [{ src = ".zshrc" }]\n`);
-  await expect(loadConfig(dir)).rejects.toBeInstanceOf(BotuConfigError);
+  await writeFile(join(dir, "boomfile.toml"), `[[section]]\nlink = [{ src = ".zshrc" }]\n`);
+  await expect(loadConfig(dir)).rejects.toBeInstanceOf(BoomConfigError);
 });
 
-test("resolveConfigDir honors BOTU_CONFIG over a bogus cwd", async () => {
+test("resolveConfigDir honors BOOM_CONFIG over a bogus cwd", async () => {
   const dir = await sandbox();
-  await writeFile(join(dir, "botufile.toml"), `[[section]]\nname = "x"\n`);
-  expect(await resolveConfigDir({ BOTU_CONFIG: dir }, "/definitely/not/here")).toBe(dir);
+  await writeFile(join(dir, "boomfile.toml"), `[[section]]\nname = "x"\n`);
+  expect(await resolveConfigDir({ BOOM_CONFIG: dir }, "/definitely/not/here")).toBe(dir);
 });

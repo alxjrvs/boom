@@ -4,7 +4,7 @@ import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { BotuContext } from "../src/context.ts";
+import type { BoomContext } from "../src/context.ts";
 import { reconcile } from "../src/engine/reconcile.ts";
 import { rollback } from "../src/engine/rollback.ts";
 import { linkTarget, pathExists, stat } from "../src/lib/fs.ts";
@@ -12,23 +12,23 @@ import { linkTarget, pathExists, stat } from "../src/lib/fs.ts";
 interface Sandbox {
   readonly home: string;
   readonly repo: string;
-  readonly ctx: BotuContext;
+  readonly ctx: BoomContext;
   out(): string;
   clear(): void;
   write(file: string, body: string): Promise<void>;
 }
 
-async function sandbox(botufile: string): Promise<Sandbox> {
-  const base = await mkdtemp(join(tmpdir(), "botu-tx-"));
+async function sandbox(boomfile: string): Promise<Sandbox> {
+  const base = await mkdtemp(join(tmpdir(), "boom-tx-"));
   const home = join(base, "home");
   const repo = join(base, "repo");
   await mkdir(home, { recursive: true });
   await mkdir(repo, { recursive: true });
-  await writeFile(join(repo, "botufile.toml"), botufile);
+  await writeFile(join(repo, "boomfile.toml"), boomfile);
   const env: Record<string, string | undefined> = {
     HOME: home,
     XDG_STATE_HOME: join(base, "state"),
-    BOTU_CONFIG: repo,
+    BOOM_CONFIG: repo,
     NO_COLOR: "1",
   };
   const buf = { out: "" };
@@ -49,7 +49,7 @@ async function sandbox(botufile: string): Promise<Sandbox> {
   return {
     home,
     repo,
-    ctx: { process: proc, env, cwd: repo } as unknown as BotuContext,
+    ctx: { process: proc, env, cwd: repo } as unknown as BoomContext,
     out: () => buf.out,
     clear: () => {
       buf.out = "";
@@ -136,7 +136,7 @@ test("--only does NOT reap links owned by other sections", async () => {
 
   // And a later full apply still knows it owns "b" (merged manifest), so dropping "b"
   // from the config reaps it as expected — proving the manifest wasn't narrowed.
-  await sb.write("botufile.toml", `[[section]]\nname = "a"\nlink = [{ src = ".a", dst = "~/.a" }]\n`);
+  await sb.write("boomfile.toml", `[[section]]\nname = "a"\nlink = [{ src = ".a", dst = "~/.a" }]\n`);
   expect(await reconcile("apply", sb.ctx, {})).toBe(0);
   expect(await pathExists(join(sb.home, ".b"))).toBe(false);
 });
@@ -150,7 +150,7 @@ test("orphan reaping reaps an unmodified copy but leaves a modified one", async 
   expect(await reconcile("apply", sb.ctx, {})).toBe(0);
   await writeFile(join(sb.home, "m"), "edited by user"); // diverge from source
 
-  await sb.write("botufile.toml", `[[section]]\nname = "S"\n`); // drop both copies
+  await sb.write("boomfile.toml", `[[section]]\nname = "S"\n`); // drop both copies
   expect(await reconcile("apply", sb.ctx, {})).toBe(0);
   expect(await pathExists(join(sb.home, "u"))).toBe(false); // unmodified → reaped
   expect(await pathExists(join(sb.home, "m"))).toBe(true); // modified → left in place
@@ -194,20 +194,20 @@ test("apply --json emits a parseable structured report", async () => {
 // Subprocess (not in-process): a `run` step's stdout uses real OS fds, so only a real
 // child can prove --json keeps stdout pure. Must be Bun.spawnSync (oven-sh/bun#24690).
 test("apply --json keeps run-step output off stdout (routes it to stderr)", async () => {
-  const base = await mkdtemp(join(tmpdir(), "botu-json-"));
+  const base = await mkdtemp(join(tmpdir(), "boom-json-"));
   const home = join(base, "home");
   const repo = join(base, "repo");
   await mkdir(home, { recursive: true });
   await mkdir(repo, { recursive: true });
   await writeFile(
-    join(repo, "botufile.toml"),
+    join(repo, "boomfile.toml"),
     `[[section]]\nname = "S"\nrun = [{ on = "apply", cmd = "echo POLLUTION_ON_STDOUT" }]\n`,
   );
   const index = join(import.meta.dir, "../src/index.ts");
   const env = {
     HOME: home,
     XDG_STATE_HOME: join(base, "state"),
-    BOTU_CONFIG: repo,
+    BOOM_CONFIG: repo,
     NO_COLOR: "1",
     PATH: process.env.PATH ?? "",
   };
@@ -231,7 +231,7 @@ test("orphan reaping removes a link dropped from the config", async () => {
   expect(await reconcile("apply", sb.ctx, {})).toBe(0);
   expect(await pathExists(join(sb.home, ".b"))).toBe(true);
 
-  await sb.write("botufile.toml", `[[section]]\nname = "S"\nlink = [{ src = ".a", dst = "~/.a" }]\n`);
+  await sb.write("boomfile.toml", `[[section]]\nname = "S"\nlink = [{ src = ".a", dst = "~/.a" }]\n`);
   expect(await reconcile("apply", sb.ctx, {})).toBe(0);
   expect(await pathExists(join(sb.home, ".a"))).toBe(true);
   expect(await pathExists(join(sb.home, ".b"))).toBe(false); // reaped
@@ -239,7 +239,7 @@ test("orphan reaping removes a link dropped from the config", async () => {
 
 test("rollback restores a link orphaned (and reaped) by the same run", async () => {
   // A reap is a real mutation like any other in the run — it must go through the same
-  // journal + backup transaction so `botu rollback` can undo it, not delete outside it.
+  // journal + backup transaction so `boom rollback` can undo it, not delete outside it.
   const sb = await sandbox(
     `[[section]]\nname = "S"\nlink = [{ src = ".a", dst = "~/.a" }, { src = ".b", dst = "~/.b" }]\n`,
   );
@@ -247,7 +247,7 @@ test("rollback restores a link orphaned (and reaped) by the same run", async () 
   await sb.write(".b", "b");
   expect(await reconcile("apply", sb.ctx, {})).toBe(0);
 
-  await sb.write("botufile.toml", `[[section]]\nname = "S"\nlink = [{ src = ".a", dst = "~/.a" }]\n`);
+  await sb.write("boomfile.toml", `[[section]]\nname = "S"\nlink = [{ src = ".a", dst = "~/.a" }]\n`);
   expect(await reconcile("apply", sb.ctx, {})).toBe(0);
   expect(await pathExists(join(sb.home, ".b"))).toBe(false); // reaped
 

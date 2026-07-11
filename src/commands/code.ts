@@ -1,4 +1,4 @@
-// `botu code <init|claude|cmux>` — open portals to your code workspaces. A nested
+// `boom code <init|claude|cmux>` — open portals to your code workspaces. A nested
 // route map. `claude` flattens every repo into a symlink farm and opens the agent
 // view there; `cmux` opens one workspace per repo. Both honor --dry-run (the tested
 // path) and only spawn the backend tool when it's present.
@@ -6,7 +6,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { buildCommand, buildRouteMap } from "@stricli/core";
-import type { BotuContext } from "../context.ts";
+import type { BoomContext } from "../context.ts";
 import {
   agentsFarmDir,
   codeBreadcrumbPath,
@@ -18,7 +18,7 @@ import {
 } from "../engine/code.ts";
 import { cleanEnv, hasCommand } from "../lib/proc.ts";
 
-const initCommand = buildCommand<Record<never, never>, [string?], BotuContext>({
+const initCommand = buildCommand<Record<never, never>, [string?], BoomContext>({
   docs: { brief: "Record the code dir (default ~/Code)" },
   parameters: {
     positional: {
@@ -31,15 +31,15 @@ const initCommand = buildCommand<Record<never, never>, [string?], BotuContext>({
     const crumb = codeBreadcrumbPath(this.env);
     await mkdir(dirname(crumb), { recursive: true });
     await writeFile(crumb, `${target}\n`);
-    this.process.stdout.write(`botu: code dir recorded → ${target}\n`);
+    this.process.stdout.write(`boom: code dir recorded → ${target}\n`);
   },
 });
 
 const rel = (root: string, p: string) => (p.startsWith(`${root}/`) ? p.slice(root.length + 1) : p);
 
-// `botu code claude` — flatten ~/Code into a symlink farm and open `claude agents`
+// `boom code claude` — flatten ~/Code into a symlink farm and open `claude agents`
 // there, so every repo is @-taggable for dispatch even with no running agents.
-const claudeCommand = buildCommand<{ dryRun?: boolean }, [], BotuContext>({
+const claudeCommand = buildCommand<{ dryRun?: boolean }, [], BoomContext>({
   docs: { brief: "Symlink every repo into one dir and open `claude agents` there" },
   parameters: {
     flags: { dryRun: { kind: "boolean", optional: true, brief: "Plan only; touch nothing, spawn nothing" } },
@@ -47,13 +47,13 @@ const claudeCommand = buildCommand<{ dryRun?: boolean }, [], BotuContext>({
   async func(flags) {
     const root = await resolveCodeDir(this.env);
     if (!root) {
-      this.process.stderr.write("botu code: no code dir — run: botu code init [DIR]\n");
+      this.process.stderr.write("boom code: no code dir — run: boom code init [DIR]\n");
       this.process.exitCode = 1;
       return;
     }
     const { links, collisions } = await planAgentsFarm(root);
     const farm = agentsFarmDir(this.env);
-    this.process.stdout.write(`==> botu code claude  (${root} → ${farm})\n`);
+    this.process.stdout.write(`==> boom code claude  (${root} → ${farm})\n`);
     for (const { name, target } of links) this.process.stdout.write(`  • ${name} → ${rel(root, target)}\n`);
     for (const { name, target } of collisions)
       this.process.stdout.write(`  ! ${name} skipped (name already taken) → ${rel(root, target)}\n`);
@@ -83,19 +83,19 @@ const claudeCommand = buildCommand<{ dryRun?: boolean }, [], BotuContext>({
   },
 });
 
-// `botu code cmux` — one cmux workspace per repo.
-const cmuxCommand = buildCommand<{ dryRun?: boolean }, [], BotuContext>({
+// `boom code cmux` — one cmux workspace per repo.
+const cmuxCommand = buildCommand<{ dryRun?: boolean }, [], BoomContext>({
   docs: { brief: "One cmux workspace per repo" },
   parameters: { flags: { dryRun: { kind: "boolean", optional: true, brief: "Plan only; spawn nothing" } } },
   async func(flags) {
     const root = await resolveCodeDir(this.env);
     if (!root) {
-      this.process.stderr.write("botu code: no code dir — run: botu code init [DIR]\n");
+      this.process.stderr.write("boom code: no code dir — run: boom code init [DIR]\n");
       this.process.exitCode = 1;
       return;
     }
     const repos = await findRepos(root);
-    this.process.stdout.write(`==> botu code cmux  (${root})\n`);
+    this.process.stdout.write(`==> boom code cmux  (${root})\n`);
     const live = !flags.dryRun && hasCommand("cmux", this.env);
     for (const repo of repos) {
       if (!live) {
@@ -117,7 +117,7 @@ const cmuxCommand = buildCommand<{ dryRun?: boolean }, [], BotuContext>({
 
 export const codeRouteMap = buildRouteMap({
   routes: { init: initCommand, claude: claudeCommand, cmux: cmuxCommand },
-  // Bare `botu code` is the everyday entrypoint — go straight to the agent farm.
+  // Bare `boom code` is the everyday entrypoint — go straight to the agent farm.
   defaultCommand: "claude",
   docs: { brief: "Open portals to your code workspaces (default: claude / cmux)" },
 });

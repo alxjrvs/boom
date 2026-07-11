@@ -10,11 +10,11 @@
 #   op-agent status              report keychain token presence (exit 0/1)
 #
 # This stays a standalone script ONLY because Claude Code's headersHelper execs
-# it by path; the botufile drives provision/status via `on apply|verify op-agent …`.
+# it by path; the boomfile drives provision/status via `on apply|verify op-agent …`.
 set -euo pipefail
 
 KEYCHAIN="op-claude-agent"
-VAULT="${BOTU_vault:-claude-agent}"
+VAULT="${BOOM_vault:-claude-agent}"
 
 # Load the SA token from the login keychain into THIS process only (no biometric,
 # headless-safe). Empty/missing → op falls back to desktop auth.

@@ -21,7 +21,7 @@ export async function reconcileRun(entry: Run, ctx: ReconcileCtx): Promise<void>
   if (ctx.verb === "apply" || ctx.verb === "repair") await ctx.journal?.side("run", entry.cmd);
   // Run from the dotfiles repo, not the invocation cwd, so apply is cwd-independent:
   // a step like `lefthook install` targets the repo's `.git`, not whatever directory
-  // `botu` was called from. Steps that name absolute / `~`-anchored paths are unaffected.
+  // `boom` was called from. Steps that name absolute / `~`-anchored paths are unaffected.
   const { code } = runShell(entry.cmd, ctx.env, { quietStdout: ctx.json, cwd: ctx.repo });
   if (code !== 0) ctx.report.fail(`${entry.cmd} (exit ${code})`);
 }

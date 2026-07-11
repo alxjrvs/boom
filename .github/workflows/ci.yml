@@ -1,7 +1,7 @@
 name: ci
 
 # The checks `make check` runs locally, on every push and PR. Runs on Linux and
-# macOS: botu targets both, and the compiled binary must boot on each.
+# macOS: boom targets both, and the compiled binary must boot on each.
 on:
   push:
     branches: [main, v2/typescript]
@@ -31,19 +31,19 @@ jobs:
         run: bun test
 
       - name: Compile host binary
-        run: bun build src/index.ts --compile --outfile build/botu
+        run: bun build src/index.ts --compile --outfile build/boom
 
       - name: Smoke — binary boots
-        run: ./build/botu --version
+        run: ./build/boom --version
 
       # Smoke the config-free generators so a broken catalog/route fails CI, not a user.
       - name: Smoke — completions + man + skill
         run: |
-          ./build/botu completions bash > /dev/null
-          ./build/botu completions zsh > /dev/null
-          ./build/botu completions fish > /dev/null
-          ./build/botu man > /dev/null
-          ./build/botu skill > /dev/null
+          ./build/boom completions bash > /dev/null
+          ./build/boom completions zsh > /dev/null
+          ./build/boom completions fish > /dev/null
+          ./build/boom man > /dev/null
+          ./build/boom skill > /dev/null
 
   version-guard:
     # Every PR must move package.json's version exactly one semver step from main —
@@ -86,5 +86,5 @@ jobs:
       - name: Cross-compile release matrix
         run: |
           for t in bun-darwin-arm64 bun-darwin-x64 bun-linux-x64; do
-            bun build src/index.ts --compile --target="$t" --outfile "build/botu-$t"
+            bun build src/index.ts --compile --target="$t" --outfile "build/boom-$t"
           done

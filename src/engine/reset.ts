@@ -1,6 +1,6 @@
-// `botu source reset` — discard local changes in the config repo and reset it to match
+// `boom source reset` — discard local changes in the config repo and reset it to match
 // origin. The counterpart to what linkRemoteConfigRepo's re-link refusal points you
-// at ("`botu source push` or clean it up"): this is the "clean it up" half, without having
+// at ("`boom source push` or clean it up"): this is the "clean it up" half, without having
 // to know the managed clone's path or wipe/re-clone by hand. Fetches first, then
 // hard-resets to the upstream tip (or the pinned ref, for a detached/@ref-pinned
 // clone — pins are static, so "reset to remote" means "back to the pin") and clears
@@ -10,7 +10,7 @@
 // refuses to clobber them (see config/remote.ts), so reset must too: require --force
 // before a hard reset discards commits no remote has.
 import { requireConfigBreadcrumb } from "../config/load.ts";
-import type { BotuContext } from "../context.ts";
+import type { BoomContext } from "../context.ts";
 import {
   cleanUntracked,
   fetchOrigin,
@@ -25,14 +25,14 @@ export interface ResetOptions {
   readonly force?: boolean;
 }
 
-export async function resetConfigRepo(ctx: BotuContext, opts: ResetOptions = {}): Promise<number> {
+export async function resetConfigRepo(ctx: BoomContext, opts: ResetOptions = {}): Promise<number> {
   const breadcrumb = await requireConfigBreadcrumb(ctx);
   if (!breadcrumb) return 1;
   const { path, remote } = breadcrumb;
 
   const fetch = fetchOrigin(path, ctx.env);
   if (fetch.code !== 0) {
-    ctx.process.stderr.write(`botu: could not reach ${remote.url}: ${fetch.stderr || "fetch failed"}\n`);
+    ctx.process.stderr.write(`boom: could not reach ${remote.url}: ${fetch.stderr || "fetch failed"}\n`);
     return 1;
   }
 
@@ -41,8 +41,8 @@ export async function resetConfigRepo(ctx: BotuContext, opts: ResetOptions = {})
       .map((c) => `    ${c}`)
       .join("\n");
     ctx.process.stderr.write(
-      `botu: ${path} has commit(s) no remote has — reset would discard them:\n${commits}\n` +
-        "botu: pass --force to discard anyway, or `botu source push` first\n",
+      `boom: ${path} has commit(s) no remote has — reset would discard them:\n${commits}\n` +
+        "boom: pass --force to discard anyway, or `boom source push` first\n",
     );
     return 1;
   }
@@ -51,13 +51,13 @@ export async function resetConfigRepo(ctx: BotuContext, opts: ResetOptions = {})
   const before = headSha(path, ctx.env);
   const reset = resetHard(path, target, ctx.env);
   if (reset.code !== 0) {
-    ctx.process.stderr.write(`botu: git reset --hard ${target} failed: ${reset.stderr || "unknown error"}\n`);
+    ctx.process.stderr.write(`boom: git reset --hard ${target} failed: ${reset.stderr || "unknown error"}\n`);
     return 1;
   }
   cleanUntracked(path, ctx.env);
 
   const after = headSha(path, ctx.env);
   const moved = before && after && before !== after ? ` (was ${before})` : "";
-  ctx.process.stdout.write(`botu: reset ${path} to ${after ?? target}${moved}\n`);
+  ctx.process.stdout.write(`boom: reset ${path} to ${after ?? target}${moved}\n`);
   return 0;
 }

@@ -1,9 +1,9 @@
-// `botu completions <bash|zsh|fish>` — emit a shell completion script for botu's
+// `boom completions <bash|zsh|fish>` — emit a shell completion script for boom's
 // top-level commands to stdout. Static (the command set is fixed at build time from the
 // catalog), so it needs no runtime round-trip into the binary. Install per your shell,
-// e.g. `botu completions zsh > ~/.zsh/completions/_botu`.
+// e.g. `boom completions zsh > ~/.zsh/completions/_boom`.
 import { buildCommand } from "@stricli/core";
-import type { BotuContext } from "../context.ts";
+import type { BoomContext } from "../context.ts";
 import { commandList, commandNames } from "./catalog.ts";
 
 export const SHELLS = ["bash", "zsh", "fish"] as const;
@@ -17,14 +17,14 @@ export function isShell(s: string): s is Shell {
 const sq = (s: string): string => s.replace(/'/g, "'\\''");
 
 function bash(): string {
-  return `# botu bash completion. Source it, e.g. in ~/.bashrc:  source <(botu completions bash)
-_botu() {
+  return `# boom bash completion. Source it, e.g. in ~/.bashrc:  source <(boom completions bash)
+_boom() {
   local cur="\${COMP_WORDS[COMP_CWORD]}"
   if [ "$COMP_CWORD" -eq 1 ]; then
     COMPREPLY=( $(compgen -W "${commandNames().join(" ")}" -- "$cur") )
   fi
 }
-complete -F _botu botu
+complete -F _boom boom
 `;
 }
 
@@ -32,25 +32,25 @@ function zsh(): string {
   const lines = commandList()
     .map((c) => `    '${sq(c.name)}:${sq(c.brief)}'`)
     .join("\n");
-  return `#compdef botu
-# botu zsh completion. Install as _botu on your $fpath, or:  source <(botu completions zsh)
-_botu() {
+  return `#compdef boom
+# boom zsh completion. Install as _boom on your $fpath, or:  source <(boom completions zsh)
+_boom() {
   local -a commands
   commands=(
 ${lines}
   )
-  _describe -t commands 'botu command' commands
+  _describe -t commands 'boom command' commands
 }
-_botu "$@"
+_boom "$@"
 `;
 }
 
 function fish(): string {
   const lines = commandList()
-    .map((c) => `complete -c botu -n __fish_use_subcommand -a '${sq(c.name)}' -d '${sq(c.brief)}'`)
+    .map((c) => `complete -c boom -n __fish_use_subcommand -a '${sq(c.name)}' -d '${sq(c.brief)}'`)
     .join("\n");
-  return `# botu fish completion. Install:  botu completions fish > ~/.config/fish/completions/botu.fish
-complete -c botu -f
+  return `# boom fish completion. Install:  boom completions fish > ~/.config/fish/completions/boom.fish
+complete -c boom -f
 ${lines}
 `;
 }
@@ -66,7 +66,7 @@ export function completionScript(shell: Shell): string {
   }
 }
 
-export const completionsCommand = buildCommand<Record<never, never>, [string], BotuContext>({
+export const completionsCommand = buildCommand<Record<never, never>, [string], BoomContext>({
   docs: { brief: "Emit a shell completion script (bash | zsh | fish)" },
   parameters: {
     positional: {

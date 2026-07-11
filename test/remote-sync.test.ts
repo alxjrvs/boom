@@ -1,5 +1,5 @@
 // Repo-only config: ref parsing, the clone/fetch/pull-and-report sync step, the
-// doctor config-repo section, and `botu source push`. Fixtures are local git repos —
+// doctor config-repo section, and `boom source push`. Fixtures are local git repos —
 // `git clone`/`fetch`/`push` treat a local path exactly like any other remote, so
 // none of this needs real network access.
 import { expect, test } from "bun:test";
@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readConfigBreadcrumb } from "../src/config/load.ts";
 import { linkRemoteConfigRepo, parseRemoteRef } from "../src/config/remote.ts";
-import type { BotuContext } from "../src/context.ts";
+import type { BoomContext } from "../src/context.ts";
 import { commitConfigRepo } from "../src/engine/commit.ts";
 import { diffConfigRepo } from "../src/engine/diff.ts";
 import { doctor } from "../src/engine/doctor.ts";
@@ -19,7 +19,7 @@ import { pathExists } from "../src/lib/fs.ts";
 import { captureArgv } from "../src/lib/proc.ts";
 
 async function base(): Promise<string> {
-  return mkdtemp(join(tmpdir(), "botu-sync-"));
+  return mkdtemp(join(tmpdir(), "boom-sync-"));
 }
 
 function git(dir: string, ...args: string[]) {
@@ -41,7 +41,7 @@ function configureIdentity(dir: string): void {
 
 async function originFixture(): Promise<string> {
   const dir = await base();
-  await writeFile(join(dir, "botufile.toml"), `[[section]]\nname = "x"\n`);
+  await writeFile(join(dir, "boomfile.toml"), `[[section]]\nname = "x"\n`);
   git(dir, "init", "-q", "-b", "main");
   commitAll(dir, "init");
   return dir;
@@ -52,19 +52,19 @@ async function bareOriginFixture(): Promise<string> {
   git(bare, "init", "-q", "--bare", "-b", "main");
   const staging = await base();
   captureArgv(["git", "clone", "-q", bare, staging], {});
-  await writeFile(join(staging, "botufile.toml"), `[[section]]\nname = "x"\n`);
+  await writeFile(join(staging, "boomfile.toml"), `[[section]]\nname = "x"\n`);
   commitAll(staging, "init");
   captureArgv(["git", "push", "-q", "origin", "main"], {}, { cwd: staging });
   return bare;
 }
 
-function ctxFor(env: Record<string, string | undefined>, cwd: string): { ctx: BotuContext; out(): string } {
+function ctxFor(env: Record<string, string | undefined>, cwd: string): { ctx: BoomContext; out(): string } {
   const buf = { out: "" };
   const write = (s: string) => {
     buf.out += s;
   };
   const proc = { stdout: { write }, stderr: { write }, env, exitCode: 0 };
-  return { ctx: { process: proc, env, cwd } as unknown as BotuContext, out: () => buf.out };
+  return { ctx: { process: proc, env, cwd } as unknown as BoomContext, out: () => buf.out };
 }
 
 // ---- parseRemoteRef ----------------------------------------------------------
@@ -148,9 +148,9 @@ test("verify reports commits-behind as drift without pulling", async () => {
   const origin = await originFixture();
   const env = { XDG_STATE_HOME: await base(), NO_COLOR: "1" };
   const repo = await linkRemoteConfigRepo(env, origin);
-  const before = await readFile(join(repo, "botufile.toml"), "utf8");
+  const before = await readFile(join(repo, "boomfile.toml"), "utf8");
 
-  await writeFile(join(origin, "botufile.toml"), `[[section]]\nname = "x"\n[[section]]\nname = "y"\n`);
+  await writeFile(join(origin, "boomfile.toml"), `[[section]]\nname = "x"\n[[section]]\nname = "y"\n`);
   commitAll(origin, "add y");
 
   const { ctx, out } = ctxFor(env, repo);
@@ -158,7 +158,7 @@ test("verify reports commits-behind as drift without pulling", async () => {
   expect(out()).toContain("commit(s) behind origin");
   expect(rc).toBe(2);
   // verify never touches the working tree
-  expect(await readFile(join(repo, "botufile.toml"), "utf8")).toBe(before);
+  expect(await readFile(join(repo, "boomfile.toml"), "utf8")).toBe(before);
 });
 
 test("verify warns on a dirty tree even when commit history matches origin", async () => {
@@ -179,7 +179,7 @@ test("verify warns on committed-but-unpushed local commits even when behind-coun
   const env = { XDG_STATE_HOME: await base(), NO_COLOR: "1" };
   const repo = await linkRemoteConfigRepo(env, origin);
   configureIdentity(repo);
-  await writeFile(join(repo, "botufile.toml"), `[[section]]\nname = "x"\n[[section]]\nname = "local"\n`);
+  await writeFile(join(repo, "boomfile.toml"), `[[section]]\nname = "x"\n[[section]]\nname = "local"\n`);
   commitAll(repo, "local edit");
 
   const { ctx, out } = ctxFor(env, repo);
@@ -194,14 +194,14 @@ test("apply pulls and reports what changed", async () => {
   const env = { XDG_STATE_HOME: await base(), NO_COLOR: "1" };
   const repo = await linkRemoteConfigRepo(env, origin);
 
-  await writeFile(join(origin, "botufile.toml"), `[[section]]\nname = "x"\n[[section]]\nname = "y"\n`);
+  await writeFile(join(origin, "boomfile.toml"), `[[section]]\nname = "x"\n[[section]]\nname = "y"\n`);
   commitAll(origin, "add y");
 
   const { ctx, out } = ctxFor(env, repo);
   await reconcile("apply", ctx, {});
   expect(out()).toContain("pulled 1 commit(s)");
-  expect(out()).toContain("botufile.toml");
-  expect(await readFile(join(repo, "botufile.toml"), "utf8")).toContain('name = "y"');
+  expect(out()).toContain("boomfile.toml");
+  expect(await readFile(join(repo, "boomfile.toml"), "utf8")).toContain('name = "y"');
 });
 
 test("apply reports an unreachable origin but still reconciles from the local clone", async () => {
@@ -223,18 +223,18 @@ test("apply reports a genuine rebase conflict, aborts cleanly, but still reconci
   const repo = await linkRemoteConfigRepo(env, origin);
 
   // Diverge: a local-only commit in the managed clone...
-  await writeFile(join(repo, "botufile.toml"), `[[section]]\nname = "x"\n[[section]]\nname = "local"\n`);
+  await writeFile(join(repo, "boomfile.toml"), `[[section]]\nname = "x"\n[[section]]\nname = "local"\n`);
   commitAll(repo, "local edit");
   // ...and an incompatible commit on origin's main, off the same base — replaying the
   // local commit on top of it via rebase conflicts.
-  await writeFile(join(origin, "botufile.toml"), `[[section]]\nname = "x"\n[[section]]\nname = "remote"\n`);
+  await writeFile(join(origin, "boomfile.toml"), `[[section]]\nname = "x"\n[[section]]\nname = "remote"\n`);
   commitAll(origin, "remote edit");
 
   const { ctx, out } = ctxFor(env, repo);
   const rc = await reconcile("apply", ctx, {});
   expect(out()).toContain("pull --rebase failed");
   // never blocks reconciling from the last-known-good (here: locally-committed) state
-  expect(await readFile(join(repo, "botufile.toml"), "utf8")).toContain('name = "local"');
+  expect(await readFile(join(repo, "boomfile.toml"), "utf8")).toContain('name = "local"');
   // rebase --abort must have restored a clean, non-conflicted working tree.
   expect(git(repo, "status", "--porcelain").stdout.trim()).toBe("");
   expect(rc).toBe(1);
@@ -245,7 +245,7 @@ test("apply pulls a remote change while preserving an uncommitted local edit (au
   const env = { XDG_STATE_HOME: await base(), NO_COLOR: "1" };
   const repo = await linkRemoteConfigRepo(env, origin);
 
-  await writeFile(join(origin, "botufile.toml"), `[[section]]\nname = "x"\n[[section]]\nname = "y"\n`);
+  await writeFile(join(origin, "boomfile.toml"), `[[section]]\nname = "x"\n[[section]]\nname = "y"\n`);
   commitAll(origin, "add y");
   // uncommitted, dirty tree — the default pull must autostash this and restore it.
   await writeFile(join(repo, "scratch.txt"), "uncommitted local edit\n");
@@ -254,7 +254,7 @@ test("apply pulls a remote change while preserving an uncommitted local edit (au
   const rc = await reconcile("apply", ctx, {});
   expect(rc).toBe(0);
   expect(out()).toContain("pulled 1 commit(s)");
-  expect(await readFile(join(repo, "botufile.toml"), "utf8")).toContain('name = "y"');
+  expect(await readFile(join(repo, "boomfile.toml"), "utf8")).toContain('name = "y"');
   expect(await readFile(join(repo, "scratch.txt"), "utf8")).toBe("uncommitted local edit\n");
 });
 
@@ -264,7 +264,7 @@ test("apply --commit commits local edits first, then rebases them onto the pulle
   const repo = await linkRemoteConfigRepo(env, origin);
   configureIdentity(repo);
 
-  await writeFile(join(origin, "botufile.toml"), `[[section]]\nname = "x"\n[[section]]\nname = "y"\n`);
+  await writeFile(join(origin, "boomfile.toml"), `[[section]]\nname = "x"\n[[section]]\nname = "y"\n`);
   commitAll(origin, "add y");
   await writeFile(join(repo, "scratch.txt"), "local addition\n");
 
@@ -272,7 +272,7 @@ test("apply --commit commits local edits first, then rebases them onto the pulle
   const rc = await reconcile("apply", ctx, { commit: true, commitMessage: "test commit" });
   expect(rc).toBe(0);
   expect(out()).toContain("committed local changes (test commit)");
-  expect(await readFile(join(repo, "botufile.toml"), "utf8")).toContain('name = "y"');
+  expect(await readFile(join(repo, "boomfile.toml"), "utf8")).toContain('name = "y"');
   expect(await readFile(join(repo, "scratch.txt"), "utf8")).toBe("local addition\n");
   expect(git(repo, "log", "-1", "--format=%s").stdout.trim()).toBe("test commit");
   // the commit replayed on top of the pull, not left behind as a stray unpushed tip.
@@ -284,14 +284,14 @@ test("apply --commit with a clean tree pulls normally, without an empty commit",
   const env = { XDG_STATE_HOME: await base(), NO_COLOR: "1" };
   const repo = await linkRemoteConfigRepo(env, origin);
 
-  await writeFile(join(origin, "botufile.toml"), `[[section]]\nname = "x"\n[[section]]\nname = "y"\n`);
+  await writeFile(join(origin, "boomfile.toml"), `[[section]]\nname = "x"\n[[section]]\nname = "y"\n`);
   commitAll(origin, "add y");
 
   const { ctx, out } = ctxFor(env, repo);
   const rc = await reconcile("apply", ctx, { commit: true });
   expect(rc).toBe(0);
   expect(out()).not.toContain("committed local changes");
-  expect(await readFile(join(repo, "botufile.toml"), "utf8")).toContain('name = "y"');
+  expect(await readFile(join(repo, "boomfile.toml"), "utf8")).toContain('name = "y"');
 });
 
 test("apply --commit commits local edits even when already up to date with origin", async () => {
@@ -316,7 +316,7 @@ test("a pinned ref is reported as static, not checked for drift", async () => {
   const env = { XDG_STATE_HOME: await base(), NO_COLOR: "1" };
   const repo = await linkRemoteConfigRepo(env, `${origin}@${sha}`);
 
-  await writeFile(join(origin, "botufile.toml"), `[[section]]\nname = "x"\n[[section]]\nname = "y"\n`);
+  await writeFile(join(origin, "boomfile.toml"), `[[section]]\nname = "x"\n[[section]]\nname = "y"\n`);
   commitAll(origin, "add y");
 
   const { ctx, out } = ctxFor(env, repo);
@@ -332,7 +332,7 @@ test("reset refuses to discard committed-but-unpushed local commits without --fo
   const env = { XDG_STATE_HOME: await base(), NO_COLOR: "1" };
   const repo = await linkRemoteConfigRepo(env, origin);
 
-  await writeFile(join(repo, "botufile.toml"), `[[section]]\nname = "x"\n[[section]]\nname = "local"\n`);
+  await writeFile(join(repo, "boomfile.toml"), `[[section]]\nname = "x"\n[[section]]\nname = "local"\n`);
   commitAll(repo, "local edit");
 
   const { ctx, out } = ctxFor(env, repo);
@@ -341,7 +341,7 @@ test("reset refuses to discard committed-but-unpushed local commits without --fo
   expect(out()).toContain("local edit"); // the at-risk commit is listed
   expect(out()).toContain("--force");
   // refused, so nothing was actually discarded
-  expect(await readFile(join(repo, "botufile.toml"), "utf8")).toContain('name = "local"');
+  expect(await readFile(join(repo, "boomfile.toml"), "utf8")).toContain('name = "local"');
 });
 
 test("reset --force discards uncommitted and committed-but-unpushed local changes", async () => {
@@ -350,7 +350,7 @@ test("reset --force discards uncommitted and committed-but-unpushed local change
   const repo = await linkRemoteConfigRepo(env, origin);
 
   // A committed-but-unpushed local change...
-  await writeFile(join(repo, "botufile.toml"), `[[section]]\nname = "x"\n[[section]]\nname = "local"\n`);
+  await writeFile(join(repo, "boomfile.toml"), `[[section]]\nname = "x"\n[[section]]\nname = "local"\n`);
   commitAll(repo, "local edit");
   // ...plus an uncommitted one on top.
   await writeFile(join(repo, "untracked.txt"), "oops\n");
@@ -359,8 +359,8 @@ test("reset --force discards uncommitted and committed-but-unpushed local change
   const rc = await resetConfigRepo(ctx, { force: true });
   expect(rc).toBe(0);
   expect(out()).toContain("reset");
-  expect(await readFile(join(repo, "botufile.toml"), "utf8")).toBe(
-    await readFile(join(origin, "botufile.toml"), "utf8"),
+  expect(await readFile(join(repo, "boomfile.toml"), "utf8")).toBe(
+    await readFile(join(origin, "boomfile.toml"), "utf8"),
   );
   expect(await pathExists(join(repo, "untracked.txt"))).toBe(false);
 });
@@ -384,17 +384,17 @@ test("reset on a pinned clone goes back to the pinned ref, not origin's current 
   const repo = await linkRemoteConfigRepo(env, `${origin}@${sha}`);
 
   // origin moves on...
-  await writeFile(join(origin, "botufile.toml"), `[[section]]\nname = "x"\n[[section]]\nname = "y"\n`);
+  await writeFile(join(origin, "boomfile.toml"), `[[section]]\nname = "x"\n[[section]]\nname = "y"\n`);
   commitAll(origin, "add y");
   // ...and the pinned clone gets a local edit.
-  await writeFile(join(repo, "botufile.toml"), `[[section]]\nname = "local"\n`);
+  await writeFile(join(repo, "boomfile.toml"), `[[section]]\nname = "local"\n`);
   commitAll(repo, "local edit");
 
   const { ctx } = ctxFor(env, repo);
   // a committed-but-unpushed local commit on the pinned clone too — needs --force
   expect(await resetConfigRepo(ctx, { force: true })).toBe(0);
   // back to the pin, not origin's now-two-commits-ahead tip
-  expect(await readFile(join(repo, "botufile.toml"), "utf8")).toBe(`[[section]]\nname = "x"\n`);
+  expect(await readFile(join(repo, "boomfile.toml"), "utf8")).toBe(`[[section]]\nname = "x"\n`);
 });
 
 test("reset fails cleanly when no remote config is linked", async () => {
@@ -419,14 +419,14 @@ test("doctor reports the linked config repo as reachable", async () => {
   const origin = await originFixture();
   const env = { XDG_STATE_HOME: await base(), NO_COLOR: "1" };
   const repo = await linkRemoteConfigRepo(env, origin);
-  const { ctx, out } = ctxFor({ ...env, BOTU_OS: "linux" }, repo);
+  const { ctx, out } = ctxFor({ ...env, BOOM_OS: "linux" }, repo);
   await doctor(ctx);
   expect(out()).toContain(`${origin} reachable`);
 });
 
 test("doctor warns when no remote config is linked", async () => {
   const { ctx, out } = ctxFor(
-    { XDG_STATE_HOME: await base(), BOTU_OS: "linux", NO_COLOR: "1" },
+    { XDG_STATE_HOME: await base(), BOOM_OS: "linux", NO_COLOR: "1" },
     await base(),
   );
   await doctor(ctx);
@@ -499,8 +499,8 @@ test("diff does not take the clean path for a modified tracked file", async () =
   const origin = await originFixture();
   const env = { XDG_STATE_HOME: await base(), NO_COLOR: "1" };
   const repo = await linkRemoteConfigRepo(env, origin);
-  // botufile.toml is tracked (from originFixture) — a content edit is a tracked change.
-  await writeFile(join(repo, "botufile.toml"), `[[section]]\nname = "y"\n`);
+  // boomfile.toml is tracked (from originFixture) — a content edit is a tracked change.
+  await writeFile(join(repo, "boomfile.toml"), `[[section]]\nname = "y"\n`);
 
   const { ctx, out } = ctxFor(env, repo);
   const rc = await diffConfigRepo(ctx);
@@ -549,6 +549,6 @@ test("push fails cleanly when no remote config is linked", async () => {
 test("captureArgv reports a missing executable or cwd as a failed result, not a throw", () => {
   // Bun.spawnSync throws for both; sync/push/reset rely on getting a code back so a
   // missing git (or a stale breadcrumb path) degrades to their reported-error paths.
-  expect(captureArgv(["botu-definitely-not-a-real-tool"], {}).code).toBe(-1);
-  expect(captureArgv(["git", "status"], {}, { cwd: join(tmpdir(), "botu-no-such-dir") }).code).toBe(-1);
+  expect(captureArgv(["boom-definitely-not-a-real-tool"], {}).code).toBe(-1);
+  expect(captureArgv(["git", "status"], {}, { cwd: join(tmpdir(), "boom-no-such-dir") }).code).toBe(-1);
 });

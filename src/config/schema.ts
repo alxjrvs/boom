@@ -1,4 +1,4 @@
-// The botufile.toml schema (nested-by-section). This typed contract is the source
+// The boomfile.toml schema (nested-by-section). This typed contract is the source
 // of truth shared by the loader, the reconcile engine (M2), and the dotFiles
 // migration prompt. Within a section, resources run by phase:
 //   link → copy → glob → packages (brewfile/mise) → run → hook.
@@ -54,7 +54,7 @@ export const SectionSchema = v.object({
   hook: v.optional(v.array(HookSchema)),
 });
 
-export const BotufileSchema = v.object({
+export const BoomfileSchema = v.object({
   section: v.array(SectionSchema),
 });
 
@@ -65,4 +65,4 @@ export type Run = v.InferOutput<typeof RunSchema>;
 export type Hook = v.InferOutput<typeof HookSchema>;
 export type OsxDefault = v.InferOutput<typeof OsxDefaultSchema>;
 export type Section = v.InferOutput<typeof SectionSchema>;
-export type Botufile = v.InferOutput<typeof BotufileSchema>;
+export type Boomfile = v.InferOutput<typeof BoomfileSchema>;

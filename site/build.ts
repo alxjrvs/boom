@@ -37,8 +37,8 @@ const PAGES: Page[] = [
   {
     slug: "spec",
     src: "SPEC.md",
-    title: "The Design Spec — botu",
-    desc: "BoomTube's design of record: the reconcile model, config-repo git sync, the typed botufile.toml schema, the hook extension contract, transaction/journal, and the stack.",
+    title: "The Design Spec — boom",
+    desc: "BoomTube's design of record: the reconcile model, config-repo git sync, the typed boomfile.toml schema, the hook extension contract, transaction/journal, and the stack.",
     caption: "The blueprint of the Fourth World!",
   },
 ];
@@ -61,13 +61,13 @@ const navItem = (href: string, slug: string, label: string, active: string): str
 
 const masthead = (active: string): string => `<header class="masthead">
   <div class="wrap">
-    <a class="logo" href="index.html">BOTU<span class="bang">!</span></a>
+    <a class="logo" href="index.html">BOOM<span class="bang">!</span></a>
     <nav aria-label="Pages">
       ${navItem("index.html", "home", "Home", active)}
       ${navItem("guide.html", "guide", "Guide", active)}
       ${navItem("spec.html", "spec", "Spec", active)}
     </nav>
-    <a class="btn gold" href="https://github.com/alxjrvs/botu">GitHub</a>
+    <a class="btn gold" href="https://github.com/alxjrvs/boom">GitHub</a>
   </div>
 </header>`;
 
@@ -99,7 +99,7 @@ ${body}
     <nav class="docnav" aria-label="More docs">
       <a class="btn" href="index.html">&larr; Home</a>
       <a class="btn blue" href="guide.html">The Guide</a>
-      <a class="btn gold" href="https://github.com/alxjrvs/botu">View source on GitHub</a>
+      <a class="btn gold" href="https://github.com/alxjrvs/boom">View source on GitHub</a>
     </nav>
   </div>
 </main>
@@ -123,8 +123,8 @@ const renderGuide = (): string => {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Guide — botu</title>
-<meta name="description" content="How to use botu: install, bootstrap a machine, the reconcile loop (apply / verify / repair, and rollback), the botufile.toml reference, config-repo git, code portals, and housekeeping.">
+<title>Guide — boom</title>
+<meta name="description" content="How to use boom: install, bootstrap a machine, the reconcile loop (apply / verify / repair, and rollback), the boomfile.toml reference, config-repo git, code portals, and housekeeping.">
 ${faviconLink}
 <link rel="stylesheet" href="styles.css">
 </head>

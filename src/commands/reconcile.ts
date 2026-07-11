@@ -1,7 +1,7 @@
 // The reconcile verbs — thin wrappers over the one engine loop (engine/reconcile.ts),
 // parameterized by verb. Exit code comes from the engine (verify: 0/2/1).
 import { buildCommand } from "@stricli/core";
-import type { BotuContext } from "../context.ts";
+import type { BoomContext } from "../context.ts";
 import { reconcile } from "../engine/reconcile.ts";
 import type { LinkMode } from "../engine/types.ts";
 
@@ -42,8 +42,8 @@ function linkModeOf(flags: { skip?: boolean }): LinkMode {
   return flags.skip ? "skip" : "overwrite";
 }
 
-export const applyCommand = buildCommand<ApplyFlags, [], BotuContext>({
-  docs: { brief: "Reconcile your machine from the botufile — make it so" },
+export const applyCommand = buildCommand<ApplyFlags, [], BoomContext>({
+  docs: { brief: "Reconcile your machine from the boomfile — make it so" },
   parameters: {
     flags: {
       dryRun: { kind: "boolean", optional: true, brief: "Show what would change; change nothing" },
@@ -58,7 +58,7 @@ export const applyCommand = buildCommand<ApplyFlags, [], BotuContext>({
         kind: "parsed",
         parse: parseTag,
         optional: true,
-        brief: 'Commit message for --commit (default: "botu: local changes")',
+        brief: 'Commit message for --commit (default: "boom: local changes")',
       },
       upgrade: {
         kind: "boolean",
@@ -86,7 +86,7 @@ export const applyCommand = buildCommand<ApplyFlags, [], BotuContext>({
   },
 });
 
-export const verifyCommand = buildCommand<VerifyFlags, [], BotuContext>({
+export const verifyCommand = buildCommand<VerifyFlags, [], BoomContext>({
   docs: { brief: "Check for drift — exit 0 ok / 2 warn / 1 fail" },
   parameters: {
     flags: {
@@ -104,7 +104,7 @@ export const verifyCommand = buildCommand<VerifyFlags, [], BotuContext>({
   },
 });
 
-export const repairCommand = buildCommand<OnlyFlags, [], BotuContext>({
+export const repairCommand = buildCommand<OnlyFlags, [], BoomContext>({
   docs: { brief: "Repair drift (apply, overwriting conflicts)" },
   parameters: { flags: { only: onlyFlag, profile: profileFlag, json: jsonFlag } },
   async func(flags) {
@@ -116,8 +116,8 @@ export const repairCommand = buildCommand<OnlyFlags, [], BotuContext>({
   },
 });
 
-export const uninstallCommand = buildCommand<{ dryRun?: boolean; json?: boolean }, [], BotuContext>({
-  docs: { brief: "Remove everything botu installed" },
+export const uninstallCommand = buildCommand<{ dryRun?: boolean; json?: boolean }, [], BoomContext>({
+  docs: { brief: "Remove everything boom installed" },
   parameters: {
     flags: {
       dryRun: { kind: "boolean", optional: true, brief: "Show what would be removed; remove nothing" },

@@ -1,5 +1,5 @@
-// botu's on-disk state under ${XDG_STATE_HOME:-~/.local/state}/botu/:
-//   manifest          TSV of destinations botu owns (orphan reaping)
+// boom's on-disk state under ${XDG_STATE_HOME:-~/.local/state}/boom/:
+//   manifest          TSV of destinations boom owns (orphan reaping)
 //   journal/<id>.ndjson  per-run transaction log (apply/fix)
 //   backups/<id>/...  files displaced by an overwrite (so rollback can restore)
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -19,17 +19,17 @@ export interface ManifestEntry {
 export function stateHome(env: Env): string {
   return env.XDG_STATE_HOME ?? join(env.HOME ?? "", ".local", "state");
 }
-export function botuStateDir(env: Env): string {
-  return join(stateHome(env), "botu");
+export function boomStateDir(env: Env): string {
+  return join(stateHome(env), "boom");
 }
 export function manifestPath(env: Env): string {
-  return join(botuStateDir(env), "manifest");
+  return join(boomStateDir(env), "manifest");
 }
 export function journalDir(env: Env): string {
-  return join(botuStateDir(env), "journal");
+  return join(boomStateDir(env), "journal");
 }
 export function backupsDir(env: Env): string {
-  return join(botuStateDir(env), "backups");
+  return join(boomStateDir(env), "backups");
 }
 
 export async function readManifest(env: Env): Promise<ManifestEntry[]> {
@@ -57,7 +57,7 @@ export async function readManifest(env: Env): Promise<ManifestEntry[]> {
 }
 
 export async function writeManifest(env: Env, entries: readonly ManifestEntry[]): Promise<void> {
-  await mkdir(botuStateDir(env), { recursive: true });
+  await mkdir(boomStateDir(env), { recursive: true });
   const body = entries.map((e) => `${e.kind}\t${e.dst}\t${e.src}`).join("\n");
   await writeFile(manifestPath(env), body.length > 0 ? `${body}\n` : "");
 }

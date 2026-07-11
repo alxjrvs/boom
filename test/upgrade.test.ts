@@ -1,5 +1,5 @@
 // Pure-function coverage for the self-update path (the irreversible "replace the running
-// binary" command), plus a lockstep guard that the release-asset names botu downloads
+// binary" command), plus a lockstep guard that the release-asset names boom downloads
 // match the ones the workflows actually build.
 import { expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
@@ -15,15 +15,15 @@ test("releaseTargetFor maps the three supported platforms and nothing else", () 
 });
 
 test("expectedHash pulls the right hash out of a sha256sum manifest", () => {
-  const sums = ["aaaa  botu-bun-darwin-arm64", "bbbb  botu-bun-linux-x64"].join("\n");
-  expect(expectedHash(sums, "botu-bun-darwin-arm64")).toBe("aaaa");
-  expect(expectedHash(sums, "botu-bun-linux-x64")).toBe("bbbb");
-  expect(expectedHash(sums, "botu-bun-darwin-x64")).toBeUndefined();
+  const sums = ["aaaa  boom-bun-darwin-arm64", "bbbb  boom-bun-linux-x64"].join("\n");
+  expect(expectedHash(sums, "boom-bun-darwin-arm64")).toBe("aaaa");
+  expect(expectedHash(sums, "boom-bun-linux-x64")).toBe("bbbb");
+  expect(expectedHash(sums, "boom-bun-darwin-x64")).toBeUndefined();
 });
 
 test("expectedHash ignores blank lines and tolerates extra whitespace", () => {
-  const sums = "\n  cccc   botu-bun-linux-x64  \n\n";
-  expect(expectedHash(sums, "botu-bun-linux-x64")).toBe("cccc");
+  const sums = "\n  cccc   boom-bun-linux-x64  \n\n";
+  expect(expectedHash(sums, "boom-bun-linux-x64")).toBe("cccc");
 });
 
 test("sha256 matches a known vector", () => {

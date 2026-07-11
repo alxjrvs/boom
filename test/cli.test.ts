@@ -23,9 +23,9 @@ function fakeContext() {
     env: {} as Record<string, string>,
     exitCode: 0 as number,
   };
-  // The fake satisfies BotuContext (process/env/cwd); cwd points nowhere so the
+  // The fake satisfies BoomContext (process/env/cwd); cwd points nowhere so the
   // reconcile verbs resolve no config and report the expected error.
-  return { buf, proc, ctx: { process: proc, env: proc.env, cwd: "/nonexistent-botu" } as never };
+  return { buf, proc, ctx: { process: proc, env: proc.env, cwd: "/nonexistent-boom" } as never };
 }
 
 test("--version prints the package version", async () => {

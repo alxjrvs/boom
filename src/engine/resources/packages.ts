@@ -36,7 +36,7 @@ export function reconcileBrewfile(file: string, ctx: ReconcileCtx): void {
     }
     case "verify": {
       // Mirrors apply's --no-upgrade gate: otherwise a plain `verify` would flag
-      // merely-outdated (but still declared) formulae as drift that `botu apply`
+      // merely-outdated (but still declared) formulae as drift that `boom apply`
       // then won't repair, since apply itself no longer upgrades by default.
       if (
         runArgv(["brew", "bundle", "check", `--file=${path}`, ...noUpgrade], ctx.env, {
@@ -44,7 +44,7 @@ export function reconcileBrewfile(file: string, ctx: ReconcileCtx): void {
         }).code === 0
       )
         report.ok("brew bundle satisfied");
-      else report.warn("brew bundle missing deps — run: botu apply");
+      else report.warn("brew bundle missing deps — run: boom apply");
       return;
     }
     case "uninstall":
@@ -63,7 +63,7 @@ export function reconcileMise(ctx: ReconcileCtx): void {
         return;
       }
       // Run from the repo (cwd-independent apply), so mise resolves the repo's
-      // `mise.toml` instead of whatever project tree `botu` was invoked from.
+      // `mise.toml` instead of whatever project tree `boom` was invoked from.
       if (runArgv(["mise", "install"], ctx.env, { quietStdout: ctx.json, cwd: ctx.repo }).code === 0)
         report.ok("mise tools installed");
       else report.fail("mise install failed");
@@ -81,7 +81,7 @@ export function reconcileMise(ctx: ReconcileCtx): void {
       });
       const missing = new TextDecoder().decode(p.stdout).trim();
       if (p.exitCode === 0 && missing === "") report.ok("mise tools installed");
-      else report.warn("mise tools missing — run: botu apply");
+      else report.warn("mise tools missing — run: boom apply");
       return;
     }
     case "uninstall":

@@ -73,15 +73,15 @@ jobs:
         run: |
           mkdir -p dist
           for t in bun-darwin-arm64 bun-darwin-x64 bun-linux-x64; do
-            bun build src/index.ts --compile --target="$t" --outfile "dist/botu-$t"
+            bun build src/index.ts --compile --target="$t" --outfile "dist/boom-$t"
           done
 
       - name: Upload unsigned binaries
         if: steps.v.outputs.new == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: botu-unsigned
-          path: dist/botu-*
+          name: boom-unsigned
+          path: dist/boom-*
 
   # Sign (+ notarize, when secrets are present) the macOS binaries on a real macOS host.
   # Cross-compiled-on-Linux Mach-O binaries carry an ad-hoc signature Apple Silicon's
@@ -96,7 +96,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: botu-unsigned
+          name: boom-unsigned
           path: dist
 
       - name: Developer ID sign + notarize
@@ -111,7 +111,7 @@ jobs:
         run: |
           set -euo pipefail
           # Import the signing cert into a throwaway keychain unlocked for this job only.
-          KEYCHAIN="$RUNNER_TEMP/botu-signing.keychain-db"
+          KEYCHAIN="$RUNNER_TEMP/boom-signing.keychain-db"
           KP="$(uuidgen)"
           security create-keychain -p "$KP" "$KEYCHAIN"
           security set-keychain-settings -lut 21600 "$KEYCHAIN"
@@ -122,7 +122,7 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KP" "$KEYCHAIN"
           security list-keychains -d user -s "$KEYCHAIN" "$(security default-keychain | tr -d ' "')"
 
-          for b in dist/botu-bun-darwin-arm64 dist/botu-bun-darwin-x64; do
+          for b in dist/boom-bun-darwin-arm64 dist/boom-bun-darwin-x64; do
             codesign --force --options runtime --timestamp --keychain "$KEYCHAIN" \
               --sign "$MACOS_SIGN_IDENTITY" "$b"
             # A bare binary can't be stapled; notarize a zip so the hash is registered.
@@ -136,15 +136,15 @@ jobs:
         if: env.HAS_SIGNING != 'true'
         run: |
           set -euo pipefail
-          for b in dist/botu-bun-darwin-arm64 dist/botu-bun-darwin-x64; do
+          for b in dist/boom-bun-darwin-arm64 dist/boom-bun-darwin-x64; do
             codesign --force --sign - "$b"
           done
 
       - name: Upload signed macOS binaries
         uses: actions/upload-artifact@v4
         with:
-          name: botu-darwin-signed
-          path: dist/botu-bun-darwin-*
+          name: boom-darwin-signed
+          path: dist/boom-bun-darwin-*
 
   release:
     needs: [build, sign-macos]
@@ -155,17 +155,17 @@ jobs:
       # counterparts. download-artifact merges into the same dir, signed copies last.
       - uses: actions/download-artifact@v4
         with:
-          name: botu-unsigned
+          name: boom-unsigned
           path: dist
       - uses: actions/download-artifact@v4
         with:
-          name: botu-darwin-signed
+          name: boom-darwin-signed
           path: dist
 
-      # Checksums must cover the *final* (signed) binaries — `botu upgrade` and install.sh
+      # Checksums must cover the *final* (signed) binaries — `boom upgrade` and install.sh
       # verify against this manifest, so it has to match exactly what ships.
       - name: Checksums
-        run: cd dist && sha256sum botu-* > SHA256SUMS
+        run: cd dist && sha256sum boom-* > SHA256SUMS
 
       - name: Tag + release with the binaries attached
         uses: softprops/action-gh-release@v2
@@ -173,5 +173,5 @@ jobs:
           tag_name: ${{ needs.build.outputs.tag }}
           name: ${{ needs.build.outputs.tag }}
           files: |
-            dist/botu-*
+            dist/boom-*
             dist/SHA256SUMS

@@ -61,7 +61,7 @@ export async function backupTo(dst: string, backupRoot: string): Promise<string>
   return target;
 }
 
-// Restore a backed-up file to `dst`, replacing whatever botu currently has there.
+// Restore a backed-up file to `dst`, replacing whatever boom currently has there.
 export async function restoreFrom(from: string, dst: string): Promise<void> {
   await rm(dst, { recursive: true, force: true });
   await mkdir(dirname(dst), { recursive: true });

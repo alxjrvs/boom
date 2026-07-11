@@ -3,8 +3,8 @@
 ## What this is
 
 **BoomTube** is a **workspace manager** — a single self-contained binary (the
-executable is **`botu`**), compiled from **TypeScript on Bun**, that provisions a
-machine from a declarative `botufile.toml` and opens portals to your code
+executable is **`boom`**), compiled from **TypeScript on Bun**, that provisions a
+machine from a declarative `boomfile.toml` and opens portals to your code
 workspaces: reconcile fast, get out of the way, get to work. It is a rewrite of
 the original bash engine (now removed); read [`SPEC.md`](SPEC.md) for the design
 of record.
@@ -15,11 +15,11 @@ of record.
    (`Bun.$`/`Bun.spawn`, `node:fs`, `Bun.color`, `bun:sqlite` if ever needed).
    Minimal ceremony; deleting custom code in favor of a built-in is the
    highest-value change.
-2. **One TypeScript binary, zero runtime deps on the user's machine.** botu
+2. **One TypeScript binary, zero runtime deps on the user's machine.** boom
    compiles via `bun build --compile` to a standalone executable (macOS/Linux).
    The ~62 MB embedded-runtime floor is an accepted tradeoff for type safety,
    testability, and a frictionless install. Config is **typed, validated TOML**
-   (`botufile.toml`), parsed once into the schema in `src/config/schema.ts`.
+   (`boomfile.toml`), parsed once into the schema in `src/config/schema.ts`.
 3. **Legible showpiece.** Small, exemplary, senior-engineer quality. Comments
    explain the *decision and the gotcha*, not the *what*.
 4. **One model, two surfaces.** `apply`/`verify`/`repair`/`uninstall` are one
@@ -37,8 +37,8 @@ of record.
 - Resources are handlers implementing the verb contract (`src/engine/resources/`);
   user **hooks** are `hooks/<name>.ts` modules exporting `apply`/`verify`/`repair`
   that receive a `HookApi` ( `with` inputs, `ok`/`warn`/`fail`, `dryRun`, `env`).
-- Mutating runs journal to `${XDG_STATE_HOME:-~/.local/state}/botu/journal/` and
-  back up displaced files; `botu rollback` replays the journal. Breadcrumbs +
+- Mutating runs journal to `${XDG_STATE_HOME:-~/.local/state}/boom/journal/` and
+  back up displaced files; `boom rollback` replays the journal. Breadcrumbs +
   manifest live under the same state dir.
 - Commit messages: `type(scope): summary`. End with the co-author trailer.
 

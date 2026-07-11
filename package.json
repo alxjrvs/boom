@@ -1,15 +1,15 @@
 {
-  "name": "botu",
+  "name": "boom",
   "version": "0.3.0",
-  "description": "BoomTube — a workspace manager (executable: botu). Provision your machine and code workspaces from a declarative botufile.toml (apply/verify/fix), open portals to your code, and get out of the way so you can work.",
+  "description": "BoomTube — a workspace manager (executable: boom). Provision your machine and code workspaces from a declarative boomfile.toml (apply/verify/fix), open portals to your code, and get out of the way so you can work.",
   "type": "module",
   "private": true,
   "bin": {
-    "botu": "./build/botu"
+    "boom": "./build/boom"
   },
   "scripts": {
     "start": "bun run src/index.ts",
-    "build": "bun build src/index.ts --compile --outfile build/botu",
+    "build": "bun build src/index.ts --compile --outfile build/boom",
     "test": "bun test",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",

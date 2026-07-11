@@ -1,4 +1,4 @@
-// `botu mcp add` claude-argv construction. The key property: the server command survives
+// `boom mcp add` claude-argv construction. The key property: the server command survives
 // as distinct argv elements (never string-joined into a shell word), so a path with a
 // space or a shell metacharacter is passed through, not re-parsed. Stricli now owns the
 // flag/positional parsing (mcp is a real route), so there's no parser to unit-test here —
@@ -38,10 +38,10 @@ test("buildMcpAddArgv passes env-file and server as sh positionals (agent path)"
   const argv = buildMcpAddArgv(
     add({ name: "sb", agent: true, envFile: "a b.env", server: ["mcp-sb", "--flag", "x;y"] }),
   );
-  // After `sh -c <script> botu-mcp`, the env-file and each server arg are distinct
+  // After `sh -c <script> boom-mcp`, the env-file and each server arg are distinct
   // positionals — never concatenated into the script — so quoting can't be broken.
   const shIdx = argv.indexOf("sh");
   expect(argv.slice(shIdx, shIdx + 2)).toEqual(["sh", "-c"]);
-  expect(argv.slice(shIdx + 3)).toEqual(["botu-mcp", "a b.env", "mcp-sb", "--flag", "x;y"]);
+  expect(argv.slice(shIdx + 3)).toEqual(["boom-mcp", "a b.env", "mcp-sb", "--flag", "x;y"]);
   expect(argv[shIdx + 2]).toContain("op-claude-agent");
 });

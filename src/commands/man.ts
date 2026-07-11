@@ -1,7 +1,7 @@
-// `botu man` — emit the botu(1) man page in roff to stdout. Generated from the command
-// catalog so it never drifts from the route map. Install:  botu man > ~/.local/share/man/man1/botu.1
+// `boom man` — emit the boom(1) man page in roff to stdout. Generated from the command
+// catalog so it never drifts from the route map. Install:  boom man > ~/.local/share/man/man1/boom.1
 import { buildCommand } from "@stricli/core";
-import type { BotuContext } from "../context.ts";
+import type { BoomContext } from "../context.ts";
 import { VERSION } from "../lib/version.ts";
 import { commandList } from "./catalog.ts";
 
@@ -13,16 +13,16 @@ export function manPage(version: string): string {
   const commands = commandList()
     .map((c) => `.TP\n.B ${c.name}\n${roff(c.brief)}`)
     .join("\n");
-  return `.TH BOTU 1 "" "botu ${version}" "botu manual"
+  return `.TH BOOM 1 "" "boom ${version}" "boom manual"
 .SH NAME
-botu \\- an installable dotfiles + workspace engine
+boom \\- an installable dotfiles + workspace engine
 .SH SYNOPSIS
-.B botu
+.B boom
 .I command
 [\\fIoptions\\fR]
 .SH DESCRIPTION
-botu reconciles a machine from a declarative
-.I botufile.toml
+boom reconciles a machine from a declarative
+.I boomfile.toml
 \\(em symlinking and copying dotfiles, installing
 packages, running steps and hooks \\(em and opens
 portals to your code workspaces.
@@ -34,26 +34,26 @@ and rollback undoes the most recent apply.
 ${commands}
 .SH FILES
 .TP
-.I botufile.toml
+.I boomfile.toml
 The typed, validated TOML config at the root of your dotfiles repo.
 .TP
-.I ~/.local/state/botu/
+.I ~/.local/state/boom/
 Journal, backups, manifest, and breadcrumbs (honors \\fB$XDG_STATE_HOME\\fR).
 .SH ENVIRONMENT
 .TP
-.B BOTU_CONFIG
-Override the dotfiles repo botu resolves.
+.B BOOM_CONFIG
+Override the dotfiles repo boom resolves.
 .TP
-.B BOTU_OS, BOTU_HOST
+.B BOOM_OS, BOOM_HOST
 Override the auto-detected OS / hostname used to gate sections.
 .SH SEE ALSO
-.BR botu-verify (1),
-.BR botu-apply (1)
+.BR boom-verify (1),
+.BR boom-apply (1)
 `;
 }
 
-export const manCommand = buildCommand<Record<never, never>, [], BotuContext>({
-  docs: { brief: "Emit the botu(1) man page (roff)" },
+export const manCommand = buildCommand<Record<never, never>, [], BoomContext>({
+  docs: { brief: "Emit the boom(1) man page (roff)" },
   parameters: {},
   func() {
     this.process.stdout.write(manPage(VERSION));

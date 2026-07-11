@@ -1,4 +1,4 @@
-# botu — dev tasks (TypeScript on Bun). These lanes mirror CI.
+# boom — dev tasks (TypeScript on Bun). These lanes mirror CI.
 .PHONY: all check lint fmt typecheck test build build-all
 
 all: check
@@ -18,10 +18,10 @@ test: ## bun test
 	bun test
 
 build: ## compile a standalone binary for the host
-	bun build src/index.ts --compile --outfile build/botu
+	bun build src/index.ts --compile --outfile build/boom
 
 build-all: ## cross-compile the release target matrix
 	@for t in bun-darwin-arm64 bun-darwin-x64 bun-linux-x64; do \
 		echo "compiling $$t"; \
-		bun build src/index.ts --compile --target=$$t --outfile build/botu-$$t; \
+		bun build src/index.ts --compile --target=$$t --outfile build/boom-$$t; \
 	done

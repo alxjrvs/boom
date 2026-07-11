@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>BoomTube — botu</title>
-<meta name="description" content="BoomTube (botu) — a workspace manager. One self-contained binary provisions your machine and code workspaces from a declarative botufile.toml: apply, verify, repair, roll back — and opens portals to your code. Named for Jack Kirby's Boom Tube.">
+<title>BoomTube — boom</title>
+<meta name="description" content="BoomTube (boom) — a workspace manager. One self-contained binary provisions your machine and code workspaces from a declarative boomfile.toml: apply, verify, repair, roll back — and opens portals to your code. Named for Jack Kirby's Boom Tube.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='48' fill='%230b0a12'/%3E%3Ccircle cx='50' cy='50' r='36' fill='%237a1fa2'/%3E%3Ccircle cx='50' cy='50' r='27' fill='%23e2231a'/%3E%3Ccircle cx='50' cy='50' r='18' fill='%23ffcf00'/%3E%3Ccircle cx='50' cy='50' r='9' fill='%23fff8e7'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="styles.css">
 </head>
@@ -79,13 +79,13 @@
 <!-- ============================== MASTHEAD ============================== -->
 <header class="masthead">
   <div class="wrap">
-    <a class="logo" href="index.html">BOTU<span class="bang">!</span></a>
+    <a class="logo" href="index.html">BOOM<span class="bang">!</span></a>
     <nav aria-label="Pages">
       <a href="index.html" aria-current="page">Home</a>
       <a href="guide.html">Guide</a>
       <a href="spec.html">Spec</a>
     </nav>
-    <a class="btn gold" href="https://github.com/alxjrvs/botu">GitHub</a>
+    <a class="btn gold" href="https://github.com/alxjrvs/boom">GitHub</a>
   </div>
 </header>
 
@@ -197,7 +197,7 @@
     <div class="hero-card">
       <p class="caption">In a blaze of sound and light — a portal tears open!</p>
       <h1 class="display shout">BOOM<span class="tube">TUBE</span></h1>
-      <p class="kicker">The workspace manager &middot; one binary: <code>botu</code></p>
+      <p class="kicker">The workspace manager &middot; one binary: <code>boom</code></p>
       <div class="cta">
         <a class="btn gold" href="#quickstart">Quick Start &darr;</a>
         <a class="btn blue" href="guide.html">Read the Guide</a>
@@ -216,7 +216,7 @@
       <h2 class="display">The File Goes In &mdash; The Machine Comes Out</h2>
     </div>
 
-    <p class="lede">One file declares your machine — your shell, your packages, your macOS defaults, your secrets. <code>botu</code> makes reality match it, and can prove it.</p>
+    <p class="lede">One file declares your machine — your shell, your packages, your macOS defaults, your secrets. <code>boom</code> makes reality match it, and can prove it.</p>
 
     <div class="concept">
       <div class="cnode repo">
@@ -230,7 +230,7 @@
           </svg>
         </div>
         <p class="cnode-title">Your Repo</p>
-        <p class="cnode-sub"><code>botufile.toml</code> — the plan</p>
+        <p class="cnode-sub"><code>boomfile.toml</code> — the plan</p>
       </div>
 
       <div class="cconn" aria-hidden="true">
@@ -241,7 +241,7 @@
       <div class="cnode portal">
         <div class="cnode-glyph"><svg class="cportal" viewBox="0 0 100 100" aria-hidden="true"><use href="#miniportal" width="100" height="100"/></svg></div>
         <p class="cnode-title">Boom Tube</p>
-        <p class="cnode-sub"><code>botu</code> — the engine</p>
+        <p class="cnode-sub"><code>boom</code> — the engine</p>
       </div>
 
       <div class="cconn" aria-hidden="true">
@@ -263,7 +263,7 @@
       </div>
     </div>
 
-    <p class="concept-note lede">Point <code>botu</code> at your repo and step through: <strong>apply</strong> makes the machine match the file, <strong>verify</strong> proves it, <strong>repair</strong> mends drift — and <strong>rollback</strong> walks it all back, every journaled step retraced.</p>
+    <p class="concept-note lede">Point <code>boom</code> at your repo and step through: <strong>apply</strong> makes the machine match the file, <strong>verify</strong> proves it, <strong>repair</strong> mends drift — and <strong>rollback</strong> walks it all back, every journaled step retraced.</p>
   </div>
 </section>
 
@@ -282,8 +282,8 @@
         <header><h3>Install! <span class="ep">one</span></h3></header>
         <div class="kbody">
           <div class="codebox">
-            <pre tabindex="0" role="region" aria-label="Install botu with the curl installer"><span class="c"># one binary onto your PATH</span>
-curl -fsSL https://raw.githubusercontent.com/alxjrvs/botu/main/install.sh | sh</pre>
+            <pre tabindex="0" role="region" aria-label="Install boom with the curl installer"><span class="c"># one binary onto your PATH</span>
+curl -fsSL https://raw.githubusercontent.com/alxjrvs/boom/main/install.sh | sh</pre>
           </div>
           <p>macOS arm64/x64, Linux x64 — nothing else required. Homebrew works too; see the <a href="guide.html#install">Guide</a>.</p>
         </div>
@@ -294,7 +294,7 @@ curl -fsSL https://raw.githubusercontent.com/alxjrvs/botu/main/install.sh | sh</
         <div class="kbody">
           <div class="codebox">
             <pre tabindex="0" role="region" aria-label="Bootstrap a machine"><span class="c"># clone your dotfiles repo and apply it</span>
-<span class="k">botu</span> source set you/dotfiles</pre>
+<span class="k">boom</span> source set you/dotfiles</pre>
           </div>
           <p>A bare machine, claimed in one shot — clone plus a first <code>apply</code>.</p>
         </div>
@@ -304,8 +304,8 @@ curl -fsSL https://raw.githubusercontent.com/alxjrvs/botu/main/install.sh | sh</
         <header><h3>Stay in sync! <span class="ep">three</span></h3></header>
         <div class="kbody">
           <div class="codebox">
-            <pre tabindex="0" role="region" aria-label="Keep the machine in sync"><span class="k">botu</span> apply    <span class="c"># pull the repo, reconcile</span>
-<span class="k">botu</span> verify   <span class="c"># hunt for drift</span></pre>
+            <pre tabindex="0" role="region" aria-label="Keep the machine in sync"><span class="k">boom</span> apply    <span class="c"># pull the repo, reconcile</span>
+<span class="k">boom</span> verify   <span class="c"># hunt for drift</span></pre>
           </div>
           <p>The repo is the source of truth. <code>verify</code> reports drift as exit 0 / 2 / 1 — ok / warn / fail; <code>repair</code> mends it. <code>apply</code> overwrites conflicting files by default — pass <code>--skip</code> to spare them.</p>
         </div>
@@ -330,19 +330,19 @@ curl -fsSL https://raw.githubusercontent.com/alxjrvs/botu/main/install.sh | sh</
         <p><code>apply</code> / <code>verify</code> / <code>repair</code> — one loop over every resource. And <code>rollback</code>, for the way back.</p>
         <span class="go">Open &rarr;</span>
       </a>
-      <a class="card" href="guide.html#botufile">
-        <h3>The botufile.toml</h3>
+      <a class="card" href="guide.html#boomfile">
+        <h3>The boomfile.toml</h3>
         <p>The typed, validated TOML that declares your whole machine, in phase order.</p>
         <span class="go">Open &rarr;</span>
       </a>
       <a class="card" href="guide.html#git">
         <h3>Config-Repo Git</h3>
-        <p><code>diff</code> / <code>commit</code> / <code>push</code> / <code>reset</code> your dotfiles repo without leaving botu.</p>
+        <p><code>diff</code> / <code>commit</code> / <code>push</code> / <code>reset</code> your dotfiles repo without leaving boom.</p>
         <span class="go">Open &rarr;</span>
       </a>
       <a class="card" href="guide.html#portals">
         <h3>Code Portals</h3>
-        <p><code>botu code</code> opens every repo under <code>~/Code</code> in one step.</p>
+        <p><code>boom code</code> opens every repo under <code>~/Code</code> in one step.</p>
         <span class="go">Open &rarr;</span>
       </a>
       <a class="card" href="guide.html#housekeeping">
@@ -370,7 +370,7 @@ curl -fsSL https://raw.githubusercontent.com/alxjrvs/botu/main/install.sh | sh</
     <div class="links">
       <a class="btn gold" href="guide.html">Read the Guide</a>
       <a class="btn blue" href="spec.html">The Design Spec</a>
-      <a class="btn" href="https://github.com/alxjrvs/botu">GitHub &middot; alxjrvs/botu</a>
+      <a class="btn" href="https://github.com/alxjrvs/boom">GitHub &middot; alxjrvs/boom</a>
     </div>
     <p class="credits">Built with <strong>TypeScript on Bun</strong> &middot; @stricli/core &middot; valibot &middot; smol-toml.</p>
     <p class="credits">Named for Jack Kirby&rsquo;s <strong>Boom Tube</strong> — the Fourth World teleportation portal (<em>New Gods</em>, 1971). Drawn in his honor: krackle, Ben-Day dots, and all.</p>

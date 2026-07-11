@@ -84,7 +84,7 @@ async function applyLink(
     report.ok(`${disp} overwritten`);
     return;
   }
-  // skip: never clobber a file botu doesn't own.
+  // skip: never clobber a file boom doesn't own.
   report.skip(`${disp} exists but is not our symlink — skipped`);
 }
 
@@ -103,7 +103,7 @@ export async function reconcileLink(entry: Link, ctx: ReconcileCtx): Promise<voi
       // `mode` on a link sets the *target's* mode (chmod follows the symlink to the
       // repo file) — which is exactly what tools reading through the link, e.g. ssh on
       // ~/.ssh/config, check. Only do it once the link is ours: if applyLink skipped a
-      // foreign file, chmod-ing it would mutate a file botu doesn't own.
+      // foreign file, chmod-ing it would mutate a file boom doesn't own.
       if (entry.mode && !ctx.dryRun && (await linkTarget(dst)) === src) {
         try {
           await chmod(dst, Number.parseInt(entry.mode, 8));

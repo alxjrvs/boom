@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// botu entrypoint. Compiled to a standalone binary via `bun build --compile`.
+// boom entrypoint. Compiled to a standalone binary via `bun build --compile`.
 // Dispatch has exactly one branch, and no hardcoded command names: a first arg that is
 // neither a flag nor a known route is tried as a discovered user command
 // (<config>/commands/<name>.ts); everything else — including unknown input — goes to

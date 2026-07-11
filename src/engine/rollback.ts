@@ -1,13 +1,13 @@
 // Roll back a previous apply by replaying its journal's `done` records in reverse:
-// remove what botu created, restore what an overwrite displaced.
+// remove what boom created, restore what an overwrite displaced.
 import { rm } from "node:fs/promises";
-import type { BotuContext } from "../context.ts";
+import type { BoomContext } from "../context.ts";
 import { colorEnabled } from "../lib/color.ts";
 import { displayPath, restoreFrom } from "../lib/fs.ts";
 import { Reporter } from "../lib/reporter.ts";
 import { readRun } from "./journal.ts";
 
-export async function rollback(ctx: BotuContext, runId?: string): Promise<number> {
+export async function rollback(ctx: BoomContext, runId?: string): Promise<number> {
   const report = new Reporter(ctx.process.stdout, ctx.process.stderr, colorEnabled(ctx.env));
   const run = await readRun(ctx.env, runId);
   if (!run) {

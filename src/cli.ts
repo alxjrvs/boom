@@ -36,18 +36,18 @@ export const routes = buildRouteMap({
     skill: skillCommand,
   },
   docs: {
-    brief: "botu — a workspace manager. Provision your machine and code workspaces from a botufile.toml.",
+    brief: "boom — a workspace manager. Provision your machine and code workspaces from a boomfile.toml.",
   },
 });
 
 export const app = buildApplication(routes, {
-  name: "botu",
+  name: "boom",
   versionInfo: { currentVersion: VERSION },
   scanner: {
     // Accept kebab-case for camelCase flags (so `--dry-run` maps to `dryRun`).
     caseStyle: "allow-kebab-for-camel",
     // Treat `--` as an escape: everything after it is captured as raw positionals rather
-    // than parsed as flags. This is what lets `botu mcp add … -- <server cmd>` carry a
+    // than parsed as flags. This is what lets `boom mcp add … -- <server cmd>` carry a
     // server argv (with its own flags) verbatim, so mcp needs no pre-Stricli passthrough.
     allowArgumentEscapeSequence: true,
   },

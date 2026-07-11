@@ -10,21 +10,21 @@ import { commandList, commandNames } from "../src/commands/catalog.ts";
 import { completionScript } from "../src/commands/completions.ts";
 import { manPage } from "../src/commands/man.ts";
 import { skillDoc } from "../src/commands/skill.ts";
-import type { BotuContext } from "../src/context.ts";
+import type { BoomContext } from "../src/context.ts";
 import { doctor } from "../src/engine/doctor.ts";
 import { validateConfig } from "../src/engine/validate.ts";
 
 async function base(): Promise<string> {
-  return mkdtemp(join(tmpdir(), "botu-x-"));
+  return mkdtemp(join(tmpdir(), "boom-x-"));
 }
 
-function ctxFor(env: Record<string, string | undefined>, cwd: string): { ctx: BotuContext; out(): string } {
+function ctxFor(env: Record<string, string | undefined>, cwd: string): { ctx: BoomContext; out(): string } {
   const buf = { out: "" };
   const write = (s: string) => {
     buf.out += s;
   };
   const proc = { stdout: { write }, stderr: { write }, env, exitCode: 0 };
-  return { ctx: { process: proc, env, cwd } as unknown as BotuContext, out: () => buf.out };
+  return { ctx: { process: proc, env, cwd } as unknown as BoomContext, out: () => buf.out };
 }
 
 // ---- catalog ----------------------------------------------------------------
@@ -43,13 +43,13 @@ test("command list (derived from the route map) is unique and includes the core 
 
 test("bash completion lists every command and wires the function", () => {
   const s = completionScript("bash");
-  expect(s).toContain("complete -F _botu botu");
+  expect(s).toContain("complete -F _boom boom");
   for (const name of commandNames()) expect(s).toContain(name);
 });
 
 test("zsh completion is a #compdef with described commands", () => {
   const s = completionScript("zsh");
-  expect(s.startsWith("#compdef botu")).toBe(true);
+  expect(s.startsWith("#compdef boom")).toBe(true);
   expect(s).toContain("_describe");
   expect(s).toContain(`'validate:${commandList().find((c) => c.name === "validate")?.brief}'`);
   // An apostrophe in a brief is escaped for the single-quoted zsh literal.
@@ -58,7 +58,7 @@ test("zsh completion is a #compdef with described commands", () => {
 
 test("fish completion emits a per-command line", () => {
   const s = completionScript("fish");
-  expect(s).toContain("complete -c botu -f");
+  expect(s).toContain("complete -c boom -f");
   expect(s).toContain("-a 'verify'");
 });
 
@@ -66,7 +66,7 @@ test("fish completion emits a per-command line", () => {
 
 test("man page is valid-ish roff naming every command", () => {
   const m = manPage("9.9.9");
-  expect(m).toContain('.TH BOTU 1 "" "botu 9.9.9"');
+  expect(m).toContain('.TH BOOM 1 "" "boom 9.9.9"');
   expect(m).toContain(".SH COMMANDS");
   for (const c of commandList()) expect(m).toContain(`.B ${c.name}`);
 });
@@ -75,9 +75,9 @@ test("man page is valid-ish roff naming every command", () => {
 
 test("skill doc is a SKILL.md with frontmatter naming every command", () => {
   const s = skillDoc("9.9.9");
-  expect(s).toStartWith("---\nname: botu\n");
-  expect(s).toContain("# botu (v9.9.9)"); // version stamped in the heading
-  for (const c of commandList()) expect(s).toContain(`\`botu ${c.name}\``);
+  expect(s).toStartWith("---\nname: boom\n");
+  expect(s).toContain("# boom (v9.9.9)"); // version stamped in the heading
+  for (const c of commandList()) expect(s).toContain(`\`boom ${c.name}\``);
   // the safety facts an agent must not miss
   expect(s).toContain("--dry-run");
   expect(s).toContain("--json");
@@ -88,8 +88,8 @@ test("skill --install writes SKILL.md under the Claude config dir", async () => 
   const cfg = await base(); // stand in for ~/.claude via CLAUDE_CONFIG_DIR
   const { ctx, out } = ctxFor({ CLAUDE_CONFIG_DIR: cfg, NO_COLOR: "1" }, cfg);
   await run(app, ["skill", "--install"], ctx);
-  const file = join(cfg, "skills", "botu", "SKILL.md");
-  expect(await readFile(file, "utf8")).toStartWith("---\nname: botu\n");
+  const file = join(cfg, "skills", "boom", "SKILL.md");
+  expect(await readFile(file, "utf8")).toStartWith("---\nname: boom\n");
   expect(out()).toContain(`installed skill → ${file}`);
 });
 
@@ -97,20 +97,20 @@ test("skill --install writes SKILL.md under the Claude config dir", async () => 
 
 test("validate accepts a valid base + overlay and reports each file", async () => {
   const repo = await base();
-  await writeFile(join(repo, "botufile.toml"), `[[section]]\nname = "base"\n`);
-  await writeFile(join(repo, "botufile.linux.toml"), `[[section]]\nname = "linux"\n`);
-  const { ctx, out } = ctxFor({ BOTU_CONFIG: repo, NO_COLOR: "1" }, repo);
+  await writeFile(join(repo, "boomfile.toml"), `[[section]]\nname = "base"\n`);
+  await writeFile(join(repo, "boomfile.linux.toml"), `[[section]]\nname = "linux"\n`);
+  const { ctx, out } = ctxFor({ BOOM_CONFIG: repo, NO_COLOR: "1" }, repo);
   expect(await validateConfig(ctx)).toBe(0);
-  expect(out()).toContain("botufile.toml");
-  expect(out()).toContain("botufile.linux.toml");
+  expect(out()).toContain("boomfile.toml");
+  expect(out()).toContain("boomfile.linux.toml");
   expect(out()).toContain("config OK");
 });
 
 test("validate fails (exit 1) on a schema-invalid overlay", async () => {
   const repo = await base();
-  await writeFile(join(repo, "botufile.toml"), `[[section]]\nname = "base"\n`);
-  await writeFile(join(repo, "botufile.darwin.toml"), `[[section]]\nlink = "not-an-array"\n`);
-  const { ctx } = ctxFor({ BOTU_CONFIG: repo, NO_COLOR: "1" }, repo);
+  await writeFile(join(repo, "boomfile.toml"), `[[section]]\nname = "base"\n`);
+  await writeFile(join(repo, "boomfile.darwin.toml"), `[[section]]\nlink = "not-an-array"\n`);
+  const { ctx } = ctxFor({ BOOM_CONFIG: repo, NO_COLOR: "1" }, repo);
   expect(await validateConfig(ctx)).toBe(1);
 });
 
@@ -124,26 +124,26 @@ test("validate fails when no dotfiles repo resolves", async () => {
 
 test("doctor reports a parseable config and a writable state dir", async () => {
   const repo = await base();
-  await writeFile(join(repo, "botufile.toml"), `[[section]]\nname = "x"\n`);
+  await writeFile(join(repo, "boomfile.toml"), `[[section]]\nname = "x"\n`);
   const state = await base();
-  // BOTU_OS=linux skips the macOS keychain probe so the result is deterministic.
+  // BOOM_OS=linux skips the macOS keychain probe so the result is deterministic.
   const { ctx, out } = ctxFor(
-    { BOTU_CONFIG: repo, XDG_STATE_HOME: state, BOTU_OS: "linux", NO_COLOR: "1" },
+    { BOOM_CONFIG: repo, XDG_STATE_HOME: state, BOOM_OS: "linux", NO_COLOR: "1" },
     repo,
   );
   const rc = await doctor(ctx);
-  expect(out()).toContain("botufile.toml — 1 section(s)");
+  expect(out()).toContain("boomfile.toml — 1 section(s)");
   expect(out()).toContain("state dir writable");
   // No failures possible here (config valid, state writable); tool warnings may bump to 2.
   expect([0, 2]).toContain(rc);
 });
 
-test("doctor fails (exit 1) on an unparseable botufile", async () => {
+test("doctor fails (exit 1) on an unparseable boomfile", async () => {
   const repo = await base();
   await mkdir(repo, { recursive: true });
-  await writeFile(join(repo, "botufile.toml"), `this = is = not = toml`);
+  await writeFile(join(repo, "boomfile.toml"), `this = is = not = toml`);
   const { ctx } = ctxFor(
-    { BOTU_CONFIG: repo, XDG_STATE_HOME: await base(), BOTU_OS: "linux", NO_COLOR: "1" },
+    { BOOM_CONFIG: repo, XDG_STATE_HOME: await base(), BOOM_OS: "linux", NO_COLOR: "1" },
     repo,
   );
   expect(await doctor(ctx)).toBe(1);

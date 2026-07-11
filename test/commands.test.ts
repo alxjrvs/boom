@@ -4,13 +4,13 @@ import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  BotuConfigError,
+  BoomConfigError,
   configRepoCacheDir,
   readConfigBreadcrumb,
   resolveConfigDir,
 } from "../src/config/load.ts";
 import { linkRemoteConfigRepo } from "../src/config/remote.ts";
-import type { BotuContext } from "../src/context.ts";
+import type { BoomContext } from "../src/context.ts";
 import {
   agentsFarmDir,
   findRepos,
@@ -23,15 +23,15 @@ import { runUserCommand } from "../src/engine/discovery.ts";
 import { captureArgv } from "../src/lib/proc.ts";
 
 async function base(): Promise<string> {
-  return mkdtemp(join(tmpdir(), "botu-cmd-"));
+  return mkdtemp(join(tmpdir(), "boom-cmd-"));
 }
 
 // A local git repo with one commit — plays the role of "remote" for linkRemoteConfigRepo
 // tests. `git clone` treats a local path exactly like any other remote, so no network
 // (or a bare repo) is needed.
-async function gitFixture(withBotufile = true): Promise<string> {
+async function gitFixture(withBoomfile = true): Promise<string> {
   const dir = await base();
-  if (withBotufile) await writeFile(join(dir, "botufile.toml"), `[[section]]\nname = "x"\n`);
+  if (withBoomfile) await writeFile(join(dir, "boomfile.toml"), `[[section]]\nname = "x"\n`);
   else await writeFile(join(dir, "README.md"), "hi\n");
   const git = (...args: string[]) =>
     Bun.spawnSync(["git", "-C", dir, ...args], { stdout: "ignore", stderr: "ignore" });
@@ -41,7 +41,7 @@ async function gitFixture(withBotufile = true): Promise<string> {
   return dir;
 }
 
-function ctxFor(env: Record<string, string | undefined>, cwd: string): { ctx: BotuContext; out(): string } {
+function ctxFor(env: Record<string, string | undefined>, cwd: string): { ctx: BoomContext; out(): string } {
   const buf = { out: "" };
   const proc = {
     stdout: {
@@ -57,21 +57,21 @@ function ctxFor(env: Record<string, string | undefined>, cwd: string): { ctx: Bo
     env,
     exitCode: 0,
   };
-  return { ctx: { process: proc, env, cwd } as unknown as BotuContext, out: () => buf.out };
+  return { ctx: { process: proc, env, cwd } as unknown as BoomContext, out: () => buf.out };
 }
 
-test("resolveCodeDir honors BOTU_CODE", async () => {
+test("resolveCodeDir honors BOOM_CODE", async () => {
   const dir = await base();
-  expect(await resolveCodeDir({ BOTU_CODE: dir })).toBe(dir);
+  expect(await resolveCodeDir({ BOOM_CODE: dir })).toBe(dir);
 });
 
-test("resolveCodeDir reads the breadcrumb `botu code init` writes", async () => {
+test("resolveCodeDir reads the breadcrumb `boom code init` writes", async () => {
   const stateHome = await base();
   const codeDir = await base();
   const env = { XDG_STATE_HOME: stateHome };
-  // Mirror what `botu code init <codeDir>` records.
-  await mkdir(join(stateHome, "botu"), { recursive: true });
-  await writeFile(join(stateHome, "botu", "code"), `${codeDir}\n`);
+  // Mirror what `boom code init <codeDir>` records.
+  await mkdir(join(stateHome, "boom"), { recursive: true });
+  await writeFile(join(stateHome, "boom", "code"), `${codeDir}\n`);
   expect(await resolveCodeDir(env)).toBe(codeDir);
 });
 
@@ -155,32 +155,32 @@ test("pruneFarmProject is a no-op when the config is missing or HOME is unset", 
 
 test("runUserCommand dispatches a config-supplied command", async () => {
   const repo = await base();
-  await writeFile(join(repo, "botufile.toml"), `[[section]]\nname = "x"\n`);
+  await writeFile(join(repo, "boomfile.toml"), `[[section]]\nname = "x"\n`);
   await mkdir(join(repo, "commands"), { recursive: true });
   await writeFile(
     join(repo, "commands", "hello.ts"),
     `export default function (args, ctx) { ctx.process.stdout.write("hi " + args.join(",")); return 0; }\n`,
   );
-  const { ctx, out } = ctxFor({ BOTU_CONFIG: repo }, repo);
+  const { ctx, out } = ctxFor({ BOOM_CONFIG: repo }, repo);
   const rc = await runUserCommand("hello", ["a", "b"], ctx);
   expect(rc).toBe(0);
   expect(out()).toBe("hi a,b");
 });
 
-test("linkRemoteConfigRepo clones into the managed cache dir and records the breadcrumb (the `botu source set` core)", async () => {
+test("linkRemoteConfigRepo clones into the managed cache dir and records the breadcrumb (the `boom source set` core)", async () => {
   const origin = await gitFixture();
   const env = { XDG_STATE_HOME: await base() };
   const target = await linkRemoteConfigRepo(env, origin);
   expect(target).toBe(configRepoCacheDir(env));
-  // The breadcrumb is the only resolution signal here (no BOTU_CONFIG, cwd elsewhere).
+  // The breadcrumb is the only resolution signal here (no BOOM_CONFIG, cwd elsewhere).
   expect(await resolveConfigDir(env, await base())).toBe(target);
   expect((await readConfigBreadcrumb(env))?.remote.url).toBe(origin);
 });
 
-test("linkRemoteConfigRepo rejects a remote with no botufile.toml", async () => {
+test("linkRemoteConfigRepo rejects a remote with no boomfile.toml", async () => {
   const origin = await gitFixture(false);
   const env = { XDG_STATE_HOME: await base() };
-  expect(linkRemoteConfigRepo(env, origin)).rejects.toBeInstanceOf(BotuConfigError);
+  expect(linkRemoteConfigRepo(env, origin)).rejects.toBeInstanceOf(BoomConfigError);
 });
 
 test("linkRemoteConfigRepo refuses to clobber an unclean managed clone on re-link", async () => {
@@ -188,7 +188,7 @@ test("linkRemoteConfigRepo refuses to clobber an unclean managed clone on re-lin
   const env = { XDG_STATE_HOME: await base() };
   const dest = await linkRemoteConfigRepo(env, origin);
   await writeFile(join(dest, "dirty.txt"), "uncommitted\n");
-  expect(linkRemoteConfigRepo(env, origin)).rejects.toBeInstanceOf(BotuConfigError);
+  expect(linkRemoteConfigRepo(env, origin)).rejects.toBeInstanceOf(BoomConfigError);
 });
 
 test("linkRemoteConfigRepo refuses to clobber a managed clone with committed-but-unpushed work", async () => {
@@ -202,7 +202,7 @@ test("linkRemoteConfigRepo refuses to clobber a managed clone with committed-but
   git("-c", "user.email=t@t.com", "-c", "user.name=t", "commit", "-q", "-m", "local work");
   // Working tree is clean once committed — `git status --porcelain` alone would miss
   // this. Re-linking must still refuse, or the commit is silently discarded on re-clone.
-  expect(linkRemoteConfigRepo(env, origin)).rejects.toBeInstanceOf(BotuConfigError);
+  expect(linkRemoteConfigRepo(env, origin)).rejects.toBeInstanceOf(BoomConfigError);
 });
 
 test("linkRemoteConfigRepo refuses to clobber unpushed commits on a pinned (detached-HEAD) clone", async () => {
@@ -219,7 +219,7 @@ test("linkRemoteConfigRepo refuses to clobber unpushed commits on a pinned (deta
     ["git", "-C", dest, "-c", "user.email=t@t.com", "-c", "user.name=t", "commit", "-q", "-m", "pinned work"],
     {},
   );
-  expect(await linkRemoteConfigRepo(env, origin).catch((e) => e)).toBeInstanceOf(BotuConfigError);
+  expect(await linkRemoteConfigRepo(env, origin).catch((e) => e)).toBeInstanceOf(BoomConfigError);
 });
 
 test("a failed re-link leaves the existing clone and breadcrumb untouched", async () => {
@@ -231,7 +231,7 @@ test("a failed re-link leaves the existing clone and breadcrumb untouched", asyn
   // clone must survive (offline apply depends on it), and the breadcrumb must still
   // name `good` — not dangle over a half-linked dir holding `other`'s content.
   expect(await linkRemoteConfigRepo(env, `${other}@nosuchref`).catch((e) => e)).toBeInstanceOf(
-    BotuConfigError,
+    BoomConfigError,
   );
   expect((await readConfigBreadcrumb(env))?.remote.url).toBe(good);
   expect(await resolveConfigDir(env, await base())).toBe(dest);
@@ -240,12 +240,12 @@ test("a failed re-link leaves the existing clone and breadcrumb untouched", asyn
 
 test("linkRemoteConfigRepo refuses a relative state dir (HOME and XDG_STATE_HOME both unset)", async () => {
   const origin = await gitFixture();
-  expect(linkRemoteConfigRepo({}, origin)).rejects.toBeInstanceOf(BotuConfigError);
+  expect(linkRemoteConfigRepo({}, origin)).rejects.toBeInstanceOf(BoomConfigError);
 });
 
 test("runUserCommand returns undefined for an unknown command", async () => {
   const repo = await base();
-  await writeFile(join(repo, "botufile.toml"), `[[section]]\nname = "x"\n`);
-  const { ctx } = ctxFor({ BOTU_CONFIG: repo }, repo);
+  await writeFile(join(repo, "boomfile.toml"), `[[section]]\nname = "x"\n`);
+  const { ctx } = ctxFor({ BOOM_CONFIG: repo }, repo);
   expect(await runUserCommand("nope", [], ctx)).toBeUndefined();
 });

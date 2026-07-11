@@ -1,16 +1,16 @@
-// `botu mcp add <name> [--scope S] [--env-file F] [--agent] -- <server…>` — register an
+// `boom mcp add <name> [--scope S] [--env-file F] [--agent] -- <server…>` — register an
 // MCP server the 1Password-native way: wrap it in `op run --env-file` so secrets resolve
 // from op:// refs, never on disk. A real Stricli route: the app enables
 // `allowArgumentEscapeSequence`, so everything after `--` is captured verbatim as trailing
 // positionals (the server argv, which can itself contain flags and a second `--`) instead
-// of being parsed as botu's own flags — no pre-Stricli passthrough needed.
+// of being parsed as boom's own flags — no pre-Stricli passthrough needed.
 import { buildCommand, buildRouteMap } from "@stricli/core";
-import type { BotuContext } from "../context.ts";
+import type { BoomContext } from "../context.ts";
 import { hasCommand } from "../lib/proc.ts";
 
 const KEYCHAIN_ITEM = "op-claude-agent";
 // Resolve `op` from PATH rather than hardcoding /opt/homebrew (Apple-Silicon-only):
-// Intel macs install it under /usr/local/bin and Linux elsewhere, and botu ships a
+// Intel macs install it under /usr/local/bin and Linux elsewhere, and boom ships a
 // Linux binary. The agent wrapper runs under `sh -c`, so a bare name resolves there.
 const OP_BIN = "op";
 
@@ -35,7 +35,7 @@ export interface McpAdd {
 // as distinct argv elements (never string-joined), so quoting/spaces survive.
 export function buildMcpAddArgv(p: McpAdd): string[] {
   const wrapped = p.agent
-    ? ["sh", "-c", AGENT_WRAPPER, "botu-mcp", p.envFile, ...p.server]
+    ? ["sh", "-c", AGENT_WRAPPER, "boom-mcp", p.envFile, ...p.server]
     : ["op", "run", `--env-file=${p.envFile}`, "--", ...p.server];
   return ["claude", "mcp", "add", p.name, "--scope", p.scope, "--", ...wrapped];
 }
@@ -45,7 +45,7 @@ type McpAddFlags = { scope?: string; envFile?: string; agent?: boolean };
 // Positionals arrive as [name, ...server]: `name` is the one positional before `--`, and
 // the escape sequence delivers the whole server command after it. minimum: 2 → a name plus
 // at least one server token.
-const mcpAddCommand = buildCommand<McpAddFlags, string[], BotuContext>({
+const mcpAddCommand = buildCommand<McpAddFlags, string[], BoomContext>({
   docs: { brief: "Register an MCP server, wrapping it in `op run --env-file`" },
   parameters: {
     flags: {
@@ -80,7 +80,7 @@ const mcpAddCommand = buildCommand<McpAddFlags, string[], BotuContext>({
   func(flags, ...args) {
     const [name, ...server] = args;
     if (!hasCommand("claude", this.env)) {
-      this.process.stderr.write("botu mcp: claude not on PATH\n");
+      this.process.stderr.write("boom mcp: claude not on PATH\n");
       this.process.exitCode = 2;
       return;
     }

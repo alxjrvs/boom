@@ -5,8 +5,8 @@
 import { join } from "node:path";
 import { loadConfig, loadOptionalConfigFile, resolveConfigDir } from "../config/load.ts";
 import { overlayFiles, profileContext, sectionApplies } from "../config/profile.ts";
-import type { Botufile, Section } from "../config/schema.ts";
-import type { BotuContext } from "../context.ts";
+import type { Boomfile, Section } from "../config/schema.ts";
+import type { BoomContext } from "../context.ts";
 import { colorEnabled } from "../lib/color.ts";
 import { backupTo, displayPath, filesEqual, linkTarget, pathExists, rm } from "../lib/fs.ts";
 import { Reporter } from "../lib/reporter.ts";
@@ -58,11 +58,11 @@ async function reapOrphans(ctx: ReconcileCtx, prior: readonly ManifestEntry[]): 
   };
   const reap = async (dst: string, disp: string, why: string): Promise<void> => {
     head();
-    if (ctx.verb === "verify") ctx.report.warn(`${disp} ${why} — botu repair to reap`);
+    if (ctx.verb === "verify") ctx.report.warn(`${disp} ${why} — boom repair to reap`);
     else if (ctx.dryRun) ctx.report.note(`would reap ${disp}`);
     else {
       // Same transaction as every other mutation here: journaled with a backup, so
-      // `botu rollback` can restore a reaped file instead of the deletion being a
+      // `boom rollback` can restore a reaped file instead of the deletion being a
       // silent, un-undoable side effect outside the run's safety net.
       await ctx.journal?.intent("reap", dst);
       const undo: UndoToken = ctx.backupRoot
@@ -79,7 +79,7 @@ async function reapOrphans(ctx: ReconcileCtx, prior: readonly ManifestEntry[]): 
     const disp = displayPath(entry.dst, ctx.env);
     if (entry.kind === "copy") {
       // A copy is a regular file with no link target; only reap it when it still
-      // byte-matches the source botu wrote, so a file the user has since edited (or
+      // byte-matches the source boom wrote, so a file the user has since edited (or
       // whose source is gone) is left in place rather than silently deleted.
       if (!(await pathExists(entry.dst))) continue;
       if (entry.src && (await filesEqual(entry.dst, entry.src))) {
@@ -96,7 +96,7 @@ async function reapOrphans(ctx: ReconcileCtx, prior: readonly ManifestEntry[]): 
   }
 }
 
-export async function reconcile(verb: Verb, ctx: BotuContext, opts: ReconcileOptions): Promise<number> {
+export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOptions): Promise<number> {
   const json = opts.json ?? false;
   const report = new Reporter(ctx.process.stdout, ctx.process.stderr, colorEnabled(ctx.env), json);
 
@@ -146,7 +146,7 @@ export async function reconcile(verb: Verb, ctx: BotuContext, opts: ReconcileOpt
 
   const repo = await resolveConfigDir(ctx.env, ctx.cwd);
   if (!repo) {
-    report.fail("no dotfiles repo found — run `botu source set <owner/repo>`");
+    report.fail("no dotfiles repo found — run `boom source set <owner/repo>`");
     return finish();
   }
   const dryRun = opts.dryRun ?? false;
@@ -154,7 +154,7 @@ export async function reconcile(verb: Verb, ctx: BotuContext, opts: ReconcileOpt
     commit: opts.commit,
     commitMessage: opts.commitMessage,
   });
-  let config: Botufile;
+  let config: Boomfile;
   try {
     config = await loadConfig(repo);
   } catch (e) {
@@ -193,7 +193,7 @@ export async function reconcile(verb: Verb, ctx: BotuContext, opts: ReconcileOpt
     osx: { changed: false },
   };
 
-  // Merge overlay files (botufile.<os|host|profile>.toml) onto the base, then gate
+  // Merge overlay files (boomfile.<os|host|profile>.toml) onto the base, then gate
   // each section by its `when` (host/OS/profile) and the --only filter.
   const pc = profileContext(ctx.env, opts.profiles ?? []);
   const sections: Section[] = [...config.section];

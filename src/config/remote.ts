@@ -1,6 +1,6 @@
-// Config source is always a git remote (repo-only): `botu source set` takes a
+// Config source is always a git remote (repo-only): `boom source set` takes a
 // remote reference — `owner/repo`, `github:owner/repo`, a full git URL, optionally
-// `@ref` — clone it into the botu-managed cache dir, and record the breadcrumb.
+// `@ref` — clone it into the boom-managed cache dir, and record the breadcrumb.
 // engine/sync.ts owns the ongoing fetch/pull-and-report on every apply/verify/fix;
 // this file owns only the initial (re-)clone.
 import { mkdir, rename, rm } from "node:fs/promises";
@@ -9,11 +9,11 @@ import type { Env } from "../engine/state.ts";
 import { pathExists } from "../lib/fs.ts";
 import { checkoutRef, cloneRepo, hasUnpushedCommits, isClean } from "../lib/git.ts";
 import {
-  BotuConfigError,
+  BoomConfigError,
   CONFIG_FILE,
   type ConfigRemote,
   configRepoCacheDir,
-  hasBotufile,
+  hasBoomfile,
   writeConfigBreadcrumb,
 } from "./load.ts";
 
@@ -61,8 +61,8 @@ export function parseRemoteRef(input: string): ParsedRemoteRef {
 // (Re-)clone `refInput` into the managed cache dir and record it as the active
 // config. Re-linking always wipes and re-clones — the cache dir is never meant to
 // hold precious work, so refuse instead of silently clobbering one that has any
-// (uncommitted changes, or commits made but not yet pushed) — `botu source push` (to keep
-// it) or `botu source reset` (to discard it) first, then re-link.
+// (uncommitted changes, or commits made but not yet pushed) — `boom source push` (to keep
+// it) or `boom source reset` (to discard it) first, then re-link.
 export async function linkRemoteConfigRepo(env: Env, refInput: string): Promise<string> {
   const { url, ref } = parseRemoteRef(refInput);
   const dest = configRepoCacheDir(env);
@@ -72,14 +72,14 @@ export async function linkRemoteConfigRepo(env: Env, refInput: string): Promise<
   // The rm below would then resolve against the process cwd — mirrors the same
   // guard engine/code.ts's materializeAgentsFarm takes before its own rebuild-via-rm.
   if (!isAbsolute(dest)) {
-    throw new BotuConfigError(
-      "botu's state dir resolved to a relative path (HOME and XDG_STATE_HOME both unset) — refusing to clone/wipe there",
+    throw new BoomConfigError(
+      "boom's state dir resolved to a relative path (HOME and XDG_STATE_HOME both unset) — refusing to clone/wipe there",
     );
   }
 
   if ((await pathExists(dest)) && (!isClean(dest, env) || hasUnpushedCommits(dest, env))) {
-    throw new BotuConfigError(
-      `${dest} has uncommitted or unpushed changes — \`botu source push\` or \`botu source reset\` before re-linking`,
+    throw new BoomConfigError(
+      `${dest} has uncommitted or unpushed changes — \`boom source push\` or \`boom source reset\` before re-linking`,
     );
   }
 
@@ -94,16 +94,16 @@ export async function linkRemoteConfigRepo(env: Env, refInput: string): Promise<
   try {
     const clone = cloneRepo(url, staging, env);
     if (clone.code !== 0) {
-      throw new BotuConfigError(`git clone ${url} failed: ${clone.stderr || "unknown error"}`);
+      throw new BoomConfigError(`git clone ${url} failed: ${clone.stderr || "unknown error"}`);
     }
     if (ref) {
       const co = checkoutRef(staging, ref, env);
       if (co.code !== 0) {
-        throw new BotuConfigError(`git checkout ${ref} failed: ${co.stderr || "unknown error"}`);
+        throw new BoomConfigError(`git checkout ${ref} failed: ${co.stderr || "unknown error"}`);
       }
     }
-    if (!(await hasBotufile(staging))) {
-      throw new BotuConfigError(`no ${CONFIG_FILE} at ${url} — doesn't look like a botu dotfiles repo`);
+    if (!(await hasBoomfile(staging))) {
+      throw new BoomConfigError(`no ${CONFIG_FILE} at ${url} — doesn't look like a boom dotfiles repo`);
     }
     await rm(dest, { recursive: true, force: true });
     await rename(staging, dest);

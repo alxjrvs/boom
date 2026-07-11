@@ -1,5 +1,5 @@
 // Process helpers. Bun.spawnSync (not Bun.$) so the engine controls exit codes
-// without throw semantics; `sh -c` so botufile `run` strings expand ~ and globs.
+// without throw semantics; `sh -c` so boomfile `run` strings expand ~ and globs.
 export type Env = Record<string, string | undefined>;
 
 export function cleanEnv(env: Env): Record<string, string> {
@@ -19,7 +19,7 @@ export interface RunOptions {
   readonly quietStdout?: boolean;
   // Working directory for the child. Default: inherit the parent's cwd. The engine
   // sets this to the dotfiles repo so a `run` step (or `mise install`) operates on
-  // the configured machine, not on wherever `botu` happened to be invoked from.
+  // the configured machine, not on wherever `boom` happened to be invoked from.
   readonly cwd?: string;
 }
 

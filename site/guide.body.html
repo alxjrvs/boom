@@ -11,7 +11,7 @@
     <a href="#install">Install</a>
     <a href="#bootstrap">Bootstrap</a>
     <a href="#reconcile">Reconcile</a>
-    <a href="#botufile">Botufile</a>
+    <a href="#boomfile">Boomfile</a>
     <a href="#git">Git</a>
     <a href="#portals">Portals</a>
     <a href="#housekeeping">Housekeeping</a>
@@ -26,7 +26,7 @@
   <div class="wrap">
     <p class="caption">The operator&rsquo;s manual!</p>
     <h1 class="display shout guide-title">THE GUIDE</h1>
-    <p class="lede" style="margin-inline:0">Every power <code>botu</code> wields, in the order you&rsquo;ll meet it — install, bootstrap, the reconcile loop, the <code>botufile.toml</code>, config-repo git, code portals, and housekeeping.</p>
+    <p class="lede" style="margin-inline:0">Every power <code>boom</code> wields, in the order you&rsquo;ll meet it — install, bootstrap, the reconcile loop, the <code>boomfile.toml</code>, config-repo git, code portals, and housekeeping.</p>
   </div>
 </section>
 
@@ -39,14 +39,14 @@
     </div>
     <div class="panel tilt-l">
       <div class="codebox">
-        <pre tabindex="0" role="region" aria-label="Install commands: curl and Homebrew"><span class="c"># curl installer — downloads the binary for your platform, puts botu on PATH</span>
-curl -fsSL https://raw.githubusercontent.com/alxjrvs/botu/main/install.sh | sh
+        <pre tabindex="0" role="region" aria-label="Install commands: curl and Homebrew"><span class="c"># curl installer — downloads the binary for your platform, puts boom on PATH</span>
+curl -fsSL https://raw.githubusercontent.com/alxjrvs/boom/main/install.sh | sh
 
 <span class="c"># …or Homebrew (this repo doubles as the tap)</span>
-brew tap alxjrvs/botu https://github.com/alxjrvs/botu
-brew install botu</pre>
+brew tap alxjrvs/boom https://github.com/alxjrvs/boom
+brew install boom</pre>
       </div>
-      <p>One self-contained executable — <strong>macOS arm64/x64, Linux x64</strong>. The binary embeds the Bun runtime, so nothing else is required. Override the install prefix with <code>BOTU_PREFIX</code>.</p>
+      <p>One self-contained executable — <strong>macOS arm64/x64, Linux x64</strong>. The binary embeds the Bun runtime, so nothing else is required. Override the install prefix with <code>BOOM_PREFIX</code>.</p>
     </div>
   </div>
 </section>
@@ -62,13 +62,13 @@ brew install botu</pre>
     </div>
     <div class="panel tilt-r">
       <div class="codebox">
-        <pre tabindex="0" role="region" aria-label="Bootstrap commands"><span class="k">botu</span> init alxjrvs/dotfiles   <span class="c"># clone your remote dotfiles repo and apply it — one-shot bootstrap</span>
-<span class="k">botu</span> apply                   <span class="c"># thereafter: reconcile from the recorded config repo</span></pre>
+        <pre tabindex="0" role="region" aria-label="Bootstrap commands"><span class="k">boom</span> init alxjrvs/dotfiles   <span class="c"># clone your remote dotfiles repo and apply it — one-shot bootstrap</span>
+<span class="k">boom</span> apply                   <span class="c"># thereafter: reconcile from the recorded config repo</span></pre>
       </div>
-      <p><code>init</code>/<code>link</code> take a <strong>remote reference</strong> — <code>owner/repo</code>, <code>github:owner/repo</code>, a git URL, optionally <code>@ref</code> — never an arbitrary local path. botu clones it into a managed cache dir and records a breadcrumb. <code>init</code> clones <em>and</em> applies; <code>link</code> clones and records only.</p>
+      <p><code>init</code>/<code>link</code> take a <strong>remote reference</strong> — <code>owner/repo</code>, <code>github:owner/repo</code>, a git URL, optionally <code>@ref</code> — never an arbitrary local path. boom clones it into a managed cache dir and records a breadcrumb. <code>init</code> clones <em>and</em> applies; <code>link</code> clones and records only.</p>
       <p style="margin-bottom:.4rem"><strong>The fresh-machine one-liner:</strong></p>
       <div class="codebox">
-        <pre tabindex="0" role="region" aria-label="Fresh-machine one-liner">curl -fsSL https://raw.githubusercontent.com/alxjrvs/botu/main/install.sh | sh &amp;&amp; <span class="k">botu</span> source set owner/repo</pre>
+        <pre tabindex="0" role="region" aria-label="Fresh-machine one-liner">curl -fsSL https://raw.githubusercontent.com/alxjrvs/boom/main/install.sh | sh &amp;&amp; <span class="k">boom</span> source set owner/repo</pre>
       </div>
     </div>
   </div>
@@ -90,11 +90,11 @@ brew install botu</pre>
         <header><h3>Apply! <span class="ep">panel one</span></h3></header>
         <div class="kbody">
           <div class="codebox">
-            <pre tabindex="0" role="region" aria-label="botu apply flags"><span class="k">botu</span> apply              <span class="c"># symlink / copy / install / run from botufile.toml</span>
-<span class="k">botu</span> apply <span class="f">--dry-run</span>    <span class="c"># preview every change; touch nothing</span>
-<span class="k">botu</span> apply <span class="f">--skip</span>       <span class="c"># skip conflicting targets instead of overwriting them</span>
-<span class="k">botu</span> apply <span class="f">--commit</span>     <span class="c"># commit local config-repo edits before pulling</span>
-<span class="k">botu</span> apply <span class="f">--resume</span>     <span class="c"># continue an interrupted apply (skips completed steps)</span></pre>
+            <pre tabindex="0" role="region" aria-label="boom apply flags"><span class="k">boom</span> apply              <span class="c"># symlink / copy / install / run from boomfile.toml</span>
+<span class="k">boom</span> apply <span class="f">--dry-run</span>    <span class="c"># preview every change; touch nothing</span>
+<span class="k">boom</span> apply <span class="f">--skip</span>       <span class="c"># skip conflicting targets instead of overwriting them</span>
+<span class="k">boom</span> apply <span class="f">--commit</span>     <span class="c"># commit local config-repo edits before pulling</span>
+<span class="k">boom</span> apply <span class="f">--resume</span>     <span class="c"># continue an interrupted apply (skips completed steps)</span></pre>
           </div>
           <p><strong>THE FILE COMMANDS</strong> — the machine bends to it.</p>
         </div>
@@ -104,8 +104,8 @@ brew install botu</pre>
         <header><h3>Verify! <span class="ep">panel two</span></h3></header>
         <div class="kbody">
           <div class="codebox">
-            <pre tabindex="0" role="region" aria-label="botu verify flags"><span class="k">botu</span> verify             <span class="c"># check for drift — exit 0 ok / 2 warn / 1 fail</span>
-<span class="k">botu</span> verify <span class="f">--json</span>      <span class="c"># …as a structured drift report</span></pre>
+            <pre tabindex="0" role="region" aria-label="boom verify flags"><span class="k">boom</span> verify             <span class="c"># check for drift — exit 0 ok / 2 warn / 1 fail</span>
+<span class="k">boom</span> verify <span class="f">--json</span>      <span class="c"># …as a structured drift report</span></pre>
           </div>
           <div class="chips">
             <span class="chip ok">exit 0 &middot; OK</span>
@@ -119,7 +119,7 @@ brew install botu</pre>
         <header><h3>Fix! <span class="ep">panel three</span></h3></header>
         <div class="kbody">
           <div class="codebox">
-            <pre tabindex="0" role="region" aria-label="botu repair"><span class="k">botu</span> repair             <span class="c"># repair drift (apply, overwriting conflicts)</span></pre>
+            <pre tabindex="0" role="region" aria-label="boom repair"><span class="k">boom</span> repair             <span class="c"># repair drift (apply, overwriting conflicts)</span></pre>
           </div>
           <p>Drift detected? Drift <strong>destroyed</strong>. <code>repair</code> is the loop again, with the gloves off.</p>
         </div>
@@ -129,7 +129,7 @@ brew install botu</pre>
         <header><h3>Rollback! <span class="ep">panel four</span></h3></header>
         <div class="kbody">
           <div class="codebox">
-            <pre tabindex="0" role="region" aria-label="botu rollback"><span class="k">botu</span> rollback           <span class="c"># undo the most recent apply (restores backed-up files)</span></pre>
+            <pre tabindex="0" role="region" aria-label="boom rollback"><span class="k">boom</span> rollback           <span class="c"># undo the most recent apply (restores backed-up files)</span></pre>
           </div>
           <p>Every mutating run <strong>journals</strong> its changes and backs up displaced files. Rollback replays the journal — the portal works in both directions.</p>
         </div>
@@ -139,7 +139,7 @@ brew install botu</pre>
     <div class="note-cap tilt-l">
       <p class="caption right">Editor&rsquo;s note!</p>
       <ul class="note-list">
-        <li><code>apply</code>/<code>repair</code> pull the config repo first (<code>pull --rebase --autostash</code>) — local edits ride along and land back on top. A failed pull is <em>reported</em>, never blocking: botu reconciles from the last-known-good local clone.</li>
+        <li><code>apply</code>/<code>repair</code> pull the config repo first (<code>pull --rebase --autostash</code>) — local edits ride along and land back on top. A failed pull is <em>reported</em>, never blocking: boom reconciles from the last-known-good local clone.</li>
         <li><code>verify</code> counts <em>&ldquo;N commits behind&rdquo;</em> as drift and warns on uncommitted or unpushed changes — without touching the working tree.</li>
         <li>A file already squatting at a <code>link</code> destination is <strong>overwritten by default</strong>; pass <code>--skip</code> to spare it.</li>
       </ul>
@@ -147,16 +147,16 @@ brew install botu</pre>
   </div>
 </section>
 
-<!-- ============================== BOTUFILE ============================== -->
-<section class="section" id="botufile">
+<!-- ============================== BOOMFILE ============================== -->
+<section class="section" id="boomfile">
   <div class="wrap">
     <div class="sec-head">
       <p class="caption">One file to declare it all — the machine obeys!</p>
-      <h2 class="display">The botufile.toml</h2>
+      <h2 class="display">The boomfile.toml</h2>
     </div>
     <div class="panel">
       <div class="codebox">
-        <pre tabindex="0" role="region" aria-label="botufile.toml example"><span class="sec">[[section]]</span>
+        <pre tabindex="0" role="region" aria-label="boomfile.toml example"><span class="sec">[[section]]</span>
 <span class="key">name</span> = <span class="s">"Shell + git"</span>
 <span class="key">link</span> = [
   { <span class="key">src</span> = <span class="s">".zshrc"</span>,     <span class="key">dst</span> = <span class="s">"~/.zshrc"</span> },
@@ -188,7 +188,7 @@ brew install botu</pre>
         <span class="phase" role="listitem">run</span><span class="arr" aria-hidden="true">&rarr;</span>
         <span class="phase" role="listitem">hook</span>
       </div>
-      <p>Imperative escapes are <code>run</code> steps (a shell command) or a <strong>hook</strong>: a <code>hooks/&lt;name&gt;.ts</code> module exporting <code>apply</code>/<code>verify</code>/<code>repair</code> that receives a typed <code>HookApi</code>. Hooks are the extension point for anything the declarative resources can&rsquo;t express. Multi-machine setups gate sections with <code>when</code>, or layer overlay files (<code>botufile.&lt;os|host|profile&gt;.toml</code>).</p>
+      <p>Imperative escapes are <code>run</code> steps (a shell command) or a <strong>hook</strong>: a <code>hooks/&lt;name&gt;.ts</code> module exporting <code>apply</code>/<code>verify</code>/<code>repair</code> that receives a typed <code>HookApi</code>. Hooks are the extension point for anything the declarative resources can&rsquo;t express. Multi-machine setups gate sections with <code>when</code>, or layer overlay files (<code>boomfile.&lt;os|host|profile&gt;.toml</code>).</p>
     </div>
   </div>
 </section>
@@ -200,17 +200,17 @@ brew install botu</pre>
   <div class="wrap">
     <div class="sec-head">
       <p class="caption right">The repo remembers!</p>
-      <h2 class="display">Config-Repo Git, Without Leaving botu</h2>
+      <h2 class="display">Config-Repo Git, Without Leaving boom</h2>
     </div>
     <div class="panel tilt-l">
       <div class="codebox">
-        <pre tabindex="0" role="region" aria-label="Config-repo git commands"><span class="k">botu</span> source diff        <span class="c"># show uncommitted local changes in the config repo</span>
-<span class="k">botu</span> source commit      <span class="c"># commit local changes in the config repo</span>
-<span class="k">botu</span> source push        <span class="c"># push the config repo's local commits upstream</span>
-<span class="k">botu</span> source reset       <span class="c"># discard local changes, reset to origin</span>
-<span class="k">botu</span> source reset <span class="f">--force</span> <span class="c"># …including commits no remote has (refused otherwise)</span></pre>
+        <pre tabindex="0" role="region" aria-label="Config-repo git commands"><span class="k">boom</span> source diff        <span class="c"># show uncommitted local changes in the config repo</span>
+<span class="k">boom</span> source commit      <span class="c"># commit local changes in the config repo</span>
+<span class="k">boom</span> source push        <span class="c"># push the config repo's local commits upstream</span>
+<span class="k">boom</span> source reset       <span class="c"># discard local changes, reset to origin</span>
+<span class="k">boom</span> source reset <span class="f">--force</span> <span class="c"># …including commits no remote has (refused otherwise)</span></pre>
       </div>
-      <p>Your dotfiles repo is the source of truth — botu speaks git for it so you never have to <code>cd</code> into the cache dir yourself.</p>
+      <p>Your dotfiles repo is the source of truth — boom speaks git for it so you never have to <code>cd</code> into the cache dir yourself.</p>
     </div>
   </div>
 </section>
@@ -223,7 +223,7 @@ brew install botu</pre>
     <div class="sec-head">
       <p class="caption">Portals within portals!</p>
       <h2 class="display">Code Portals</h2>
-      <p style="max-width:70ch"><code>botu code</code> opens portals to the repos under your code dir (default <code>~/Code</code>).</p>
+      <p style="max-width:70ch"><code>boom code</code> opens portals to the repos under your code dir (default <code>~/Code</code>).</p>
     </div>
 
     <div class="miniportals" aria-hidden="true">
@@ -236,9 +236,9 @@ brew install botu</pre>
       <header><h3>Every repo, one step through the tube</h3></header>
       <div class="kbody">
         <div class="codebox">
-          <pre tabindex="0" role="region" aria-label="botu code commands"><span class="k">botu</span> code init ~/Code    <span class="c"># record your code dir</span>
-<span class="k">botu</span> code claude         <span class="c"># symlink every repo into one dir, open `claude agents` there</span>
-<span class="k">botu</span> code cmux           <span class="c"># one cmux workspace per repo</span></pre>
+          <pre tabindex="0" role="region" aria-label="boom code commands"><span class="k">boom</span> code init ~/Code    <span class="c"># record your code dir</span>
+<span class="k">boom</span> code claude         <span class="c"># symlink every repo into one dir, open `claude agents` there</span>
+<span class="k">boom</span> code cmux           <span class="c"># one cmux workspace per repo</span></pre>
         </div>
         <p><code>code claude</code> makes every repo <code>@</code>-taggable for agent dispatch — no idle fleet required; <code>code cmux</code> opens one workspace per repo. Both honor <code>--dry-run</code> and only spawn the backend tool when it&rsquo;s present.</p>
       </div>
@@ -255,16 +255,16 @@ brew install botu</pre>
     </div>
     <div class="panel tilt-r">
       <div class="codebox">
-        <pre tabindex="0" role="region" aria-label="Housekeeping commands"><span class="k">botu</span> validate           <span class="c"># parse + schema-check the botufile; change nothing</span>
-<span class="k">botu</span> doctor             <span class="c"># check botu's own preconditions (tools, keychain, state)</span>
-<span class="k">botu</span> where config|code|engine   <span class="c"># resolve where botu keeps things</span>
-<span class="k">botu</span> upgrade            <span class="c"># upgrade the botu binary itself</span>
-<span class="k">botu</span> completions bash|zsh|fish  <span class="c"># shell completions</span>
-<span class="k">botu</span> man                <span class="c"># the man page</span>
-<span class="k">botu</span> skill              <span class="c"># emit a Claude Code SKILL.md (agentic use)</span>
-<span class="k">botu</span> skill <span class="f">--install</span>    <span class="c"># …and write it to ~/.claude/skills/botu/SKILL.md</span></pre>
+        <pre tabindex="0" role="region" aria-label="Housekeeping commands"><span class="k">boom</span> validate           <span class="c"># parse + schema-check the boomfile; change nothing</span>
+<span class="k">boom</span> doctor             <span class="c"># check boom's own preconditions (tools, keychain, state)</span>
+<span class="k">boom</span> where config|code|engine   <span class="c"># resolve where boom keeps things</span>
+<span class="k">boom</span> upgrade            <span class="c"># upgrade the boom binary itself</span>
+<span class="k">boom</span> completions bash|zsh|fish  <span class="c"># shell completions</span>
+<span class="k">boom</span> man                <span class="c"># the man page</span>
+<span class="k">boom</span> skill              <span class="c"># emit a Claude Code SKILL.md (agentic use)</span>
+<span class="k">boom</span> skill <span class="f">--install</span>    <span class="c"># …and write it to ~/.claude/skills/boom/SKILL.md</span></pre>
       </div>
-      <p>The maintenance bay: check the file, check the engine, find where everything lives, keep the binary fresh — and hand an agent a skill so it drives botu correctly.</p>
+      <p>The maintenance bay: check the file, check the engine, find where everything lives, keep the binary fresh — and hand an agent a skill so it drives boom correctly.</p>
     </div>
   </div>
 </section>
