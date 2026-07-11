@@ -4,8 +4,8 @@
 (executable: **`boom`**), compiled from **TypeScript on Bun**, that reconciles a
 machine from a declarative `boomfile.toml` and opens portals to code workspaces —
 provisioning your workspace fast, then getting out of your way so you can work.
-Named for Kirby's **Boom Tube** — it opens portals to your machine's ideal state,
-and to your code.
+Named for Kirby's **Boom Tube** — the Fourth World's instant conduit between worlds —
+it opens portals to your machine's ideal state, and to your code.
 
 It began as a bash prototype (extracted from `alxjrvs/dotFiles`) and was rewritten
 to TypeScript; this document is the design of record for that engine.
@@ -15,7 +15,7 @@ to TypeScript; this document is the design of record for that engine.
 A `boom` invocation does one of two things:
 
 1. **Reconcile verbs** over a config repo's `boomfile.toml`:
-   - `boom apply`  — make it so (`--upgrade` also upgrades outdated brewfile formulae)
+   - `boom apply`  — reconcile the machine to the boomfile (`--upgrade` also upgrades outdated brewfile formulae)
    - `boom verify` — check drift, exit 0 ok / 2 warn / 1 fail (`--json` for a report)
    - `boom repair` — repair drift (apply, overwriting conflicts)
    - `boom uninstall`
@@ -62,21 +62,27 @@ commits, since a clean behind-count alone would otherwise read as "up to date" w
 either kind of local drift sits unreported; `apply`/`repair` pull first and report what
 moved, then reconcile proceeds against whatever's on disk either way — a failed pull
 (including a `git rev-list` failure while checking drift) is reported as a failure but
-never blocks reconciling from the last-known-good local clone. The pull is `git pull
---rebase --autostash` (git stashes any dirty tracked changes before rebasing and
-restores them after, including automatically on an aborted rebase); `apply --commit`
-commits local edits first instead of autostashing them (`src/engine/commit.ts`, shared
-with `boom source commit`). A rebase conflict aborts cleanly (`git rebase --abort`, which also
-restores the autostash) and is reported as a failure, but reconcile still proceeds
-from the local state as it was before the rebase attempt. A pinned `@ref` (tag/sha,
-detached HEAD) is reported as static rather than checked for drift. Auth is whatever
-git/SSH already works in the user's shell — no boom-side credential handling. The
-config-repo git verbs live under one namespace: `boom source push` pushes the managed
-clone's local commits upstream (no auto-commit); `boom source reset` is the other
-direction — fetches, then hard-resets to the upstream tip (or the pinned `@ref` for a
-detached clone) and clears untracked files, discarding local changes back to what a
-fresh re-clone would leave. Like `linkRemoteConfigRepo`, `boom source reset` refuses to
-discard commits no remote has (listing them) unless `--force` is passed — uncommitted
+never blocks reconciling from the last-known-good local clone.
+
+The pull is `git pull --rebase --autostash` (git stashes any dirty tracked changes
+before rebasing and restores them after, including automatically on an aborted rebase);
+`apply --commit` commits local edits first instead of autostashing them
+(`src/engine/commit.ts`, shared with `boom source commit`).
+
+A rebase conflict aborts cleanly (`git rebase --abort`, which also restores the
+autostash) and is reported as a failure, but reconcile still proceeds from the local
+state as it was before the rebase attempt.
+
+A pinned `@ref` (tag/sha, detached HEAD) is reported as static rather than checked for
+drift. Auth is whatever git/SSH already works in the user's shell — no boom-side
+credential handling.
+
+The config-repo git verbs live under one namespace: `boom source push` pushes the
+managed clone's local commits upstream (no auto-commit); `boom source reset` is the
+other direction — fetches, then hard-resets to the upstream tip (or the pinned `@ref`
+for a detached clone) and clears untracked files, discarding local changes back to what
+a fresh re-clone would leave. Like `linkRemoteConfigRepo`, `boom source reset` refuses
+to discard commits no remote has (listing them) unless `--force` is passed — uncommitted
 changes alone don't need `--force`, only unpushed commits do. `linkRemoteConfigRepo`
 itself refuses to wipe a managed clone that has either uncommitted changes or commits
 not yet pushed (checked separately — `git status --porcelain` never reports
@@ -111,7 +117,8 @@ bash `_NAME_<verb>` hooks and is the public extension point.
 Mutating runs open a journal under `${XDG_STATE_HOME:-~/.local/state}/boom/journal/`
 (NDJSON, intent/done + undo token, committed marker) and **back up** any displaced
 file under `…/backups/<run-id>/`. `boom rollback` replays the journal in reverse
-(remove created links, restore backups). A `manifest` of owned destinations drives
+(remove created links, restore backups) — like a Mother Box, it remembers everything
+and can put it back. A `manifest` of owned destinations drives
 orphan reaping (verify warns; apply/fix reap). Breadcrumbs (`config`, `code`) record
 the dotfiles repo (path + remote) and code dir.
 

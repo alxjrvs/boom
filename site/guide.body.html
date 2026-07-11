@@ -62,13 +62,13 @@ brew install boom</pre>
     </div>
     <div class="panel tilt-r">
       <div class="codebox">
-        <pre tabindex="0" role="region" aria-label="Bootstrap commands"><span class="k">boom</span> init alxjrvs/dotfiles   <span class="c"># clone your remote dotfiles repo and apply it — one-shot bootstrap</span>
-<span class="k">boom</span> apply                   <span class="c"># thereafter: reconcile from the recorded config repo</span></pre>
+        <pre tabindex="0" role="region" aria-label="Bootstrap commands"><span class="k">boom</span> source set you/dotfiles   <span class="c"># clone your dotfiles repo, record it, and apply — one-shot bootstrap</span>
+<span class="k">boom</span> apply                     <span class="c"># thereafter: reconcile from the recorded config repo</span></pre>
       </div>
-      <p><code>init</code>/<code>link</code> take a <strong>remote reference</strong> — <code>owner/repo</code>, <code>github:owner/repo</code>, a git URL, optionally <code>@ref</code> — never an arbitrary local path. boom clones it into a managed cache dir and records a breadcrumb. <code>init</code> clones <em>and</em> applies; <code>link</code> clones and records only.</p>
+      <p><code>source set</code> takes a <strong>remote reference</strong> — <code>owner/repo</code>, <code>github:owner/repo</code>, a git URL, optionally <code>@ref</code> — never an arbitrary local path. boom clones it into a managed cache dir, records a breadcrumb, and applies immediately; pass <code>--no-apply</code> to clone and record only.</p>
       <p style="margin-bottom:.4rem"><strong>The fresh-machine one-liner:</strong></p>
       <div class="codebox">
-        <pre tabindex="0" role="region" aria-label="Fresh-machine one-liner">curl -fsSL https://raw.githubusercontent.com/alxjrvs/boom/main/install.sh | sh &amp;&amp; <span class="k">boom</span> source set owner/repo</pre>
+        <pre tabindex="0" role="region" aria-label="Fresh-machine one-liner">curl -fsSL https://raw.githubusercontent.com/alxjrvs/boom/main/install.sh | sh &amp;&amp; <span class="k">boom</span> source set you/dotfiles</pre>
       </div>
     </div>
   </div>
@@ -137,7 +137,7 @@ brew install boom</pre>
     </div>
 
     <div class="note-cap tilt-l">
-      <p class="caption right">Editor&rsquo;s note!</p>
+      <p class="caption right">But know this!</p>
       <ul class="note-list">
         <li><code>apply</code>/<code>repair</code> pull the config repo first (<code>pull --rebase --autostash</code>) — local edits ride along and land back on top. A failed pull is <em>reported</em>, never blocking: boom reconciles from the last-known-good local clone.</li>
         <li><code>verify</code> counts <em>&ldquo;N commits behind&rdquo;</em> as drift and warns on uncommitted or unpushed changes — without touching the working tree.</li>
@@ -188,7 +188,8 @@ brew install boom</pre>
         <span class="phase" role="listitem">run</span><span class="arr" aria-hidden="true">&rarr;</span>
         <span class="phase" role="listitem">hook</span>
       </div>
-      <p>Imperative escapes are <code>run</code> steps (a shell command) or a <strong>hook</strong>: a <code>hooks/&lt;name&gt;.ts</code> module exporting <code>apply</code>/<code>verify</code>/<code>repair</code> that receives a typed <code>HookApi</code>. Hooks are the extension point for anything the declarative resources can&rsquo;t express. Multi-machine setups gate sections with <code>when</code>, or layer overlay files (<code>boomfile.&lt;os|host|profile&gt;.toml</code>).</p>
+      <p>Imperative escapes are <code>run</code> steps (a shell command) or a <strong>hook</strong>: a <code>hooks/&lt;name&gt;.ts</code> module exporting <code>apply</code>/<code>verify</code>/<code>repair</code> that receives a typed <code>HookApi</code>. Hooks are the extension point for anything the declarative resources can&rsquo;t express.</p>
+      <p>Multi-machine setups gate sections with <code>when</code>, or layer overlay files (<code>boomfile.&lt;os|host|profile&gt;.toml</code>).</p>
     </div>
   </div>
 </section>
@@ -199,7 +200,7 @@ brew install boom</pre>
 <section class="section" id="git">
   <div class="wrap">
     <div class="sec-head">
-      <p class="caption right">The repo remembers!</p>
+      <p class="caption right">The Source remembers!</p>
       <h2 class="display">Config-Repo Git, Without Leaving boom</h2>
     </div>
     <div class="panel tilt-l">
@@ -210,7 +211,7 @@ brew install boom</pre>
 <span class="k">boom</span> source reset       <span class="c"># discard local changes, reset to origin</span>
 <span class="k">boom</span> source reset <span class="f">--force</span> <span class="c"># …including commits no remote has (refused otherwise)</span></pre>
       </div>
-      <p>Your dotfiles repo is the source of truth — boom speaks git for it so you never have to <code>cd</code> into the cache dir yourself.</p>
+      <p>Your dotfiles repo is The Source — boom speaks git for it so you never have to <code>cd</code> into the cache dir yourself.</p>
     </div>
   </div>
 </section>
@@ -233,7 +234,7 @@ brew install boom</pre>
     </div>
 
     <div class="kpanel tilt-r" style="max-width:860px; margin-inline:auto">
-      <header><h3>Every repo, one step through the tube</h3></header>
+      <header><h3>Every repo, one step through the Boom Tube</h3></header>
       <div class="kbody">
         <div class="codebox">
           <pre tabindex="0" role="region" aria-label="boom code commands"><span class="k">boom</span> code init ~/Code    <span class="c"># record your code dir</span>

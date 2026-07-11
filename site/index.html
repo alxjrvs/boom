@@ -313,7 +313,7 @@
 <section class="section" id="quickstart">
   <div class="wrap">
     <div class="sec-head">
-      <p class="caption">From bare metal to homeworld — three panels!</p>
+      <p class="caption">From bare metal to New Genesis — three panels!</p>
       <h2 class="display">Quick Start</h2>
     </div>
 
@@ -334,7 +334,7 @@ curl -fsSL https://raw.githubusercontent.com/alxjrvs/boom/main/install.sh | sh</
         <div class="kbody">
           <div class="codebox">
             <pre tabindex="0" role="region" aria-label="Bootstrap a machine"><span class="c"># clone your dotfiles repo and apply it</span>
-<span class="k">boom</span> source set you/dotfiles</pre>
+<span class="k">boom</span> source set you/dotfiles   <span class="c"># your GitHub user/repo</span></pre>
           </div>
           <p>A bare machine, claimed in one shot — clone plus a first <code>apply</code>.</p>
         </div>
@@ -347,7 +347,8 @@ curl -fsSL https://raw.githubusercontent.com/alxjrvs/boom/main/install.sh | sh</
             <pre tabindex="0" role="region" aria-label="Keep the machine in sync"><span class="k">boom</span> apply    <span class="c"># pull the repo, reconcile</span>
 <span class="k">boom</span> verify   <span class="c"># hunt for drift</span></pre>
           </div>
-          <p>The repo is the source of truth. <code>verify</code> reports drift as exit 0 / 2 / 1 — ok / warn / fail; <code>repair</code> mends it. <code>apply</code> overwrites conflicting files by default — pass <code>--skip</code> to spare them.</p>
+          <p>The repo is the source of truth. <code>verify</code> reports drift (exit <code>0</code> ok, <code>2</code> warn, <code>1</code> fail); <code>repair</code> mends it.</p>
+          <p><code>apply</code> overwrites conflicting files by default — pass <code>--skip</code> to spare them.</p>
         </div>
       </article>
     </div>
@@ -368,27 +369,27 @@ curl -fsSL https://raw.githubusercontent.com/alxjrvs/boom/main/install.sh | sh</
       <a class="card" href="guide.html#reconcile">
         <h3>The Reconcile Loop</h3>
         <p><code>apply</code> / <code>verify</code> / <code>repair</code> — one loop over every resource. And <code>rollback</code>, for the way back.</p>
-        <span class="go">Open &rarr;</span>
+        <span class="go">Step through &rarr;</span>
       </a>
       <a class="card" href="guide.html#boomfile">
         <h3>The boomfile.toml</h3>
         <p>The typed, validated TOML that declares your whole machine, in phase order.</p>
-        <span class="go">Open &rarr;</span>
+        <span class="go">Step through &rarr;</span>
       </a>
       <a class="card" href="guide.html#git">
         <h3>Config-Repo Git</h3>
         <p><code>diff</code> / <code>commit</code> / <code>push</code> / <code>reset</code> your dotfiles repo without leaving boom.</p>
-        <span class="go">Open &rarr;</span>
+        <span class="go">Step through &rarr;</span>
       </a>
       <a class="card" href="guide.html#portals">
         <h3>Code Portals</h3>
         <p><code>boom code</code> opens every repo under <code>~/Code</code> in one step.</p>
-        <span class="go">Open &rarr;</span>
+        <span class="go">Step through &rarr;</span>
       </a>
       <a class="card" href="guide.html#housekeeping">
         <h3>Housekeeping</h3>
         <p><code>validate</code>, <code>doctor</code>, <code>where</code>, <code>upgrade</code>, <code>completions</code>, <code>man</code>.</p>
-        <span class="go">Open &rarr;</span>
+        <span class="go">Step through &rarr;</span>
       </a>
       <a class="card" href="guide.html">
         <h3>The Whole Guide</h3>
@@ -437,7 +438,7 @@ curl -fsSL https://raw.githubusercontent.com/alxjrvs/boom/main/install.sh | sh</
     btn.textContent = 'Copy';
     btn.addEventListener('click', function () {
       navigator.clipboard.writeText(pre.textContent.trim()).then(function () {
-        btn.textContent = 'ZAKK!';
+        btn.textContent = 'BOOM!';
         status.textContent = 'Copied to clipboard';
         setTimeout(function () { btn.textContent = 'Copy'; status.textContent = ''; }, 1400);
       });

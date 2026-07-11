@@ -8,10 +8,10 @@
   --space:  #0b0a12;   /* deep-space near-black          */
   --red:    #e2231a;   /* Kirby red                      */
   --gold:   #ffcf00;   /* cosmic gold                    */
-  --blue:   #0a8bd6;   /* electric blue                  */
-  --cyan:   #22d3ff;   /* hotter electric blue           */
-  --mag:    #b5179e;   /* Apokolips magenta              */
-  --purp:   #7a1fa2;   /* Apokolips purple               */
+  --blue:   #0a8bd6;   /* New Genesis blue               */
+  --cyan:   #22d3ff;   /* Boom Tube cyan (Mother Box ping)*/
+  --mag:    #b5179e;   /* Boom Tube magenta              */
+  --purp:   #7a1fa2;   /* cosmic-energy purple           */
   --cream:  #f3e9cf;   /* newsprint cream                */
   --text:   #17131f;
   /* Kirby red is gorgeous as an ink but only ~3.9:1 on cream — below AA. This
@@ -160,6 +160,10 @@ button:focus-visible,
 .panel > :first-child { margin-top: 0; }
 .panel > :last-child { margin-bottom: 0; }
 .panel h3 { font-family: var(--display); text-transform: uppercase; font-size: 1.5rem; margin: 0 0 .6rem; letter-spacing: .03em; }
+/* Cap the reading measure on the Guide's single-column panel prose (the widest text on
+   the site — full 1100px .wrap). Codeboxes, chips, and the phases strip keep full width;
+   grid kpanels are already <430px so this is a no-op there. */
+.panel > p, .kpanel .kbody > p, .note-cap .note-list { max-width: 70ch; }
 
 /* tabbed comic panels for the reconcile page */
 .kpanel {
@@ -221,7 +225,7 @@ button:focus-visible,
   /* hung off the box corner like a taped-on sticker, so it can't cover the first
      code line (which it did on every box whose first line ran long) */
   position: absolute; top: -12px; right: -10px;
-  font-family: var(--mono); font-size: .62rem; font-weight: 700;
+  font-family: var(--mono); font-size: .65rem; font-weight: 700;
   text-transform: uppercase; letter-spacing: .08em;
   background: var(--gold); color: #000;
   border: 2px solid var(--ink); box-shadow: 3px 3px 0 var(--ink);
@@ -331,7 +335,8 @@ code {
 .hero-deco { position: absolute; pointer-events: none; }
 
 /* the title callout — a bold Kirby caption card over the portal. Kept mostly opaque so
-   the gold/cyan title stays high-contrast no matter what energy is behind it. */
+   the gold/cyan title stays high-contrast no matter what energy is behind it, and
+   flat-inked (no backdrop blur) to honor the no-soft-gradients doctrine up top. */
 .hero-card {
   position: relative; z-index: 4;
   max-width: min(92vw, 600px);
@@ -339,7 +344,6 @@ code {
   background: rgba(11, 10, 18, .86);
   border: 5px solid var(--ink);
   box-shadow: 12px 12px 0 var(--ink);
-  -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
 }
 .hero-card .caption { margin-bottom: .2rem; }
 .hero-card h1 { font-size: clamp(2.8rem, 10vw, 5.4rem); margin: .3rem 0 .5rem; }
@@ -445,8 +449,9 @@ footer .credits strong { color: var(--gold); }
 }
 
 @media (max-width: 560px) {
-  /* keep the tiny type but grow the hit area to ≥24px (WCAG 2.5.8) */
-  .masthead nav a { font-size: .6rem; padding: .45rem .4rem; }
+  /* keep the type small but hold a ~.65rem legibility floor, and grow the hit area
+     to ≥24px (WCAG 2.5.8) */
+  .masthead nav a { font-size: .65rem; letter-spacing: .05em; padding: .45rem .35rem; }
   /* shrink the logo + Source button so the masthead stays one row instead of
      wrapping the button onto a second row (which also broke anchor scroll offset) */
   .logo { font-size: 1.35rem; }
@@ -501,8 +506,12 @@ footer .credits strong { color: var(--gold); }
 .doc h1 { font-size: clamp(2.2rem, 8vw, 3.6rem); margin: .2rem 0 .8rem; color: var(--space); }
 .doc h2 { font-size: clamp(1.55rem, 5.5vw, 2.3rem); margin: 2rem 0 .7rem; color: var(--red); border-bottom: 4px solid var(--ink); padding-bottom: .2rem; }
 .doc h3 { font-size: clamp(1.25rem, 4vw, 1.5rem); margin: 1.5rem 0 .5rem; color: var(--purp); }
-.doc h4 { font-size: 1.05rem; margin: 1.2rem 0 .4rem; color: var(--space); letter-spacing: .06em; }
+.doc h4 { font-size: 1.2rem; margin: 1.2rem 0 .4rem; color: var(--space); letter-spacing: .06em; }
 .doc p { margin: 0 0 1rem; }
+/* Cap the reading measure so prose doesn't run past ~70 characters on wide viewports
+   (the .doc panel is 900px). Left-aligned — no auto margins — so capped prose and the
+   full-width tables/code that keep the whole column share a left edge. */
+.doc p, .doc ul, .doc ol, .doc blockquote { max-width: 70ch; }
 .doc a { color: var(--red-text); font-weight: 700; text-decoration: underline; text-underline-offset: 2px; text-decoration-thickness: 2px; }
 .doc a:hover { color: #000; background: var(--gold); }  /* black on gold ≈ 14:1; blue-on-gold was 2.5:1 */
 .doc strong { color: var(--space); font-weight: 800; }
@@ -518,7 +527,7 @@ footer .credits strong { color: var(--gold); }
 .doc pre code { background: none; border: 0; padding: 0; color: inherit; white-space: pre; font-size: inherit; }
 
 /* blockquote → a Kirby caption aside */
-.doc blockquote { margin: 0 0 1.2rem; padding: .8rem 1rem; background: var(--gold); border: 3px solid var(--ink); box-shadow: 5px 5px 0 var(--ink); color: #000; font-weight: 600; }
+.doc blockquote { margin: 0 0 1.2rem; padding: .8rem 1rem; background: var(--gold); border: 3px solid var(--ink); box-shadow: 5px 5px 0 var(--ink); color: #000; font-weight: 400; }
 .doc blockquote p:last-child { margin-bottom: 0; }
 .doc blockquote code { background: rgba(0,0,0,.12); border-color: rgba(0,0,0,.5); color: #6a0d06; }
 
