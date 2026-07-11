@@ -136,12 +136,17 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
   let resumeDone: ReadonlySet<string> | undefined;
   if (mutating) {
     const runId = newRunId();
-    journal = new Journal(ctx.env, runId);
-    backupRoot = join(backupsDir(ctx.env), runId);
+    // Read the prior interrupted run's done-set BEFORE opening this run's journal. The
+    // sqlite Journal inserts its run row eagerly, so once it exists it is the newest run —
+    // an untargeted readRun() would then resolve to *this* empty run and resume nothing.
+    // (The old NDJSON journal got away with the reverse order only because its constructor
+    // was lazy and wrote no file until the first op.)
     if (opts.resume) {
       const prior = await readRun(ctx.env);
       if (prior) resumeDone = new Set(prior.done.map((d) => d.dst));
     }
+    journal = new Journal(ctx.env, runId);
+    backupRoot = join(backupsDir(ctx.env), runId);
   }
   const priorManifest = await readManifest(ctx.env);
 
