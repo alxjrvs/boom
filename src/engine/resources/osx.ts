@@ -4,7 +4,7 @@
 import { detectOs } from "../../config/profile.ts";
 import type { OsxDefault } from "../../config/schema.ts";
 import { expandHome } from "../../lib/fs.ts";
-import { cleanEnv } from "../../lib/proc.ts";
+import { captureArgv, cleanEnv } from "../../lib/proc.ts";
 import type { ReconcileCtx } from "../types.ts";
 
 type OsxType = OsxDefault["type"];
@@ -48,9 +48,11 @@ export function reconcileOsxDefault(entry: OsxDefault, ctx: ReconcileCtx): void 
   const value: OsxValue = type === "string" ? expandHome(String(entry.value), ctx.env) : entry.value;
   const want = osxWanted(type, value);
 
+  // captureArgv (not a raw Bun.spawnSync) so a missing/erroring `defaults` degrades to
+  // {ok:false} instead of throwing — and the stdout trim lives in one place, not here.
   const readCurrent = (): { ok: boolean; cur: string } => {
-    const p = Bun.spawnSync(["defaults", "read", domain, key], { env, stdout: "pipe", stderr: "ignore" });
-    return { ok: p.exitCode === 0, cur: p.exitCode === 0 ? new TextDecoder().decode(p.stdout).trim() : "" };
+    const r = captureArgv(["defaults", "read", domain, key], ctx.env);
+    return { ok: r.code === 0, cur: r.code === 0 ? r.stdout : "" };
   };
 
   switch (ctx.verb) {

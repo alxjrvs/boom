@@ -1,7 +1,23 @@
 // Filesystem helpers for the reconcile engine. node:fs/promises (not Bun.write) for
 // all metadata/link ops — Bun.write cannot create symlinks or set modes.
-import { chmod, copyFile, lstat, mkdir, readlink, rename, rm, stat, symlink } from "node:fs/promises";
+import { chmod, copyFile, cp, lstat, mkdir, readlink, rename, rm, stat, symlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
+
+// Move `src` → `dst`, surviving a cross-filesystem boundary. `rename(2)` is atomic but
+// throws EXDEV when the two paths live on different mounts — which the backup tree does
+// whenever `$XDG_STATE_HOME` sits on a different device than `$HOME` (tmpfs state, a
+// bind-mounted home). Without this, every overwrite-with-backup *and* every rollback
+// restore would fail on those layouts. Fall back to a recursive copy + remove (dst can be
+// a directory, so this is cp -r, not a file-only Bun.write). Assumes dst's parent exists.
+async function moveAcross(src: string, dst: string): Promise<void> {
+  try {
+    await rename(src, dst);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "EXDEV") throw e;
+    await cp(src, dst, { recursive: true, force: true });
+    await rm(src, { recursive: true, force: true });
+  }
+}
 
 type Env = Record<string, string | undefined>;
 
@@ -57,7 +73,7 @@ export async function ensureSymlink(src: string, dst: string): Promise<void> {
 export async function backupTo(dst: string, backupRoot: string): Promise<string> {
   const target = join(backupRoot, dst);
   await mkdir(dirname(target), { recursive: true });
-  await rename(dst, target);
+  await moveAcross(dst, target);
   return target;
 }
 
@@ -65,7 +81,7 @@ export async function backupTo(dst: string, backupRoot: string): Promise<string>
 export async function restoreFrom(from: string, dst: string): Promise<void> {
   await rm(dst, { recursive: true, force: true });
   await mkdir(dirname(dst), { recursive: true });
-  await rename(from, dst);
+  await moveAcross(from, dst);
 }
 
 // Byte-equal compare of two files (for `copy` verify); false if either is unreadable.

@@ -91,6 +91,21 @@ export async function pruneRuns(env: Env, keep = 10): Promise<void> {
   }
 }
 
+// Parse NDJSON records, skipping blank lines and any torn/partial trailing line a crash
+// mid-append can leave behind. The journal is a crash-recovery log read by rollback and
+// --resume *precisely* after an interrupted run — so one malformed line must degrade to
+// "skip that record", never throw out of the recovery path it exists to serve.
+function* records(text: string): Generator<{ t: string; [k: string]: unknown }> {
+  for (const line of text.split("\n")) {
+    if (line.length === 0) continue;
+    try {
+      yield JSON.parse(line);
+    } catch {
+      // torn/partial line (crash mid-write) — skip it, keep reading the rest
+    }
+  }
+}
+
 // Read a run's `done` + `side` records (the most recent run if `runId` is omitted).
 export async function readRun(
   env: Env,
@@ -115,11 +130,9 @@ export async function readRun(
   }
   const done: DoneRecord[] = [];
   const sides: SideRecord[] = [];
-  for (const line of text.split("\n")) {
-    if (line.length === 0) continue;
-    const rec = JSON.parse(line) as { t: string };
-    if (rec.t === "done") done.push(rec as DoneRecord);
-    else if (rec.t === "side") sides.push(rec as SideRecord);
+  for (const rec of records(text)) {
+    if (rec.t === "done") done.push(rec as unknown as DoneRecord);
+    else if (rec.t === "side") sides.push(rec as unknown as SideRecord);
   }
   return { runId: id, done, sides };
 }
@@ -155,9 +168,7 @@ export async function listRuns(env: Env): Promise<RunSummary[]> {
     let ops = 0;
     let sides = 0;
     let committed = false;
-    for (const line of text.split("\n")) {
-      if (line.length === 0) continue;
-      const rec = JSON.parse(line) as { t: string };
+    for (const rec of records(text)) {
       if (rec.t === "done") ops++;
       else if (rec.t === "side") sides++;
       else if (rec.t === "committed") committed = true;
