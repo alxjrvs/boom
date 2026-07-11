@@ -434,12 +434,14 @@ footer .credits strong { color: var(--gold); }
 /* ---------- motion (only if welcome) ---------- */
 @media (prefers-reduced-motion: no-preference) {
   html { scroll-behavior: smooth; }
-  @keyframes portalPulse { from { transform: scale(1); } to { transform: scale(1.025); } }
-  .hero-stage .portal { animation: portalPulse 5.5s ease-in-out infinite alternate; transform-origin: 50% 50%; }
-  @keyframes burstWiggle { from { rotate: -2.5deg; } to { rotate: 2.5deg; } }
-  .burst { animation: burstWiggle 3.2s ease-in-out infinite alternate; }
-  @keyframes krakTwinkle { from { opacity: .55; } to { opacity: 1; } }
-  .twinkle { animation: krakTwinkle 2.8s ease-in-out infinite alternate; }
+  /* Ambient motion, kept gentle: enough to feel alive, slow/shallow enough not to
+     nag in peripheral vision (and fully off under prefers-reduced-motion). */
+  @keyframes portalPulse { from { transform: scale(1); } to { transform: scale(1.02); } }
+  .hero-stage .portal { animation: portalPulse 6.5s ease-in-out infinite alternate; transform-origin: 50% 50%; }
+  @keyframes burstWiggle { from { rotate: -1.4deg; } to { rotate: 1.4deg; } }
+  .burst { animation: burstWiggle 4.6s ease-in-out infinite alternate; }
+  @keyframes krakTwinkle { from { opacity: .72; } to { opacity: 1; } }
+  .twinkle { animation: krakTwinkle 4s ease-in-out infinite alternate; }
 }
 
 @media (max-width: 560px) {
@@ -488,7 +490,9 @@ footer .credits strong { color: var(--gold); }
 /* rendered-markdown typography */
 /* Long inline tokens (paths, `${XDG_STATE_HOME:-~/.local/state}/…`) must be able to
    break, or a single un-wrappable <code> pushes the whole column past the viewport. */
-.doc { font-size: clamp(1rem, 2.5vw, 1.08rem); line-height: 1.62; color: var(--text); overflow-wrap: anywhere; }
+/* break-word (not anywhere) for prose: long tokens/paths still wrap, but normal
+   words don't shatter mid-word. Fenced code + inline <code> keep their own anywhere. */
+.doc { font-size: clamp(1rem, 2.5vw, 1.08rem); line-height: 1.62; color: var(--text); overflow-wrap: break-word; }
 .doc > :first-child { margin-top: 0; }
 /* Reading-page headings stay flat: no offset drop-shadow (it doubled into a muddy
    ghost layer, esp. red h2 over a gold shadow) and no rotate. The comic shadow lives

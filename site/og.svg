@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Social-share card (1200×630). Self-contained: OG-image crawlers don't render
+     SVG, so this is rasterized to og.png at author time (rsvg-convert og.svg -o og.png)
+     and committed — CI references the PNG and needs no rasterizer. Regenerate the PNG
+     whenever this file changes. Reuses the landing page's Kirby vocabulary. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <radialGradient id="vig" cx="72%" cy="42%" r="70%">
+      <stop offset="0%" stop-color="#171226"/>
+      <stop offset="100%" stop-color="#0b0a12"/>
+    </radialGradient>
+    <pattern id="dots" width="26" height="26" patternUnits="userSpaceOnUse">
+      <circle cx="4" cy="4" r="1.5" fill="#f3e9cf" opacity=".12"/>
+    </pattern>
+    <symbol id="krak" viewBox="0 0 240 120">
+      <g fill="currentColor">
+        <circle cx="60" cy="60" r="16"/><circle cx="84" cy="52" r="12"/>
+        <circle cx="44" cy="44" r="10"/><circle cx="104" cy="64" r="9"/>
+        <circle cx="70" cy="84" r="10"/><circle cx="28" cy="60" r="7"/>
+        <circle cx="120" cy="50" r="6"/><circle cx="96" cy="86" r="6"/>
+        <circle cx="52" cy="24" r="5"/><circle cx="132" cy="70" r="5"/>
+        <circle cx="16" cy="40" r="4"/><circle cx="140" cy="86" r="4"/>
+        <circle cx="110" cy="26" r="5"/><circle cx="150" cy="60" r="3"/>
+        <circle cx="160" cy="44" r="2.5"/><circle cx="170" cy="72" r="2"/>
+        <circle cx="80" cy="10" r="3"/><circle cx="126" cy="14" r="2"/>
+      </g>
+    </symbol>
+    <symbol id="bolt" viewBox="0 0 80 110">
+      <path fill="currentColor" stroke="#000" stroke-width="4" stroke-linejoin="round"
+        d="M14 2 L66 2 L44 38 L72 38 L12 106 L30 52 L4 52 Z"/>
+    </symbol>
+    <symbol id="spark" viewBox="0 0 40 40">
+      <path fill="currentColor" d="M20 0 L24 16 L40 20 L24 24 L20 40 L16 24 L0 20 L16 16 Z"/>
+    </symbol>
+  </defs>
+
+  <!-- backdrop -->
+  <rect width="1200" height="630" fill="url(#vig)"/>
+  <rect width="1200" height="630" fill="url(#dots)"/>
+
+  <!-- the boom tube, hung off the right third -->
+  <g transform="translate(905 300)">
+    <!-- radiating speed lines -->
+    <g stroke="#ffcf00" stroke-width="2.5" opacity=".5">
+      <line x1="0" y1="0" x2="360" y2="0"/><line x1="0" y1="0" x2="300" y2="230"/>
+      <line x1="0" y1="0" x2="120" y2="330"/><line x1="0" y1="0" x2="-140" y2="300"/>
+      <line x1="0" y1="0" x2="-330" y2="120"/><line x1="0" y1="0" x2="-340" y2="-120"/>
+      <line x1="0" y1="0" x2="-150" y2="-300"/><line x1="0" y1="0" x2="120" y2="-320"/>
+      <line x1="0" y1="0" x2="320" y2="-180"/>
+    </g>
+    <g stroke="#22d3ff" stroke-width="1.5" opacity=".4">
+      <line x1="0" y1="0" x2="300" y2="-260"/><line x1="0" y1="0" x2="-300" y2="260"/>
+    </g>
+    <!-- concentric rings, outside-in -->
+    <ellipse cx="0" cy="0" rx="300" ry="300" fill="#7a1fa2" stroke="#000" stroke-width="7"/>
+    <ellipse cx="-4" cy="-3" rx="252" ry="252" fill="#b5179e" stroke="#000" stroke-width="6"/>
+    <ellipse cx="-8" cy="-6" rx="210" ry="210" fill="#0b0a12" stroke="#000" stroke-width="6"/>
+    <ellipse cx="-11" cy="-8" rx="174" ry="174" fill="#0a8bd6" stroke="#000" stroke-width="5"/>
+    <ellipse cx="-14" cy="-10" rx="142" ry="142" fill="#22d3ff" stroke="#000" stroke-width="5"/>
+    <ellipse cx="-16" cy="-12" rx="114" ry="114" fill="#0b0a12" stroke="#000" stroke-width="4"/>
+    <ellipse cx="-18" cy="-13" rx="90" ry="90" fill="#e2231a" stroke="#000" stroke-width="4"/>
+    <ellipse cx="-20" cy="-14" rx="69" ry="69" fill="#ffcf00" stroke="#000" stroke-width="4"/>
+    <ellipse cx="-21" cy="-15" rx="51" ry="51" fill="#0b0a12" stroke="#000" stroke-width="3"/>
+    <ellipse cx="-22" cy="-16" rx="36" ry="36" fill="#e2231a" stroke="#000" stroke-width="3"/>
+    <ellipse cx="-23" cy="-16" rx="24" ry="24" fill="#ffcf00" stroke="#000" stroke-width="2.5"/>
+    <ellipse cx="-23" cy="-17" rx="13" ry="13" fill="#fff8e7" stroke="#000" stroke-width="2"/>
+    <!-- krackle spilling over the rim -->
+    <g style="color:#000">
+      <use href="#krak" width="240" height="120" transform="translate(-300 -260) scale(.9)"/>
+      <use href="#krak" width="240" height="120" transform="translate(120 180) rotate(180) scale(.85)"/>
+    </g>
+    <use href="#bolt" width="80" height="110" style="color:#ffcf00" transform="translate(-250 -150) rotate(-24)"/>
+    <use href="#spark" width="40" height="40" style="color:#fff8e7" transform="translate(250 -230)"/>
+  </g>
+
+  <!-- title block, left -->
+  <g transform="translate(70 0)">
+    <!-- gold kicker caption -->
+    <g transform="translate(4 150) rotate(-1.4)">
+      <rect x="0" y="0" width="392" height="54" fill="#ffcf00" stroke="#000" stroke-width="4"/>
+      <text x="20" y="37" font-family="'Arial Narrow', Impact, sans-serif" font-weight="700"
+        font-size="27" letter-spacing="2" fill="#000">ONE BINARY · ZERO DEPS</text>
+    </g>
+    <!-- BOOMTUBE wordmark -->
+    <g font-family="Impact, 'Arial Narrow Bold', sans-serif" paint-order="stroke" stroke="#000">
+      <text x="0" y="340" font-size="150" fill="#ffcf00" stroke-width="6" letter-spacing="1">BOOM</text>
+      <text x="0" y="470" font-size="150" fill="#22d3ff" stroke-width="6" letter-spacing="1">TUBE</text>
+    </g>
+    <!-- tagline -->
+    <text x="6" y="530" font-family="'Trebuchet MS', Verdana, sans-serif" font-weight="700"
+      font-size="30" fill="#f3e9cf">The one-binary workspace manager · <tspan fill="#22d3ff" font-family="monospace">boom</tspan></text>
+  </g>
+</svg>

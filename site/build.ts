@@ -73,18 +73,49 @@ const masthead = (active: string): string => `<header class="masthead">
 
 const escapeAttr = (s: string): string => s.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
 
+// Deployed at GitHub project Pages: https://alxjrvs.github.io/boom/ (no custom domain).
+const SITE_URL = "https://alxjrvs.github.io/boom";
+
+// Per-page <head>: the same SEO surface the hand-authored landing carries (canonical,
+// Open Graph, Twitter card, theme-color) so a shared link to ANY page renders a card,
+// not a blank URL. og:image is the one committed social card (site/og.png); only
+// title/description/url vary per page. faviconLink is lifted from index.html above.
+const head = (o: { title: string; desc: string; slug: string; ogType?: string }): string => {
+  const url = o.slug === "index" ? `${SITE_URL}/` : `${SITE_URL}/${o.slug}.html`;
+  const d = escapeAttr(o.desc);
+  const t = escapeAttr(o.title);
+  return `<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${o.title}</title>
+<meta name="description" content="${d}">
+<link rel="canonical" href="${url}">
+<meta name="color-scheme" content="light">
+<meta name="theme-color" content="#0b0a12">
+<meta property="og:type" content="${o.ogType ?? "website"}">
+<meta property="og:site_name" content="BoomTube">
+<meta property="og:title" content="${t}">
+<meta property="og:description" content="${d}">
+<meta property="og:url" content="${url}">
+<meta property="og:image" content="${SITE_URL}/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="BOOMTUBE — a Jack Kirby boom-tube portal beside the wordmark; the one-binary workspace manager, boom.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="${t}">
+<meta name="twitter:description" content="${d}">
+<meta name="twitter:image" content="${SITE_URL}/og.png">
+${faviconLink}
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="stylesheet" href="styles.css">`;
+};
+
 const render = (p: Page): string => {
   const md = readFileSync(resolve(ROOT, p.src), "utf8");
   const body = rewrite(marked.parse(md, { gfm: true, async: false }) as string);
   return `<!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${p.title}</title>
-<meta name="description" content="${escapeAttr(p.desc)}">
-${faviconLink}
-<link rel="stylesheet" href="styles.css">
+${head({ title: p.title, desc: p.desc, slug: p.slug, ogType: "article" })}
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
@@ -121,12 +152,11 @@ const renderGuide = (): string => {
   return `<!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Guide — boom</title>
-<meta name="description" content="How to use boom: install, bootstrap a machine, the reconcile loop (apply / verify / repair, and rollback), the boomfile.toml reference, config-repo git, code portals, and housekeeping.">
-${faviconLink}
-<link rel="stylesheet" href="styles.css">
+${head({
+    title: "Guide — boom",
+    desc: "How to use boom: install, bootstrap a machine, the reconcile loop (apply / verify / repair, and rollback), the boomfile.toml reference, config-repo git, code portals, and housekeeping.",
+    slug: "guide",
+  })}
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
@@ -147,4 +177,20 @@ for (const p of PAGES) {
 }
 writeFileSync(resolve(SITE, "guide.html"), renderGuide());
 console.log("site: built guide.html  ← guide.body.html");
+
+// sitemap + robots (git-ignored build artifacts, rebuilt each deploy). The homepage
+// plus the Guide and every generated doc page. NOTE: a robots.txt under a project
+// path (…/boom/robots.txt) is NOT read by crawlers — they honor host-root robots
+// only — so it mainly documents intent + points at the sitemap for Search Console
+// submission. It becomes fully effective only behind a custom domain at the root.
+const pageUrls = ["", "guide.html", ...PAGES.map((p) => `${p.slug}.html`)];
+const sitemap = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${pageUrls.map((u) => `  <url><loc>${SITE_URL}/${u}</loc></url>`).join("\n")}
+</urlset>
+`;
+writeFileSync(resolve(SITE, "sitemap.xml"), sitemap);
+writeFileSync(resolve(SITE, "robots.txt"), `User-agent: *\nAllow: /\nSitemap: ${SITE_URL}/sitemap.xml\n`);
+console.log("site: built sitemap.xml + robots.txt");
+
 console.log(`site: ${PAGES.length + 1} page(s) generated in ${SITE}`);
