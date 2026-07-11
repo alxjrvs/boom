@@ -51,12 +51,11 @@ export function runArgv(args: string[], env: Env, opts?: RunOptions): ShellResul
 }
 
 export function hasCommand(name: string, env: Env): boolean {
-  const p = Bun.spawnSync(["sh", "-c", `command -v ${name}`], {
-    env: cleanEnv(env),
-    stdout: "ignore",
-    stderr: "ignore",
-  });
-  return p.exitCode === 0;
+  // Bun.which is an in-process PATH lookup — no `sh -c command -v <name>` subprocess
+  // (doctor alone forked five), and no shell re-parse of an interpolated name. Honor
+  // the caller's PATH so a sandboxed test env resolves against its own PATH, not the
+  // parent process's.
+  return Bun.which(name, { PATH: env.PATH }) !== null;
 }
 
 export interface CaptureResult extends ShellResult {

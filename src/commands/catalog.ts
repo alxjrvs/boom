@@ -24,3 +24,28 @@ export function commandList(): readonly CommandInfo[] {
 export function commandNames(): readonly string[] {
   return commandList().map((c) => c.name);
 }
+
+// The nested routes under each namespace command (`source set|status|diff|…`,
+// `code init|claude|cmux`, `mcp add`), DERIVED from the same route map — so completions
+// can offer a second level without a hand-maintained table. A route map exposes
+// getAllEntries; a leaf command does not — that `in` check is the one-level-deeper form
+// of index.ts asking the route map itself what it routes.
+export interface SubcommandGroup {
+  readonly parent: string;
+  readonly children: readonly CommandInfo[];
+}
+
+export function subcommandGroups(): readonly SubcommandGroup[] {
+  const groups: SubcommandGroup[] = [];
+  for (const e of routes.getAllEntries()) {
+    if (e.hidden) continue;
+    const target = e.target;
+    if (!("getAllEntries" in target)) continue; // a leaf command, not a namespace
+    const children = target
+      .getAllEntries()
+      .filter((c) => !c.hidden)
+      .map((c) => ({ name: c.name.original, brief: c.target.brief }));
+    if (children.length > 0) groups.push({ parent: e.name.original, children });
+  }
+  return groups;
+}

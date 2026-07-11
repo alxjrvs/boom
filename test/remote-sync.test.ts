@@ -14,6 +14,7 @@ import { doctor } from "../src/engine/doctor.ts";
 import { pushConfigRepo } from "../src/engine/push.ts";
 import { reconcile } from "../src/engine/reconcile.ts";
 import { resetConfigRepo } from "../src/engine/reset.ts";
+import { statusConfigRepo } from "../src/engine/status.ts";
 import { pathExists } from "../src/lib/fs.ts";
 import { captureArgv } from "../src/lib/proc.ts";
 
@@ -141,6 +142,33 @@ test("verify reports 0 drift right after linking", async () => {
   const rc = await reconcile("verify", ctx, {});
   expect(out()).toContain("up to date with origin");
   expect(rc).toBe(0);
+});
+
+test("source status reports in-sync (exit 0) right after linking", async () => {
+  const origin = await originFixture();
+  const env = { XDG_STATE_HOME: await base(), NO_COLOR: "1" };
+  const repo = await linkRemoteConfigRepo(env, origin);
+  const { ctx, out } = ctxFor(env, repo);
+  const rc = await statusConfigRepo(ctx);
+  expect(out()).toContain("up to date with origin");
+  expect(rc).toBe(0);
+});
+
+test("source status reports commits-behind as drift (exit 2) without pulling", async () => {
+  const origin = await originFixture();
+  const env = { XDG_STATE_HOME: await base(), NO_COLOR: "1" };
+  const repo = await linkRemoteConfigRepo(env, origin);
+  const before = await readFile(join(repo, "boomfile.toml"), "utf8");
+
+  await writeFile(join(origin, "boomfile.toml"), `[[section]]\nname = "x"\n[[section]]\nname = "y"\n`);
+  commitAll(origin, "add y");
+
+  const { ctx, out } = ctxFor(env, repo);
+  const rc = await statusConfigRepo(ctx);
+  expect(out()).toContain("commit(s) behind origin");
+  expect(rc).toBe(2);
+  // status is read-only — the working tree is untouched.
+  expect(await readFile(join(repo, "boomfile.toml"), "utf8")).toBe(before);
 });
 
 test("verify reports commits-behind as drift without pulling", async () => {

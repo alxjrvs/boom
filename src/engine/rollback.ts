@@ -5,7 +5,27 @@ import type { BoomContext } from "../context.ts";
 import { colorEnabled } from "../lib/color.ts";
 import { displayPath, restoreFrom } from "../lib/fs.ts";
 import { Reporter } from "../lib/reporter.ts";
-import { readRun } from "./journal.ts";
+import { listRuns, readRun } from "./journal.ts";
+
+// `boom rollback --list` — enumerate the retained runs so the ids `--run-id` accepts are
+// discoverable, instead of forcing a hand `ls` of the state dir. Exit 0 always; it reads.
+export async function listRollbacks(ctx: BoomContext): Promise<number> {
+  const report = new Reporter(ctx.process.stdout, ctx.process.stderr, colorEnabled(ctx.env));
+  report.header("Rollback history");
+  const runs = await listRuns(ctx.env);
+  if (runs.length === 0) {
+    report.note("no runs recorded yet");
+  } else {
+    for (const r of runs) {
+      const side = r.sides > 0 ? `, ${r.sides} side-effect(s)` : "";
+      const state = r.committed ? "" : "  (interrupted — never committed)";
+      report.ok(`${r.runId}  —  ${r.ops} op(s)${side}${state}`);
+    }
+    report.note("roll one back with: boom rollback --run-id <id>");
+  }
+  ctx.process.stdout.write("\n");
+  return 0;
+}
 
 export async function rollback(ctx: BoomContext, runId?: string): Promise<number> {
   const report = new Reporter(ctx.process.stdout, ctx.process.stderr, colorEnabled(ctx.env));
@@ -38,11 +58,8 @@ export async function rollback(ctx: BoomContext, runId?: string): Promise<number
     for (const s of run.sides) report.warn(`${s.op}: ${s.label}`);
   }
 
-  ctx.process.stdout.write("\n");
-  if (report.failures > 0) {
-    report.fail(`rollback: ${report.failures} failure(s)`);
-    return 1;
-  }
-  report.ok("rollback done");
-  return 0;
+  return report.finish({
+    ok: "rollback done",
+    fail: (f) => `rollback: ${f} failure(s)`,
+  });
 }

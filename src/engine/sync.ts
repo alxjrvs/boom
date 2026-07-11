@@ -11,12 +11,11 @@ import { readConfigBreadcrumb } from "../config/load.ts";
 import {
   diffNameOnly,
   fetchOrigin,
-  hasUnpushedCommits,
   hasUpstream,
   headSha,
-  isClean,
   pullRebaseAutostash,
   rebaseAbort,
+  repoDrift,
   revListCount,
 } from "../lib/git.ts";
 import type { Env } from "../lib/proc.ts";
@@ -55,17 +54,15 @@ export async function syncConfigRepo(
   }
 
   if (verb === "verify" || dryRun) {
-    const behind = revListCount(repo, "HEAD..@{u}", env);
-    if (behind === undefined) {
+    const drift = repoDrift(repo, env);
+    if (!drift) {
       report.fail("could not determine drift against origin (git rev-list failed)");
       return;
     }
-    const unpushed = hasUnpushedCommits(repo, env);
-    const dirty = !isClean(repo, env);
-    if (behind > 0) report.warn(`${behind} commit(s) behind origin`);
-    if (unpushed) report.warn("local commit(s) not pushed to origin");
-    if (dirty) report.warn("uncommitted local changes");
-    if (behind === 0 && !unpushed && !dirty) report.ok("up to date with origin");
+    if (drift.behind > 0) report.warn(`${drift.behind} commit(s) behind origin`);
+    if (drift.unpushed) report.warn("local commit(s) not pushed to origin");
+    if (drift.dirty) report.warn("uncommitted local changes");
+    if (drift.behind === 0 && !drift.unpushed && !drift.dirty) report.ok("up to date with origin");
     return;
   }
 

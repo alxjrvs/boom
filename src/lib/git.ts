@@ -132,3 +132,21 @@ export function untrackedFiles(dir: string, env: Env): string[] {
 export function remoteReachable(url: string, env: Env): boolean {
   return captureArgv(["git", "ls-remote", "--exit-code", url], env).code === 0;
 }
+
+// How the local clone stands against its upstream: commits behind, whether it carries
+// unpushed work, and whether the tree is dirty. The shared drift summary behind both the
+// `verify`/dry-run report (engine/sync.ts) and `boom source status` (engine/status.ts),
+// so the two can't disagree. undefined when `git rev-list` itself failed (a broken clone
+// or unreadable range) — the caller must not read that as "no drift". Assumes an upstream
+// exists (@{u} resolves); callers check hasUpstream first.
+export interface RepoDrift {
+  readonly behind: number;
+  readonly unpushed: boolean;
+  readonly dirty: boolean;
+}
+
+export function repoDrift(dir: string, env: Env): RepoDrift | undefined {
+  const behind = revListCount(dir, "HEAD..@{u}", env);
+  if (behind === undefined) return undefined;
+  return { behind, unpushed: hasUnpushedCommits(dir, env), dirty: !isClean(dir, env) };
+}

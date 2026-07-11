@@ -3,7 +3,7 @@
 // would load it, but read-only. Exit 0 if every file is valid, 1 otherwise.
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
-import { CONFIG_FILE, loadConfigFile, resolveConfigDir } from "../config/load.ts";
+import { CONFIG_FILE, loadConfigFile, NO_CONFIG_REPO_MSG, resolveConfigDir } from "../config/load.ts";
 import type { BoomContext } from "../context.ts";
 import { colorEnabled } from "../lib/color.ts";
 import { Reporter } from "../lib/reporter.ts";
@@ -36,18 +36,16 @@ export async function validateConfig(ctx: BoomContext): Promise<number> {
 
   const repo = await resolveConfigDir(ctx.env, ctx.cwd);
   if (!repo) {
-    report.fail("no dotfiles repo found — run `boom source set <owner/repo>`");
+    report.fail(NO_CONFIG_REPO_MSG);
     ctx.process.stdout.write("\n");
     return 1;
   }
 
   await validateConfigFiles(repo, report);
 
-  ctx.process.stdout.write("\n");
-  if (report.failures > 0) {
-    report.fail(`validate: ${report.failures} invalid file(s)`);
-    return 1;
-  }
-  report.ok("validate: config OK");
-  return 0;
+  // No warning tier: validate is pass/fail (a file parses or it doesn't).
+  return report.finish({
+    ok: "validate: config OK",
+    fail: (f) => `validate: ${f} invalid file(s)`,
+  });
 }

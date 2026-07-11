@@ -6,13 +6,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "@stricli/core";
 import { app } from "../src/cli.ts";
-import { commandList, commandNames } from "../src/commands/catalog.ts";
+import { commandList, commandNames, subcommandGroups } from "../src/commands/catalog.ts";
 import { completionScript } from "../src/commands/completions.ts";
 import { manPage } from "../src/commands/man.ts";
 import { skillDoc } from "../src/commands/skill.ts";
 import type { BoomContext } from "../src/context.ts";
 import { doctor } from "../src/engine/doctor.ts";
 import { validateConfig } from "../src/engine/validate.ts";
+import { colorEnabled } from "../src/lib/color.ts";
+import { hasCommand } from "../src/lib/proc.ts";
 
 async function base(): Promise<string> {
   return mkdtemp(join(tmpdir(), "boom-x-"));
@@ -60,6 +62,39 @@ test("fish completion emits a per-command line", () => {
   const s = completionScript("fish");
   expect(s).toContain("complete -c boom -f");
   expect(s).toContain("-a 'verify'");
+});
+
+test("subcommandGroups derives nested routes from the route map", () => {
+  const groups = subcommandGroups();
+  const source = groups.find((g) => g.parent === "source");
+  const names = source?.children.map((c) => c.name) ?? [];
+  for (const sub of ["set", "status", "diff", "push", "reset"]) expect(names).toContain(sub);
+  expect(groups.find((g) => g.parent === "code")?.children.map((c) => c.name)).toContain("claude");
+});
+
+test("completions complete the second level (source|code|mcp subcommands)", () => {
+  const bash = completionScript("bash");
+  expect(bash).toContain("COMP_WORDS[1]"); // dispatches on the namespace word
+  expect(bash).toContain("status"); // a source subcommand reachable only via the 2nd level
+  const fish = completionScript("fish");
+  expect(fish).toContain("__fish_seen_subcommand_from source");
+  const zsh = completionScript("zsh");
+  expect(zsh).toContain("source subcommand");
+});
+
+// ---- color / command detection ----------------------------------------------
+
+test("colorEnabled: NO_COLOR forces off, FORCE_COLOR forces on", () => {
+  expect(colorEnabled({ NO_COLOR: "1" })).toBe(false);
+  expect(colorEnabled({ FORCE_COLOR: "1" })).toBe(true);
+  // NO_COLOR wins over FORCE_COLOR (spec: any NO_COLOR value disables).
+  expect(colorEnabled({ NO_COLOR: "1", FORCE_COLOR: "1" })).toBe(false);
+});
+
+test("hasCommand resolves via PATH (Bun.which), not a shell", () => {
+  // `sh` is always on a sane PATH; a nonsense name never is.
+  expect(hasCommand("sh", process.env)).toBe(true);
+  expect(hasCommand("definitely-not-a-real-binary-xyz", process.env)).toBe(false);
 });
 
 // ---- man ---------------------------------------------------------------------

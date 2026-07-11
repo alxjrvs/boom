@@ -13,6 +13,8 @@ import { diffConfigRepo } from "../engine/diff.ts";
 import { pushConfigRepo } from "../engine/push.ts";
 import { reconcile } from "../engine/reconcile.ts";
 import { resetConfigRepo } from "../engine/reset.ts";
+import { statusConfigRepo } from "../engine/status.ts";
+import { str } from "./flags.ts";
 import { syncCommand } from "./reconcile.ts";
 
 // `boom source set <owner/repo>` — the fresh-machine bootstrap
@@ -33,7 +35,7 @@ const setCommand = buildCommand<{ sync?: boolean }, [string], BoomContext>({
       kind: "tuple",
       parameters: [
         {
-          parse: (s: string) => s,
+          parse: str,
           placeholder: "owner/repo[@ref]",
           brief: "remote dotfiles repo: owner/repo, github:owner/repo, or a git URL",
         },
@@ -61,6 +63,16 @@ const diffCommand = buildCommand<Record<never, never>, [], BoomContext>({
   },
 });
 
+// `boom source status` — read-only drift against origin (behind/ahead/dirty), the cheap
+// "am I in sync?" that doesn't also walk the whole machine like `boom verify` does.
+const statusCommand = buildCommand<Record<never, never>, [], BoomContext>({
+  docs: { brief: "Show how the config repo stands against origin (behind/ahead/dirty)" },
+  parameters: {},
+  async func() {
+    this.process.exitCode = await statusConfigRepo(this);
+  },
+});
+
 // `boom source push` — the one "save my edits remotely" command: commit any local changes,
 // then push. No separate commit verb; `-m` names the commit message.
 const pushCommand = buildCommand<{ message?: string }, [], BoomContext>({
@@ -69,7 +81,7 @@ const pushCommand = buildCommand<{ message?: string }, [], BoomContext>({
     flags: {
       message: {
         kind: "parsed",
-        parse: (s: string) => s,
+        parse: str,
         optional: true,
         brief: 'Commit message for local changes (default: "boom: local changes")',
       },
@@ -105,13 +117,14 @@ export const sourceRouteMap = buildRouteMap({
     // `boom source` is the one documented way to reconcile; the rest operate the config repo.
     sync: syncCommand,
     set: setCommand,
+    status: statusCommand,
     diff: diffCommand,
     push: pushCommand,
     reset: resetCommand,
   },
   defaultCommand: "sync",
   docs: {
-    brief: "Reconcile your machine (bare); or operate the config repo (set | diff | push | reset)",
+    brief: "Reconcile your machine (bare); or operate the config repo (set | status | diff | push | reset)",
     hideRoute: { sync: true },
   },
 });

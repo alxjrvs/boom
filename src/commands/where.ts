@@ -4,23 +4,24 @@
 
 import { dirname } from "node:path";
 import { buildCommand } from "@stricli/core";
-import { resolveConfigDir } from "../config/load.ts";
+import { NO_CONFIG_REPO_MSG, resolveConfigDir } from "../config/load.ts";
 import type { BoomContext } from "../context.ts";
 import { resolveCodeDir } from "../engine/code.ts";
+import { str } from "./flags.ts";
 
 export const whereCommand = buildCommand<Record<never, never>, [string], BoomContext>({
   docs: { brief: "Print a resolved boom path: config | code | engine" },
   parameters: {
     positional: {
       kind: "tuple",
-      parameters: [{ parse: (s: string) => s, placeholder: "target", brief: "config | code | engine" }],
+      parameters: [{ parse: str, placeholder: "target", brief: "config | code | engine" }],
     },
   },
   async func(_flags, target) {
     switch (target) {
       case "config": {
         const dir = await resolveConfigDir(this.env, this.cwd);
-        if (!dir) return new Error("no dotfiles repo found — run `boom source set <owner/repo>`");
+        if (!dir) return new Error(NO_CONFIG_REPO_MSG);
         this.process.stdout.write(`${dir}\n`);
         return;
       }

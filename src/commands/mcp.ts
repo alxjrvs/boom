@@ -7,6 +7,7 @@
 import { buildCommand, buildRouteMap } from "@stricli/core";
 import type { BoomContext } from "../context.ts";
 import { hasCommand } from "../lib/proc.ts";
+import { str } from "./flags.ts";
 
 const KEYCHAIN_ITEM = "op-claude-agent";
 // Resolve `op` from PATH rather than hardcoding /opt/homebrew (Apple-Silicon-only):
@@ -51,13 +52,13 @@ const mcpAddCommand = buildCommand<McpAddFlags, string[], BoomContext>({
     flags: {
       scope: {
         kind: "parsed",
-        parse: (s: string) => s,
+        parse: str,
         optional: true,
         brief: "Passed through to `claude mcp add --scope` (default: project)",
       },
       envFile: {
         kind: "parsed",
-        parse: (s: string) => s,
+        parse: str,
         optional: true,
         brief: "op env-file of op:// refs for `op run --env-file` (default: .env)",
       },
@@ -70,7 +71,7 @@ const mcpAddCommand = buildCommand<McpAddFlags, string[], BoomContext>({
     positional: {
       kind: "array",
       parameter: {
-        parse: (s: string) => s,
+        parse: str,
         placeholder: "name -- server-cmd…",
         brief: "server name, then `--`, then the server command (kept verbatim)",
       },

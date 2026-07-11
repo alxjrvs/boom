@@ -73,6 +73,10 @@ export async function filesEqual(a: string, b: string): Promise<boolean> {
   try {
     const [fa, fb] = [Bun.file(a), Bun.file(b)];
     if ((await fa.exists()) === false || (await fb.exists()) === false) return false;
+    // Size is a cheap stat via Bun.file; a mismatch (the common "it changed" case)
+    // settles the answer without reading either file's bytes. Only equal sizes fall
+    // through to the full byte compare — the compare is unchanged, just deferred.
+    if (fa.size !== fb.size) return false;
     return Buffer.from(await fa.arrayBuffer()).equals(Buffer.from(await fb.arrayBuffer()));
   } catch {
     return false;

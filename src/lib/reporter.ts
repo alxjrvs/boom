@@ -59,4 +59,31 @@ export class Reporter {
     this.records.push({ level: "fail", msg: s });
     if (!this.json) this.err.write(`  ${this.c("red", "✗")} ${s}\n`);
   }
+
+  // The one place the 0/2/1 exit contract lives: write a trailing blank line + a summary
+  // line at the right severity, and return the exit code — so reconcile/doctor/validate/
+  // rollback stop each re-implementing the same failures→1 / warnings→2 / ok→0 ladder with
+  // subtly different wording. Callers pass only the varying messages. Omitting `warn` means
+  // "no warning tier" (warnings don't change the exit code) — the mutating/validate case.
+  // Exit code is decided from the counts *before* the summary line is emitted, so the
+  // summary's own fail()/warn() call can't perturb it.
+  finish(msgs: {
+    ok: string;
+    fail?: (failures: number, warnings: number) => string;
+    warn?: (warnings: number) => string;
+  }): number {
+    const f = this.failures;
+    const w = this.warnings;
+    this.out.write("\n");
+    if (f > 0) {
+      this.fail(msgs.fail ? msgs.fail(f, w) : `${f} failure(s)`);
+      return 1;
+    }
+    if (msgs.warn && w > 0) {
+      this.warn(msgs.warn(w));
+      return 2;
+    }
+    this.ok(msgs.ok);
+    return 0;
+  }
 }

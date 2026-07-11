@@ -15,6 +15,11 @@ import { type Boomfile, BoomfileSchema } from "./schema.ts";
 
 export const CONFIG_FILE = "boomfile.toml";
 
+// The one canonical "you haven't linked a config repo yet" message, so every command that
+// resolves the config (reconcile, validate, where, doctor) points the user at the same
+// next step with identical wording instead of a near-copy that can drift.
+export const NO_CONFIG_REPO_MSG = "no dotfiles repo found — run `boom source set <owner/repo>`";
+
 export class BoomConfigError extends Error {}
 
 export interface ConfigRemote {

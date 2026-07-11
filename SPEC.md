@@ -22,7 +22,8 @@ A `boom` invocation does one of two things:
    - `boom uninstall`
    These share **one verb-parameterized loop** (`src/engine/reconcile.ts`) over a
    resource-type registry — siblings, not separate scripts. `boom rollback` undoes
-   the most recent sync; `source --resume` continues an interrupted one. A
+   the most recent sync (`--run-id` targets an older one, `--list` enumerates them);
+   `source --resume` continues an interrupted one. A
    conflicting (non-boom-owned) file at a `link` destination is **overwritten by
    default**; `source --skip` opts out instead. There are no command aliases — one
    canonical name per verb.
@@ -78,7 +79,10 @@ A pinned `@ref` (tag/sha, detached HEAD) is reported as static rather than check
 drift. Auth is whatever git/SSH already works in the user's shell — no boom-side
 credential handling.
 
-The config-repo git verbs live under one namespace: `boom source push` commits any local
+The config-repo git verbs live under one namespace: `boom source status` is the read-only
+"how does my clone stand against origin?" (behind / unpushed / dirty, exit 0 in sync / 2
+on drift) — the same summary the `verify` path shows, over a shared `repoDrift` helper, but
+without also walking the whole machine; `boom source push` commits any local
 config-repo changes and pushes the managed clone's commits upstream (`-m`/`--message`
 sets the commit message); `boom source reset` is the
 other direction — fetches, then hard-resets to the upstream tip (or the pinned `@ref`
@@ -142,17 +146,18 @@ src/
   cli.ts · index.ts        @stricli app + entrypoint (one dispatch: route-map lookup →
                            discovered user cmd, else Stricli — no hardcoded cases)
   commands/                verify/repair/uninstall + source (reconcile.ts; source runs
-                           the sync verb and namespaces the set/diff/push/reset route
-                           map — set is the bootstrap),
+                           the sync verb and namespaces the set/status/diff/push/reset
+                           route map — set is the bootstrap),
                            where, rollback, upgrade, validate, doctor, code, mcp (add
                            route), completions, man, skill
-                           catalog.ts (names+briefs derived from the route map for
-                           completions + man + skill)
+                           catalog.ts (names+briefs + nested subcommands derived from the
+                           route map for completions + man + skill); flags.ts (shared parsers)
   engine/
     reconcile.ts           the one verb loop
     sync.ts                pre-reconcile config-repo fetch/pull(--rebase --autostash)-and-report
     commit.ts              commit local config-repo changes (shared by `boom source push` + source --commit)
     diff.ts                boom source diff (read-only: working-tree diff vs HEAD + untracked)
+    status.ts              boom source status (read-only drift vs origin, shared repoDrift helper)
     push.ts reset.ts       boom source push / boom source reset
     registry.ts            per-section phase dispatch
     resources/             link · copy · glob · packages · run · hook

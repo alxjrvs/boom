@@ -4,18 +4,18 @@ import { buildCommand } from "@stricli/core";
 import type { BoomContext } from "../context.ts";
 import { reconcile } from "../engine/reconcile.ts";
 import type { LinkMode } from "../engine/types.ts";
+import { str } from "./flags.ts";
 
-const parseTag = (s: string): string => s;
 const onlyFlag = {
   kind: "parsed",
-  parse: parseTag,
+  parse: str,
   variadic: true,
   optional: true,
   brief: "Limit to these section names",
 } as const;
 const profileFlag = {
   kind: "parsed",
-  parse: parseTag,
+  parse: str,
   variadic: true,
   optional: true,
   brief: "Activate a profile (repeatable)",
@@ -56,7 +56,7 @@ export const syncCommand = buildCommand<SyncFlags, [], BoomContext>({
       },
       message: {
         kind: "parsed",
-        parse: parseTag,
+        parse: str,
         optional: true,
         brief: 'Commit message for --commit (default: "boom: local changes")',
       },

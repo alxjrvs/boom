@@ -31,6 +31,32 @@ test("loadConfig rejects a schema-invalid boomfile.toml", async () => {
   await expect(loadConfig(dir)).rejects.toBeInstanceOf(BoomConfigError);
 });
 
+test("loadConfig rejects an unknown key (strict schema catches typos)", async () => {
+  const dir = await sandbox();
+  // `brewfle` is a typo for `brewfile`; a non-strict object would silently drop it.
+  await writeFile(join(dir, "boomfile.toml"), `[[section]]\nname = "x"\nbrewfle = "Brewfile"\n`);
+  await expect(loadConfig(dir)).rejects.toBeInstanceOf(BoomConfigError);
+});
+
+test("loadConfig rejects a non-octal link mode at the schema boundary", async () => {
+  const dir = await sandbox();
+  await writeFile(
+    join(dir, "boomfile.toml"),
+    `[[section]]\nname = "x"\nlink = [{ src = "a", dst = "~/a", mode = "999" }]\n`,
+  );
+  await expect(loadConfig(dir)).rejects.toBeInstanceOf(BoomConfigError);
+});
+
+test("loadConfig accepts a valid octal link mode", async () => {
+  const dir = await sandbox();
+  await writeFile(
+    join(dir, "boomfile.toml"),
+    `[[section]]\nname = "x"\nlink = [{ src = "a", dst = "~/a", mode = "0700" }]\n`,
+  );
+  const cfg = await loadConfig(dir);
+  expect(cfg.section[0]?.link?.[0]?.mode).toBe("0700");
+});
+
 test("resolveConfigDir honors BOOM_CONFIG over a bogus cwd", async () => {
   const dir = await sandbox();
   await writeFile(join(dir, "boomfile.toml"), `[[section]]\nname = "x"\n`);

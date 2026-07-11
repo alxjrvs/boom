@@ -3,7 +3,7 @@
 // sync/repair it opens a transaction journal (+ backups) so the run is rollback-able and
 // resumable, and persists the manifest of owned destinations.
 import { join } from "node:path";
-import { loadConfig, loadOptionalConfigFile, resolveConfigDir } from "../config/load.ts";
+import { loadConfig, loadOptionalConfigFile, NO_CONFIG_REPO_MSG, resolveConfigDir } from "../config/load.ts";
 import { overlayFiles, profileContext, sectionApplies } from "../config/profile.ts";
 import type { Boomfile, Section } from "../config/schema.ts";
 import type { BoomContext } from "../context.ts";
@@ -100,53 +100,40 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
   const json = opts.json ?? false;
   const report = new Reporter(ctx.process.stdout, ctx.process.stderr, colorEnabled(ctx.env), json);
 
+  // The same structured envelope for every verb, so each reconcile verb is scriptable,
+  // not just the read-only one. One writer — no per-branch copy of the object literal.
+  const writeEnvelope = (): void => {
+    ctx.process.stdout.write(
+      `${JSON.stringify({
+        schemaVersion: REPORT_SCHEMA_VERSION,
+        ok: report.failures === 0,
+        warnings: report.warnings,
+        failures: report.failures,
+        records: report.records,
+      })}\n`,
+    );
+  };
+
   const finish = (): number => {
-    if (verb === "verify") {
-      if (json) {
-        ctx.process.stdout.write(
-          `${JSON.stringify({
-            schemaVersion: REPORT_SCHEMA_VERSION,
-            ok: report.failures === 0,
-            warnings: report.warnings,
-            failures: report.failures,
-            records: report.records,
-          })}\n`,
-        );
-      } else {
-        ctx.process.stdout.write("\n");
-        if (report.failures > 0)
-          report.fail(`verify: ${report.failures} failure(s), ${report.warnings} warning(s)`);
-        else if (report.warnings > 0) report.warn(`verify: ${report.warnings} warning(s)`);
-        else report.ok("verify: all checks passed");
-      }
-      return report.failures > 0 ? 1 : report.warnings > 0 ? 2 : 0;
-    }
-    // Mutating verbs (sync/repair/uninstall): same structured envelope as verify,
-    // so every reconcile verb is scriptable, not just the read-only one.
     if (json) {
-      ctx.process.stdout.write(
-        `${JSON.stringify({
-          schemaVersion: REPORT_SCHEMA_VERSION,
-          ok: report.failures === 0,
-          warnings: report.warnings,
-          failures: report.failures,
-          records: report.records,
-        })}\n`,
-      );
-      return report.failures > 0 ? 1 : 0;
+      writeEnvelope();
+      // verify's exit code carries a warning tier (0/2/1); mutating verbs are 0/1.
+      return report.failures > 0 ? 1 : verb === "verify" && report.warnings > 0 ? 2 : 0;
     }
-    ctx.process.stdout.write("\n");
-    if (report.failures > 0) {
-      report.fail(`${verb}: ${report.failures} failure(s)`);
-      return 1;
-    }
-    report.ok(`${verb} done`);
-    return 0;
+    // Human output: the shared Reporter epilogue owns the blank line + 0/2/1 mapping.
+    // verify has a warning tier; the mutating verbs (sync/repair/uninstall) do not.
+    return verb === "verify"
+      ? report.finish({
+          ok: "verify: all checks passed",
+          warn: (w) => `verify: ${w} warning(s)`,
+          fail: (f, w) => `verify: ${f} failure(s), ${w} warning(s)`,
+        })
+      : report.finish({ ok: `${verb} done`, fail: (f) => `${verb}: ${f} failure(s)` });
   };
 
   const repo = await resolveConfigDir(ctx.env, ctx.cwd);
   if (!repo) {
-    report.fail("no dotfiles repo found — run `boom source set <owner/repo>`");
+    report.fail(NO_CONFIG_REPO_MSG);
     return finish();
   }
   const dryRun = opts.dryRun ?? false;

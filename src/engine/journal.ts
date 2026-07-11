@@ -23,13 +23,22 @@ export interface SideRecord {
   label: string;
 }
 
+// Per-process monotonic tie-breaker. The ISO timestamp only resolves to the millisecond,
+// so two runs in one process within the same millisecond (back-to-back syncs — common in
+// tests, possible in a script) would otherwise collide on runId and share one journal file,
+// cross-contaminating each other's records. Zero-padded so it also sorts chronologically.
+let runSeq = 0;
+
 export function newRunId(): string {
-  // ISO timestamp (lexically sortable = chronological) + pid for intra-machine uniqueness.
-  return `${new Date().toISOString().replace(/[:.]/g, "-")}-${process.pid}`;
+  // ISO timestamp (lexically sortable = chronological) + pid for intra-machine uniqueness
+  // + a per-process sequence so same-millisecond runs never share an id.
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  return `${stamp}-${process.pid}-${String(runSeq++).padStart(4, "0")}`;
 }
 
 export class Journal {
   private readonly file: string;
+  private dirReady = false;
   readonly runId: string;
 
   constructor(env: Env, runId: string) {
@@ -38,7 +47,15 @@ export class Journal {
   }
 
   private async append(obj: unknown): Promise<void> {
-    await mkdir(dirname(this.file), { recursive: true });
+    // Create the journal dir once (on the first record), not before every append — the
+    // redundant per-record mkdir was the real waste. The write itself stays a durable
+    // appendFile (open→write→close): this is a crash-recovery log that rollback/--resume
+    // read back — including, in-process, immediately after the run — so each record must
+    // be on disk the instant its append resolves. A buffered FileSink can't promise that.
+    if (!this.dirReady) {
+      await mkdir(dirname(this.file), { recursive: true });
+      this.dirReady = true;
+    }
     await appendFile(this.file, `${JSON.stringify(obj)}\n`);
   }
 
@@ -105,4 +122,47 @@ export async function readRun(
     else if (rec.t === "side") sides.push(rec as SideRecord);
   }
   return { runId: id, done, sides };
+}
+
+// One-line summary of a recorded run, for `boom rollback --list`: how many reversible
+// ops it holds, how many non-reversible side effects, and whether it reached a clean
+// `committed` end (an uncommitted run was interrupted mid-sync).
+export interface RunSummary {
+  readonly runId: string;
+  readonly ops: number;
+  readonly sides: number;
+  readonly committed: boolean;
+}
+
+// Enumerate the retained runs, newest first — the missing counterpart to `--run-id`,
+// which until now had no way to discover the ids it accepts.
+export async function listRuns(env: Env): Promise<RunSummary[]> {
+  const dir = journalDir(env);
+  let files: string[];
+  try {
+    files = (await readdir(dir)).filter((f) => f.endsWith(".ndjson")).sort();
+  } catch {
+    return [];
+  }
+  const out: RunSummary[] = [];
+  for (const f of files) {
+    let text: string;
+    try {
+      text = await readFile(join(dir, f), "utf8");
+    } catch {
+      continue;
+    }
+    let ops = 0;
+    let sides = 0;
+    let committed = false;
+    for (const line of text.split("\n")) {
+      if (line.length === 0) continue;
+      const rec = JSON.parse(line) as { t: string };
+      if (rec.t === "done") ops++;
+      else if (rec.t === "side") sides++;
+      else if (rec.t === "committed") committed = true;
+    }
+    out.push({ runId: f.replace(/\.ndjson$/, ""), ops, sides, committed });
+  }
+  return out.reverse(); // newest first (filenames sort chronologically)
 }

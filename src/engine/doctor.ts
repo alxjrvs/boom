@@ -4,7 +4,7 @@
 // PATH, is the agent's 1Password token in the keychain, is the state dir writable.
 // Exit code mirrors verify: 0 ok / 2 warnings / 1 failures.
 import { mkdir } from "node:fs/promises";
-import { readConfigBreadcrumb, resolveConfigDir } from "../config/load.ts";
+import { NO_CONFIG_REPO_MSG, readConfigBreadcrumb, resolveConfigDir } from "../config/load.ts";
 import { detectOs } from "../config/profile.ts";
 import type { BoomContext } from "../context.ts";
 import { colorEnabled } from "../lib/color.ts";
@@ -35,7 +35,7 @@ export async function doctor(ctx: BoomContext): Promise<number> {
   report.header("Config");
   const repo = await resolveConfigDir(ctx.env, ctx.cwd);
   if (!repo) {
-    report.warn("no dotfiles repo found — run `boom source set <owner/repo>`");
+    report.warn(NO_CONFIG_REPO_MSG);
   } else {
     // Same parse `boom validate` runs (base boomfile + every overlay), shared so the two
     // commands can't disagree; here it's one section among doctor's broader preconditions.
@@ -84,15 +84,9 @@ export async function doctor(ctx: BoomContext): Promise<number> {
     report.fail(`state dir not writable (${stateDir}): ${(e as Error).message}`);
   }
 
-  ctx.process.stdout.write("\n");
-  if (report.failures > 0) {
-    report.fail(`doctor: ${report.failures} failure(s), ${report.warnings} warning(s)`);
-    return 1;
-  }
-  if (report.warnings > 0) {
-    report.warn(`doctor: ${report.warnings} warning(s)`);
-    return 2;
-  }
-  report.ok("doctor: all checks passed");
-  return 0;
+  return report.finish({
+    ok: "doctor: all checks passed",
+    warn: (w) => `doctor: ${w} warning(s)`,
+    fail: (f, w) => `doctor: ${f} failure(s), ${w} warning(s)`,
+  });
 }

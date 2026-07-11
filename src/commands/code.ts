@@ -17,13 +17,14 @@ import {
   resolveCodeDir,
 } from "../engine/code.ts";
 import { cleanEnv, hasCommand } from "../lib/proc.ts";
+import { str } from "./flags.ts";
 
 const initCommand = buildCommand<Record<never, never>, [string?], BoomContext>({
   docs: { brief: "Record the code dir (default ~/Code)" },
   parameters: {
     positional: {
       kind: "tuple",
-      parameters: [{ parse: (s: string) => s, optional: true, placeholder: "dir", brief: "code directory" }],
+      parameters: [{ parse: str, optional: true, placeholder: "dir", brief: "code directory" }],
     },
   },
   async func(_flags, dir) {
