@@ -93,7 +93,7 @@ const pushCommand = buildCommand<{ message?: string }, [], BoomContext>({
   },
 });
 
-const resetCommand = buildCommand<{ force?: boolean }, [], BoomContext>({
+const resetCommand = buildCommand<{ force?: boolean; yes?: boolean }, [], BoomContext>({
   docs: { brief: "Discard local changes in the config repo and reset it to origin" },
   parameters: {
     flags: {
@@ -102,11 +102,16 @@ const resetCommand = buildCommand<{ force?: boolean }, [], BoomContext>({
         optional: true,
         brief: "Also discard commits no remote has (refused otherwise)",
       },
+      yes: {
+        kind: "boolean",
+        optional: true,
+        brief: "Skip the confirmation prompt for a dirty tree (for scripts/CI)",
+      },
     },
-    aliases: { f: "force" },
+    aliases: { f: "force", y: "yes" },
   },
   async func(flags) {
-    this.process.exitCode = await resetConfigRepo(this, { force: flags.force });
+    this.process.exitCode = await resetConfigRepo(this, { force: flags.force, yes: flags.yes });
   },
 });
 

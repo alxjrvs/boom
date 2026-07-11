@@ -12,12 +12,14 @@
 import { requireConfigBreadcrumb } from "../config/load.ts";
 import type { BoomContext } from "../context.ts";
 import { colorEnabled } from "../lib/color.ts";
+import { confirm } from "../lib/confirm.ts";
 import {
   cleanUntracked,
   fetchOrigin,
   hasUnpushedCommits,
   hasUpstream,
   headSha,
+  isClean,
   resetHard,
   unpushedCommits,
 } from "../lib/git.ts";
@@ -25,6 +27,7 @@ import { Reporter } from "../lib/reporter.ts";
 
 export interface ResetOptions {
   readonly force?: boolean;
+  readonly yes?: boolean;
 }
 
 export async function resetConfigRepo(ctx: BoomContext, opts: ResetOptions = {}): Promise<number> {
@@ -50,6 +53,16 @@ export async function resetConfigRepo(ctx: BoomContext, opts: ResetOptions = {})
       `${path} has commit(s) no remote has — reset would discard them:\n${commits}\n` +
         "    pass --force to discard anyway, or `boom source push` first",
     );
+    return 1;
+  }
+
+  // Confirm before discarding a dirty working tree (nothing to lose on a clean one, so no
+  // prompt then). --force/--yes signal intent; a non-TTY proceeds silently (scriptable).
+  if (
+    !isClean(path, ctx.env) &&
+    !confirm(`discard local changes in ${path}?`, { yes: opts.force || opts.yes })
+  ) {
+    report.warn("reset aborted");
     return 1;
   }
 
