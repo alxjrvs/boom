@@ -3,10 +3,28 @@
 // rollback replays `done` records in reverse; --resume skips destinations already done.
 import { appendFile, mkdir, readdir, readFile, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { backupTo } from "../lib/fs.ts";
 import { backupsDir, type Env, journalDir } from "./state.ts";
 
 // How to reverse one mutation: remove what we created, or restore a backed-up file.
 export type UndoToken = { kind: "remove" } | { kind: "restore"; from: string };
+
+// Displace whatever currently sits at `dst` so a create can take its place, and return how
+// to reverse it. With a backup root, move the existing file into the run's backup tree
+// (rollback restores it); without one, remove it (rollback just deletes what we create).
+// This is the transaction's most safety-critical branch — one copy here instead of the four
+// subtly-different hand-inlined versions it replaced across reconcile.ts + filesystem.ts.
+// Assumes `dst` exists (every mutating caller has already confirmed a conflict); `recursive`
+// covers a dst that may be a directory (a link/copy target that was a whole dir).
+export async function displace(
+  dst: string,
+  backupRoot: string | undefined,
+  recursive = false,
+): Promise<UndoToken> {
+  if (backupRoot) return { kind: "restore", from: await backupTo(dst, backupRoot) };
+  await rm(dst, { recursive, force: true });
+  return { kind: "remove" };
+}
 
 export interface DoneRecord {
   t: "done";

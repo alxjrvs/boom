@@ -8,9 +8,9 @@ import { overlayFiles, profileContext, sectionApplies } from "../config/profile.
 import type { Boomfile, Section } from "../config/schema.ts";
 import type { BoomContext } from "../context.ts";
 import { colorEnabled } from "../lib/color.ts";
-import { backupTo, displayPath, filesEqual, linkTarget, pathExists, rm } from "../lib/fs.ts";
+import { displayPath, filesEqual, linkTarget, pathExists } from "../lib/fs.ts";
 import { Reporter } from "../lib/reporter.ts";
-import { Journal, newRunId, pruneRuns, readRun, type UndoToken } from "./journal.ts";
+import { displace, Journal, newRunId, pruneRuns, readRun } from "./journal.ts";
 import { reconcileSection } from "./registry.ts";
 import { backupsDir, type ManifestEntry, readManifest, writeManifest } from "./state.ts";
 import { syncConfigRepo } from "./sync.ts";
@@ -65,10 +65,7 @@ async function reapOrphans(ctx: ReconcileCtx, prior: readonly ManifestEntry[]): 
       // `boom rollback` can restore a reaped file instead of the deletion being a
       // silent, un-undoable side effect outside the run's safety net.
       await ctx.journal?.intent("reap", dst);
-      const undo: UndoToken = ctx.backupRoot
-        ? { kind: "restore", from: await backupTo(dst, ctx.backupRoot) }
-        : { kind: "remove" };
-      if (!ctx.backupRoot) await rm(dst, { force: true });
+      const undo = await displace(dst, ctx.backupRoot);
       await ctx.journal?.done("reap", dst, undo);
       ctx.report.ok(`reaped orphan ${disp}`);
     }

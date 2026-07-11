@@ -3,7 +3,6 @@
 import { basename, dirname, join } from "node:path";
 import type { Glob, Link } from "../../config/schema.ts";
 import {
-  backupTo,
   chmod,
   copyFile,
   displayPath,
@@ -16,7 +15,7 @@ import {
   rm,
   stat,
 } from "../../lib/fs.ts";
-import type { UndoToken } from "../journal.ts";
+import { displace, type UndoToken } from "../journal.ts";
 import type { LinkMode, ReconcileCtx } from "../types.ts";
 
 // mkdir(dir, {recursive:true}) only no-ops when `dir` already exists AND is a real
@@ -30,10 +29,7 @@ async function ensureParentDir(dir: string, mode: LinkMode, ctx: ReconcileCtx): 
   if ((await stat(dir).catch(() => undefined))?.isDirectory()) return true;
   if (mode !== "overwrite") return false;
   await ctx.journal?.intent("mkdir", dir);
-  const undo: UndoToken = ctx.backupRoot
-    ? { kind: "restore", from: await backupTo(dir, ctx.backupRoot) }
-    : { kind: "remove" };
-  if (!ctx.backupRoot) await rm(dir, { recursive: true, force: true });
+  const undo = await displace(dir, ctx.backupRoot, true);
   await mkdir(dir, { recursive: true });
   await ctx.journal?.done("mkdir", dir, undo);
   return true;
@@ -75,10 +71,7 @@ async function applyLink(
   }
   if (mode === "overwrite") {
     await ctx.journal?.intent("link", dst);
-    const undo: UndoToken = ctx.backupRoot
-      ? { kind: "restore", from: await backupTo(dst, ctx.backupRoot) }
-      : { kind: "remove" };
-    if (!ctx.backupRoot) await rm(dst, { recursive: true, force: true });
+    const undo = await displace(dst, ctx.backupRoot, true);
     await ensureSymlink(src, dst);
     await ctx.journal?.done("link", dst, undo);
     report.ok(`${disp} overwritten`);
@@ -172,10 +165,11 @@ export async function reconcileCopy(entry: Link, ctx: ReconcileCtx): Promise<voi
         return;
       }
       await ctx.journal?.intent("copy", dst);
-      let undo: UndoToken = { kind: "remove" };
-      if ((await pathExists(dst)) && ctx.backupRoot) {
-        undo = { kind: "restore", from: await backupTo(dst, ctx.backupRoot) };
-      }
+      // Only displace when a file is actually there (copyFile overwrites in place); with no
+      // backup root the undo is a plain remove of the copy we're about to write.
+      const undo: UndoToken = (await pathExists(dst))
+        ? await displace(dst, ctx.backupRoot, true)
+        : { kind: "remove" };
       await mkdir(dirname(dst), { recursive: true });
       await copyFile(src, dst);
       await chmod(dst, mode);
