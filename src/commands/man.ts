@@ -57,7 +57,7 @@ ${subcommands}
 The typed, validated TOML config at the root of your dotfiles repo.
 .TP
 .I ~/.local/state/boom/
-Journal, backups, manifest, and breadcrumbs (honors \\fB$XDG_STATE_HOME\\fR).
+State DB (manifest + transaction journal), backups, and breadcrumbs (honors \\fB$XDG_STATE_HOME\\fR).
 .SH ENVIRONMENT
 .TP
 .B BOOM_CONFIG

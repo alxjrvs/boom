@@ -37,9 +37,11 @@ of record.
 - Resources are handlers implementing the verb contract (`src/engine/resources/`);
   user **hooks** are `hooks/<name>.ts` modules exporting `sync`/`verify`/`repair`
   that receive a `HookApi` ( `with` inputs, `ok`/`warn`/`fail`, `dryRun`, `env`).
-- Mutating runs journal to `${XDG_STATE_HOME:-~/.local/state}/boom/journal/` and
-  back up displaced files; `boom rollback` replays the journal. Breadcrumbs +
-  manifest live under the same state dir.
+- Mutating runs record a transaction journal in a `bun:sqlite` store
+  (`${XDG_STATE_HOME:-~/.local/state}/boom/state.db`, `src/engine/db.ts`) and back up
+  displaced files under `…/backups/<run-id>/`; `boom rollback` replays the journal
+  (`--dry-run` previews it). The owned-destinations manifest lives in the same DB;
+  breadcrumbs live beside it under the state dir.
 - Commit messages: `type(scope): summary`. End with the co-author trailer.
 
 ## Merge policy (enforced by branch protection + CI)

@@ -122,13 +122,17 @@ bash `_NAME_<verb>` hooks and is the public extension point.
 
 ### Transaction + state
 
-Mutating runs open a journal under `${XDG_STATE_HOME:-~/.local/state}/boom/journal/`
-(NDJSON, intent/done + undo token, committed marker) and **back up** any displaced
-file under `…/backups/<run-id>/`. `boom rollback` replays the journal in reverse
-(remove created links, restore backups) — like a Mother Box, it remembers everything
-and can put it back. A `manifest` of owned destinations drives
-orphan reaping (verify warns; sync/repair reap). Breadcrumbs (`config`, `code`) record
-the dotfiles repo (path + remote) and code dir.
+On-disk state lives in a single **bun:sqlite** database at
+`${XDG_STATE_HOME:-~/.local/state}/boom/state.db` (`src/engine/db.ts`): the per-run
+transaction journal (intent/done rows + undo token, a `committed` flag) and the `manifest`
+of owned destinations. Each journal row commits atomically (WAL), so an interrupted run
+leaves whole rows — there's no torn-record to guard against on read. Mutating runs also
+**back up** any displaced file under `…/backups/<run-id>/`. `boom rollback` replays a run's
+`done` rows in reverse (remove created links, restore backups) — like a Mother Box, it
+remembers everything and can put it back; `--dry-run` previews the replay. The manifest
+drives orphan reaping (verify warns; sync/repair reap), and a legacy TSV manifest is
+imported once on upgrade. Breadcrumbs (`config`, `code`) record the config repo (path +
+remote) and code dir.
 
 ## Stack
 
@@ -136,6 +140,7 @@ the dotfiles repo (path + remote) and code dir.
 |---------|--------|
 | CLI | `@stricli/core` — the only framework that compiles cleanly under `bun build --compile` |
 | Config | TOML via `smol-toml`, validated by `valibot` |
+| State | `bun:sqlite` (`state.db`: owned-destinations manifest + transaction journal) |
 | Shell / process | `Bun.$` / `Bun.spawnSync`; `node:fs/promises` for symlink/copy/mode |
 | Output | `Bun.color` palette + a tally Reporter (drives exit codes) |
 | Quality gates | Biome (lint + format), `tsc --noEmit`, `bun test` |
@@ -161,9 +166,9 @@ src/
     diff.ts                boom source diff (read-only: working-tree diff vs HEAD + untracked)
     status.ts              boom source status (read-only drift vs origin, shared repoDrift helper)
     push.ts reset.ts       boom source push / boom source reset
-    registry.ts            per-section phase dispatch
-    resources/             link · copy · glob · packages · run · hook
-    journal.ts state.ts    transaction + on-disk state
+    registry.ts            data-driven resource table (phase order) + finalize hooks
+    resources/             link · copy · glob · packages · osx · run · hook
+    db.ts journal.ts state.ts   bun:sqlite store: transaction journal + manifest
     rollback.ts code.ts discovery.ts
   config/  schema.ts load.ts remote.ts profile.ts
   lib/     reporter.ts color.ts fs.ts proc.ts git.ts version.ts
