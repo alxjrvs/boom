@@ -11,6 +11,7 @@
 // before a hard reset discards commits no remote has.
 import { requireConfigBreadcrumb } from "../config/load.ts";
 import type { BoomContext } from "../context.ts";
+import { colorEnabled } from "../lib/color.ts";
 import {
   cleanUntracked,
   fetchOrigin,
@@ -20,29 +21,34 @@ import {
   resetHard,
   unpushedCommits,
 } from "../lib/git.ts";
+import { Reporter } from "../lib/reporter.ts";
 
 export interface ResetOptions {
   readonly force?: boolean;
 }
 
 export async function resetConfigRepo(ctx: BoomContext, opts: ResetOptions = {}): Promise<number> {
+  // Reporter (not raw boom: writes) so every `boom source` subcommand speaks one voice —
+  // the ✓/→/✗ glyphs — and returns 1 (not 2) for a hard failure, keeping exit-2 reserved
+  // for the verify/status warning tier.
+  const report = new Reporter(ctx.process.stdout, ctx.process.stderr, colorEnabled(ctx.env));
   const breadcrumb = await requireConfigBreadcrumb(ctx);
   if (!breadcrumb) return 1;
   const { path, remote } = breadcrumb;
 
   const fetch = fetchOrigin(path, ctx.env);
   if (fetch.code !== 0) {
-    ctx.process.stderr.write(`boom: could not reach ${remote.url}: ${fetch.stderr || "fetch failed"}\n`);
+    report.fail(`could not reach ${remote.url}: ${fetch.stderr || "fetch failed"}`);
     return 1;
   }
 
   if (!opts.force && hasUnpushedCommits(path, ctx.env)) {
     const commits = unpushedCommits(path, ctx.env)
-      .map((c) => `    ${c}`)
+      .map((c) => `      ${c}`)
       .join("\n");
-    ctx.process.stderr.write(
-      `boom: ${path} has commit(s) no remote has — reset would discard them:\n${commits}\n` +
-        "boom: pass --force to discard anyway, or `boom source push` first\n",
+    report.fail(
+      `${path} has commit(s) no remote has — reset would discard them:\n${commits}\n` +
+        "    pass --force to discard anyway, or `boom source push` first",
     );
     return 1;
   }
@@ -51,13 +57,13 @@ export async function resetConfigRepo(ctx: BoomContext, opts: ResetOptions = {})
   const before = headSha(path, ctx.env);
   const reset = resetHard(path, target, ctx.env);
   if (reset.code !== 0) {
-    ctx.process.stderr.write(`boom: git reset --hard ${target} failed: ${reset.stderr || "unknown error"}\n`);
+    report.fail(`git reset --hard ${target} failed: ${reset.stderr || "unknown error"}`);
     return 1;
   }
   cleanUntracked(path, ctx.env);
 
   const after = headSha(path, ctx.env);
   const moved = before && after && before !== after ? ` (was ${before})` : "";
-  ctx.process.stdout.write(`boom: reset ${path} to ${after ?? target}${moved}\n`);
+  report.ok(`reset ${path} to ${after ?? target}${moved}`);
   return 0;
 }

@@ -4,13 +4,18 @@
 // just saves cd-ing into a cache dir you don't normally think about to inspect it.
 import { requireConfigBreadcrumb } from "../config/load.ts";
 import type { BoomContext } from "../context.ts";
+import { colorEnabled } from "../lib/color.ts";
 import { diffHead, isClean, untrackedFiles } from "../lib/git.ts";
+import { Reporter } from "../lib/reporter.ts";
 
 export async function diffConfigRepo(ctx: BoomContext): Promise<number> {
+  // Reporter owns boom's status lines (one voice with push/reset); the actual diff is
+  // streamed raw by diffHead so git colors + pages it exactly as a bare `git diff` would.
+  const report = new Reporter(ctx.process.stdout, ctx.process.stderr, colorEnabled(ctx.env));
   const breadcrumb = await requireConfigBreadcrumb(ctx);
   if (!breadcrumb) return 1;
   if (isClean(breadcrumb.path, ctx.env)) {
-    ctx.process.stdout.write("boom: no local changes\n");
+    report.ok("no local changes");
     return 0;
   }
   // Streams straight to the terminal; the untracked note prints after it because
@@ -18,8 +23,8 @@ export async function diffConfigRepo(ctx: BoomContext): Promise<number> {
   const result = diffHead(breadcrumb.path, ctx.env);
   const untracked = untrackedFiles(breadcrumb.path, ctx.env);
   if (untracked.length > 0) {
-    ctx.process.stdout.write("boom: untracked (new files `boom source push` would add):\n");
-    for (const f of untracked) ctx.process.stdout.write(`  ${f}\n`);
+    report.note("untracked (new files `boom source push` would add):");
+    for (const f of untracked) report.note(`  ${f}`);
   }
   return result.code === 0 ? 0 : 1;
 }

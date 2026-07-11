@@ -81,8 +81,10 @@ const mcpAddCommand = buildCommand<McpAddFlags, string[], BoomContext>({
   func(flags, ...args) {
     const [name, ...server] = args;
     if (!hasCommand("claude", this.env)) {
+      // Exit 1 — a missing prerequisite is a hard failure, not the verify/status warning
+      // tier that owns exit 2 in this CLI.
       this.process.stderr.write("boom mcp: claude not on PATH\n");
-      this.process.exitCode = 2;
+      this.process.exitCode = 1;
       return;
     }
     const argv = buildMcpAddArgv({
