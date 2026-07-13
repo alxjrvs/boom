@@ -11,22 +11,22 @@ class Boom < Formula
   on_macos do
     on_arm do
       url "https://github.com/alxjrvs/boom/releases/download/v#{version}/boom-bun-darwin-arm64"
-      sha256 "c5bf0f632c406ffe06b06ef2a4bdbfbbd0ad436d8055469f9433bb9c9a928b9e"
+      sha256 "04d3c508e6e3ef8639a8b8cae5c3f302f71c33e4dde0bdbf28b8c9854e70f7ad"
     end
     on_intel do
       url "https://github.com/alxjrvs/boom/releases/download/v#{version}/boom-bun-darwin-x64"
-      sha256 "524b6a0a3ab07c5829da7e4957f90d6b4c786e9d955e8e299a1ee78d62ce03d6"
+      sha256 "58192bb397147e98027c3a95fa8231822d3885028a6a797ce42f5082d0a28e9d"
     end
   end
 
   on_linux do
     on_arm do
       url "https://github.com/alxjrvs/boom/releases/download/v#{version}/boom-bun-linux-arm64"
-      sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+      sha256 "7ab51ed4c1a9309fb3602a0ecb46e6d9d5a226c5ee286c8d8e7d38c3dd5381ef"
     end
     on_intel do
       url "https://github.com/alxjrvs/boom/releases/download/v#{version}/boom-bun-linux-x64"
-      sha256 "484e39a425a2c8042d594acb755910042fca2615167ea3057ad428a43c4c068c"
+      sha256 "00ea6343759fbd917014b7eeefcc0ed1089e96e4bc766764e0d6adc052f34bcd"
     end
   end
 
