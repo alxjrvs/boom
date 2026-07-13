@@ -140,15 +140,18 @@ export const uninstallCommand = buildCommand<
     aliases: { y: "yes" },
   },
   async func(flags) {
-    // Confirm before the real teardown (never for a dry run — it changes nothing). Only an
-    // interactive terminal without --yes is prompted; a pipe/CI proceeds, so scripts are
-    // unaffected. A json run is machine-driven, so treat it as already-consented.
+    // Confirm before the real teardown (never for a dry run — it changes nothing). An
+    // interactive terminal is prompted; a non-TTY without --yes now REFUSES rather than
+    // silently tearing down (see lib/confirm.ts), so `echo | boom uninstall` can't wipe
+    // state by accident. A --json run is machine-driven, so treat it as already-consented.
     if (
       !flags.dryRun &&
       !flags.json &&
       !confirm("boom uninstall removes everything boom installed.", { yes: flags.yes })
     ) {
-      this.process.stderr.write("boom: uninstall aborted\n");
+      this.process.stderr.write(
+        "boom: uninstall aborted — pass --yes to confirm in a non-interactive shell\n",
+      );
       this.process.exitCode = 1;
       return;
     }

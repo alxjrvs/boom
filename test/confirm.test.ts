@@ -1,11 +1,12 @@
-// The confirm() contract is scriptable-first: --yes proceeds, and a non-TTY (which is what
-// `bun test` runs under) proceeds silently — only an interactive terminal is ever prompted.
+// The confirm() contract: --yes always proceeds; an interactive terminal is prompted; a
+// non-TTY (which is what `bun test` runs under) REFUSES without --yes, so a piped/CI/cron
+// invocation can't silently run an irreversible teardown.
 import { expect, test } from "bun:test";
 import { confirm } from "../src/lib/confirm.ts";
 
-test("confirm proceeds without prompting when --yes or non-interactive", () => {
+test("confirm proceeds with --yes but refuses a non-TTY without it", () => {
   expect(confirm("really?", { yes: true })).toBe(true);
-  // bun test has no TTY on stdin, so this takes the silent-proceed path (never prompts).
+  // bun test has no TTY on stdin, so without --yes this refuses rather than prompting.
   expect(process.stdin.isTTY).toBeFalsy();
-  expect(confirm("really?")).toBe(true);
+  expect(confirm("really?")).toBe(false);
 });

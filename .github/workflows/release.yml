@@ -80,7 +80,7 @@ jobs:
         if: steps.v.outputs.new == 'true'
         run: |
           mkdir -p dist
-          for t in bun-darwin-arm64 bun-darwin-x64 bun-linux-x64; do
+          for t in bun-darwin-arm64 bun-darwin-x64 bun-linux-x64 bun-linux-arm64; do
             bun build src/index.ts --compile --target="$t" --outfile "dist/boom-$t"
           done
 
@@ -216,17 +216,19 @@ jobs:
           arm="$(sha boom-bun-darwin-arm64)"
           intel="$(sha boom-bun-darwin-x64)"
           linux="$(sha boom-bun-linux-x64)"
-          for v in "$arm" "$intel" "$linux"; do
+          linuxarm="$(sha boom-bun-linux-arm64)"
+          for v in "$arm" "$intel" "$linux" "$linuxarm"; do
             [ -n "$v" ] || { echo "::error::missing sha256 in SHA256SUMS"; exit 1; }
           done
           # Rewrite each sha256 line by the arch of the url line just above it, so this
           # works on the first release (placeholders) and every release after (real shas).
-          awk -v arm="$arm" -v intel="$intel" -v linux="$linux" '
+          awk -v arm="$arm" -v intel="$intel" -v linux="$linux" -v linuxarm="$linuxarm" '
             /url .*boom-bun-darwin-arm64/ { a = "arm" }
             /url .*boom-bun-darwin-x64/   { a = "intel" }
+            /url .*boom-bun-linux-arm64/  { a = "linuxarm" }
             /url .*boom-bun-linux-x64/    { a = "linux" }
             /sha256 "/ {
-              s = (a == "arm" ? arm : a == "intel" ? intel : linux)
+              s = (a == "arm" ? arm : a == "intel" ? intel : a == "linuxarm" ? linuxarm : linux)
               sub(/sha256 "[^"]*"/, "sha256 \"" s "\"")
             }
             { print }

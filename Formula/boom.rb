@@ -6,7 +6,7 @@
 class Boom < Formula
   desc "Installable dotfiles + workspace engine — apply/verify/fix from boomfile.toml"
   homepage "https://github.com/alxjrvs/boom"
-  version "0.8.0"
+  version "0.9.0"
 
   on_macos do
     on_arm do
@@ -20,8 +20,14 @@ class Boom < Formula
   end
 
   on_linux do
-    url "https://github.com/alxjrvs/boom/releases/download/v#{version}/boom-bun-linux-x64"
-    sha256 "484e39a425a2c8042d594acb755910042fca2615167ea3057ad428a43c4c068c"
+    on_arm do
+      url "https://github.com/alxjrvs/boom/releases/download/v#{version}/boom-bun-linux-arm64"
+      sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+    end
+    on_intel do
+      url "https://github.com/alxjrvs/boom/releases/download/v#{version}/boom-bun-linux-x64"
+      sha256 "484e39a425a2c8042d594acb755910042fca2615167ea3057ad428a43c4c068c"
+    end
   end
 
   def install

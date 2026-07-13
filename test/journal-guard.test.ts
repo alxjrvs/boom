@@ -18,7 +18,8 @@ test("journal round-trips done ops + side effects and marks the run committed", 
   await j.intent("link", "/x");
   await j.done("link", "/x", { kind: "remove" });
   await j.side("run", "echo hi");
-  await j.commit();
+  j.markCommitted();
+  j.close();
 
   const run = await readRun(env);
   expect(run?.runId).toBe("run-a");

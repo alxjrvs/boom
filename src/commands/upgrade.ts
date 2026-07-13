@@ -17,7 +17,12 @@ const REPO = "alxjrvs/boom";
 // cross-compiles and ci.yml smoke-builds; the lockstep is guarded by a test that greps
 // both workflows (test/upgrade.test.ts), so a renamed asset can't silently break
 // `boom upgrade` / install.sh.
-export const RELEASE_TARGETS = ["bun-darwin-arm64", "bun-darwin-x64", "bun-linux-x64"] as const;
+export const RELEASE_TARGETS = [
+  "bun-darwin-arm64",
+  "bun-darwin-x64",
+  "bun-linux-x64",
+  "bun-linux-arm64",
+] as const;
 
 // process.platform/arch → the release-asset suffix install.sh maps `uname` to.
 export function releaseTargetFor(platform: string, arch: string): string | undefined {
@@ -28,8 +33,33 @@ export function releaseTargetFor(platform: string, arch: string): string | undef
       return "bun-darwin-x64";
     case "linux/x64":
       return "bun-linux-x64";
+    case "linux/arm64":
+      return "bun-linux-arm64";
     default:
       return undefined;
+  }
+}
+
+// Stage the downloaded bytes beside the running binary (same directory → same filesystem,
+// so the swap can be an atomic rename). Returns the staged path. Split out from the swap
+// so the irreversible replace-the-running-binary step is unit-testable without a live
+// download (test/upgrade.test.ts drives these two against a throwaway file).
+export async function stageBinary(self: string, bin: Uint8Array): Promise<string> {
+  const staged = join(dirname(self), `.boom.upgrade.${process.pid}`);
+  await Bun.write(staged, bin);
+  await chmod(staged, 0o755);
+  return staged;
+}
+
+// Swap the staged binary into place. `rename(2)` over the running executable is safe on
+// Unix — the live process keeps the old inode. Clean up the staging file if the rename
+// itself fails, so a failed upgrade never leaves a stray `.boom.upgrade.*` behind.
+export async function swapInto(self: string, staged: string): Promise<void> {
+  try {
+    await rename(staged, self);
+  } catch (e) {
+    await rm(staged, { force: true });
+    throw e;
   }
 }
 
@@ -154,13 +184,12 @@ export const upgradeCommand = buildCommand<UpgradeFlags, [], BoomContext>({
     }
     report.ok("checksum verified");
 
-    // Stage beside the target (same filesystem → rename is atomic) then swap. Renaming
-    // over the running executable is safe on Unix: the live process keeps the old inode.
-    const dir = dirname(self);
-    const staged = join(dir, `.boom.upgrade.${release.version}`);
+    // Stage beside the target (same filesystem → rename is atomic) then swap. `staged` is
+    // declared out here so the catch can clean it up no matter where the flow threw —
+    // stageBinary's own chmod, codesign, or the swap — never leaving a stray `.boom.upgrade.*`.
+    let staged: string | undefined;
     try {
-      await Bun.write(staged, bin);
-      await chmod(staged, 0o755);
+      staged = await stageBinary(self, bin);
 
       // macOS release binaries are signed on a real macOS host, so the download should
       // already verify. Only re-sign ad-hoc as a fallback when it doesn't — re-signing a
@@ -180,9 +209,9 @@ export const upgradeCommand = buildCommand<UpgradeFlags, [], BoomContext>({
         }
       }
 
-      await rename(staged, self);
+      await swapInto(self, staged);
     } catch (err) {
-      await rm(staged, { force: true });
+      if (staged) await rm(staged, { force: true });
       report.fail(`install failed: ${(err as Error).message}`);
       this.process.exitCode = 1;
       return;

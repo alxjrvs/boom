@@ -94,7 +94,14 @@ export async function resolveConfigDir(env: Env, cwd: string): Promise<string | 
 function validate(file: string, raw: unknown): Boomfile {
   const result = v.safeParse(BoomfileSchema, raw);
   if (!result.success) {
-    const lines = result.issues.map((i) => `  - ${v.getDotPath(i) ?? "(root)"}: ${i.message}`);
+    // Field path + message, plus the offending value where valibot reports one — so a
+    // schema failure points at both *where* (`section.0.link.2.mode`) and *what*
+    // (`received "999"`), instead of just naming the field and leaving the user to hunt.
+    const lines = result.issues.map((i) => {
+      const path = v.getDotPath(i) ?? "(root)";
+      const got = i.received && i.received !== "undefined" ? ` (received ${i.received})` : "";
+      return `  - ${path}: ${i.message}${got}`;
+    });
     throw new BoomConfigError(`${file}: does not match the boomfile schema:\n${lines.join("\n")}`);
   }
   return result.output;

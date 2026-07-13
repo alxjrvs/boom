@@ -57,6 +57,22 @@ export async function readManifest(env: Env): Promise<ManifestEntry[]> {
   return legacy;
 }
 
+// Drop specific destinations from the manifest, leaving the rest intact. Used by
+// `boom rollback`: reversing a run un-owns exactly the destinations it created (or restored
+// to a foreign file), so the manifest must forget them — otherwise the next verify reports
+// phantom drift and the next sync's reap logic acts on ownership that no longer holds.
+// dsts that aren't in the manifest (a reaped orphan, a `mkdir` dir) delete as no-ops.
+export async function removeManifestEntries(env: Env, dsts: readonly string[]): Promise<void> {
+  if (dsts.length === 0) return;
+  withDb(env, (db) => {
+    const del = db.transaction((ds: readonly string[]) => {
+      const stmt = db.query("DELETE FROM manifest WHERE dst = ?");
+      for (const d of ds) stmt.run(d);
+    });
+    del(dsts);
+  });
+}
+
 export async function writeManifest(env: Env, entries: readonly ManifestEntry[]): Promise<void> {
   withDb(env, (db) => {
     const replace = db.transaction((es: readonly ManifestEntry[]) => {

@@ -9,6 +9,7 @@ import type { Boomfile, Section } from "../config/schema.ts";
 import type { BoomContext } from "../context.ts";
 import { colorEnabled } from "../lib/color.ts";
 import { displayPath, filesEqual, linkTarget, pathExists } from "../lib/fs.ts";
+import { acquireLock } from "../lib/lock.ts";
 import { REPORT_SCHEMA_VERSION, Reporter } from "../lib/reporter.ts";
 import { displace, Journal, newRunId, pruneRuns, readRun } from "./journal.ts";
 import { finalizeResources, reconcileSection } from "./registry.ts";
@@ -131,83 +132,108 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
   }
 
   const mutating = (verb === "sync" || verb === "repair") && !dryRun;
+
+  // A mutating run holds an exclusive lock: two concurrent sync/repair runs would race on
+  // the same destinations and clobber each other's manifest. A live holder is a clean
+  // failure; a stale lock from a crashed run is reclaimed (see lib/lock.ts).
+  let releaseLock: (() => void) | undefined;
+  if (mutating) {
+    try {
+      releaseLock = acquireLock(ctx.env);
+    } catch (e) {
+      report.fail((e as Error).message);
+      return finish();
+    }
+  }
+
   let journal: Journal | undefined;
-  let backupRoot: string | undefined;
-  let resumeDone: ReadonlySet<string> | undefined;
-  if (mutating) {
-    const runId = newRunId();
-    // Read the prior interrupted run's done-set BEFORE opening this run's journal. The
-    // sqlite Journal inserts its run row eagerly, so once it exists it is the newest run —
-    // an untargeted readRun() would then resolve to *this* empty run and resume nothing.
-    // (The old NDJSON journal got away with the reverse order only because its constructor
-    // was lazy and wrote no file until the first op.)
-    if (opts.resume) {
-      const prior = await readRun(ctx.env);
-      if (prior) resumeDone = new Set(prior.done.map((d) => d.dst));
-    }
-    journal = new Journal(ctx.env, runId);
-    backupRoot = join(backupsDir(ctx.env), runId);
-  }
-  const priorManifest = await readManifest(ctx.env);
-
-  const rctx: ReconcileCtx = {
-    repo,
-    verb,
-    dryRun,
-    json,
-    linkMode: opts.linkMode ?? "overwrite",
-    upgrade: opts.upgrade ?? false,
-    env: ctx.env,
-    report,
-    declared: [],
-    journal,
-    backupRoot,
-    resumeDone,
-    dirty: new Set<string>(),
-  };
-
-  // Merge overlay files (boomfile.<os|host|profile>.toml) onto the base, then gate
-  // each section by its `when` (host/OS/profile) and the --only filter.
-  const pc = profileContext(ctx.env, opts.profiles ?? []);
-  const sections: Section[] = [...config.section];
   try {
-    for (const name of overlayFiles(pc)) {
-      const overlay = await loadOptionalConfigFile(join(repo, name));
-      if (overlay) sections.push(...overlay.section);
+    let backupRoot: string | undefined;
+    if (mutating) {
+      let runId = newRunId();
+      // --resume continues INTO the interrupted run — reuse its id and backup dir — rather
+      // than opening a fresh run. A fresh run would leave the interrupted pass's displaced
+      // originals attached to the OLD run's rows: invisible to `rollback` (which reads the
+      // latest run) and reapable by prune. Only an uncommitted (genuinely interrupted) run
+      // is resumable; a committed one has nothing to resume, so fall through to a new run.
+      // Re-application itself needs no journal-based skip list: reconcile is naturally
+      // idempotent (an already-correct link/copy is skipped by the reality checks in
+      // filesystem.ts), so resume just re-runs and only touches what isn't already in place.
+      if (opts.resume) {
+        const prior = await readRun(ctx.env);
+        if (prior && !prior.committed) runId = prior.runId;
+      }
+      journal = new Journal(ctx.env, runId);
+      backupRoot = join(backupsDir(ctx.env), runId);
     }
-  } catch (e) {
-    report.fail((e as Error).message);
+    const priorManifest = await readManifest(ctx.env);
+
+    const rctx: ReconcileCtx = {
+      repo,
+      verb,
+      dryRun,
+      json,
+      linkMode: opts.linkMode ?? "overwrite",
+      upgrade: opts.upgrade ?? false,
+      env: ctx.env,
+      report,
+      declared: [],
+      journal,
+      backupRoot,
+      dirty: new Set<string>(),
+    };
+
+    // Merge overlay files (boomfile.<os|host|profile>.toml) onto the base, then gate
+    // each section by its `when` (host/OS/profile) and the --only filter.
+    const pc = profileContext(ctx.env, opts.profiles ?? []);
+    const sections: Section[] = [...config.section];
+    try {
+      for (const name of overlayFiles(pc)) {
+        const overlay = await loadOptionalConfigFile(join(repo, name));
+        if (overlay) sections.push(...overlay.section);
+      }
+    } catch (e) {
+      report.fail((e as Error).message);
+      return finish();
+    }
+
+    if (dryRun) report.header(`${verb} — dry run (no changes)`);
+    const only = opts.only && opts.only.length > 0 ? new Set(opts.only) : undefined;
+    for (const section of sections) {
+      if (!sectionApplies(section, pc)) continue;
+      if (only && !only.has(section.name)) continue;
+      report.header(section.name);
+      await reconcileSection(section, rctx);
+    }
+
+    // Reaping compares the *whole* prior manifest against what this run declared. Under
+    // --only just the named sections re-declared, so every other section would look
+    // orphaned — skip reaping entirely for a scoped run.
+    if (verb !== "uninstall" && !only) await reapOrphans(rctx, priorManifest);
+
+    if (mutating) {
+      // Mark committed only when the run actually succeeded (zero failures). A run that
+      // reached the end with failed items stays committed=0 so `rollback --list` flags it
+      // as needing attention rather than mislabelling a half-applied run as clean.
+      if (report.failures === 0) journal?.markCommitted();
+      await pruneRuns(ctx.env);
+      // A scoped run only knows about the sections it ran, so merge into the prior
+      // manifest rather than replacing it (which would drop — and later reap — the rest).
+      await writeManifest(ctx.env, only ? mergeManifest(priorManifest, rctx.declared) : rctx.declared);
+    } else if (verb === "uninstall" && !dryRun) {
+      await writeManifest(ctx.env, []); // uninstall clears the manifest
+    }
+
+    // End-of-run finalize hooks (each self-gates): the seam where a resource acts on its own
+    // accumulated state — e.g. osx restarts Dock/Finder/SystemUIServer once, iff a default
+    // actually changed — instead of the core loop reaching into a resource-specific flag.
+    await finalizeResources(rctx);
+
     return finish();
+  } finally {
+    // Always release the DB handle and the lock, even on an early return (e.g. a malformed
+    // overlay) — the open WAL connection used to leak for the process lifetime.
+    journal?.close();
+    releaseLock?.();
   }
-
-  if (dryRun) report.header(`${verb} — dry run (no changes)`);
-  const only = opts.only && opts.only.length > 0 ? new Set(opts.only) : undefined;
-  for (const section of sections) {
-    if (!sectionApplies(section, pc)) continue;
-    if (only && !only.has(section.name)) continue;
-    report.header(section.name);
-    await reconcileSection(section, rctx);
-  }
-
-  // Reaping compares the *whole* prior manifest against what this run declared. Under
-  // --only just the named sections re-declared, so every other section would look
-  // orphaned — skip reaping entirely for a scoped run.
-  if (verb !== "uninstall" && !only) await reapOrphans(rctx, priorManifest);
-
-  if (mutating) {
-    await journal?.commit();
-    await pruneRuns(ctx.env);
-    // A scoped run only knows about the sections it ran, so merge into the prior
-    // manifest rather than replacing it (which would drop — and later reap — the rest).
-    await writeManifest(ctx.env, only ? mergeManifest(priorManifest, rctx.declared) : rctx.declared);
-  } else if (verb === "uninstall" && !dryRun) {
-    await writeManifest(ctx.env, []); // uninstall clears the manifest
-  }
-
-  // End-of-run finalize hooks (each self-gates): the seam where a resource acts on its own
-  // accumulated state — e.g. osx restarts Dock/Finder/SystemUIServer once, iff a default
-  // actually changed — instead of the core loop reaching into a resource-specific flag.
-  await finalizeResources(rctx);
-
-  return finish();
 }

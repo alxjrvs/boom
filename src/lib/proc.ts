@@ -10,6 +10,10 @@ export function cleanEnv(env: Env): Record<string, string> {
 
 export interface ShellResult {
   readonly code: number;
+  // True when the child was killed by the RunOptions.timeoutMs deadline (rather than
+  // exiting on its own). runShell surfaces this so a hung `run` step reads as a timeout,
+  // not a generic failure.
+  readonly timedOut?: boolean;
 }
 
 export interface RunOptions {
@@ -21,19 +25,32 @@ export interface RunOptions {
   // sets this to the dotfiles repo so a `run` step (or `mise install`) operates on
   // the configured machine, not on wherever `boom` happened to be invoked from.
   readonly cwd?: string;
+  // Wall-clock cap in ms; Bun.spawnSync kills the child (SIGTERM) when it's exceeded.
+  // Omit / 0 for no limit.
+  readonly timeoutMs?: number;
 }
 
 // fd 2 = the parent's stderr; Bun.spawn routes a child stream to a parent fd by number.
 const childStdout = (opts?: RunOptions): "inherit" | 2 => (opts?.quietStdout ? 2 : "inherit");
 
+// A child killed by a signal (timeout, SIGKILL) yields exitCode null; map that onto a
+// non-zero code so `code === 0` is never a false success and the number type never lies.
+function exitOf(p: { exitCode: number | null }): number {
+  return p.exitCode ?? 1;
+}
+
 export function runShell(cmd: string, env: Env, opts?: RunOptions): ShellResult {
+  const timeout = opts?.timeoutMs && opts.timeoutMs > 0 ? opts.timeoutMs : undefined;
   const p = Bun.spawnSync(["sh", "-c", cmd], {
     env: cleanEnv(env),
     cwd: opts?.cwd,
     stdout: childStdout(opts),
     stderr: "inherit",
+    timeout,
   });
-  return { code: p.exitCode };
+  // exitCode is null when the child was signalled — with a timeout set that's the deadline
+  // firing. (A signal without a timeout still maps to a non-zero code via exitOf.)
+  return { code: exitOf(p), timedOut: timeout !== undefined && p.exitCode === null };
 }
 
 // Run a tool by argv (no shell). Preferred for the engine's own invocations
@@ -47,7 +64,7 @@ export function runArgv(args: string[], env: Env, opts?: RunOptions): ShellResul
     stdout: childStdout(opts),
     stderr: "inherit",
   });
-  return { code: p.exitCode };
+  return { code: exitOf(p) };
 }
 
 export function hasCommand(name: string, env: Env): boolean {
@@ -73,7 +90,7 @@ export function captureArgv(args: string[], env: Env, opts?: RunOptions): Captur
   // so map the throw onto that contract instead of crashing them.
   try {
     const p = Bun.spawnSync(args, { env: cleanEnv(env), cwd: opts?.cwd, stdout: "pipe", stderr: "pipe" });
-    return { code: p.exitCode, stdout: p.stdout.toString().trim(), stderr: p.stderr.toString().trim() };
+    return { code: exitOf(p), stdout: p.stdout.toString().trim(), stderr: p.stderr.toString().trim() };
   } catch (e) {
     return { code: -1, stdout: "", stderr: e instanceof Error ? e.message : String(e) };
   }

@@ -400,7 +400,9 @@ test("reset discards a dirty-but-uncommitted tree with no unpushed commits, no -
   await writeFile(join(repo, "untracked.txt"), "oops\n"); // uncommitted only — not "unpushed work"
 
   const { ctx } = ctxFor(env, repo);
-  expect(await resetConfigRepo(ctx)).toBe(0);
+  // --yes consents to the dirty-tree confirm (a non-TTY refuses without it); the point of
+  // this case is that --force is NOT required — only unpushed commits need that.
+  expect(await resetConfigRepo(ctx, { yes: true })).toBe(0);
   expect(await pathExists(join(repo, "untracked.txt"))).toBe(false);
 });
 

@@ -8,6 +8,7 @@ import type { BoomContext } from "../src/context.ts";
 import { Journal, listRuns, newRunId } from "../src/engine/journal.ts";
 import { reconcile } from "../src/engine/reconcile.ts";
 import { listRollbacks, rollback } from "../src/engine/rollback.ts";
+import { readManifest } from "../src/engine/state.ts";
 import { linkTarget, pathExists, stat } from "../src/lib/fs.ts";
 
 interface Sandbox {
@@ -68,23 +69,29 @@ test("rollback removes a freshly applied link", async () => {
   expect(await pathExists(join(sb.home, ".z"))).toBe(false);
 });
 
-test("--resume skips destinations a prior interrupted run already recorded", async () => {
+test("--resume re-applies a missing dst and skips one already correct on disk (idempotent)", async () => {
   const sb = await sandbox(
     `[[section]]\nname = "S"\nlink = [{ src = ".a", dst = "~/.a" }, { src = ".b", dst = "~/.b" }]\n`,
   );
   await sb.write(".a", "a");
   await sb.write(".b", "b");
-  // A prior run that recorded ~/.a as done, then was interrupted (never committed). This is
-  // the case the eager sqlite run-row insert broke: the new run must NOT shadow this one.
+  // Simulate an interrupted run: ~/.b was actually linked; ~/.a never got created (its
+  // create threw/was killed). Resume must trust the DISK, not the journal — re-applying the
+  // missing ~/.a and skipping the already-correct ~/.b — so a create that failed after its
+  // journal row was written is retried, not silently declared done.
+  await symlink(join(sb.repo, ".b"), join(sb.home, ".b"));
   const prior = new Journal(sb.ctx.env, newRunId());
+  // Both got a journal `done` row, but only ~/.b landed on disk — ~/.a's create failed
+  // after its row was written. A journal row must NOT cause resume to skip ~/.a.
   await prior.done("link", join(sb.home, ".a"), { kind: "remove" });
+  await prior.done("link", join(sb.home, ".b"), { kind: "remove" });
+  prior.close();
 
   sb.clear();
   expect(await reconcile("sync", sb.ctx, { resume: true })).toBe(0);
-  const out = sb.out();
-  expect(out).toContain("resumed — already applied"); // ~/.a skipped from the prior done-set
-  expect(await pathExists(join(sb.home, ".a"))).toBe(false); // trusted as already done, not re-linked
-  expect(await linkTarget(join(sb.home, ".b"))).toBe(join(sb.repo, ".b")); // ~/.b was new → applied
+  expect(sb.out()).toContain("already linked"); // ~/.b skipped by the reality check
+  expect(await linkTarget(join(sb.home, ".a"))).toBe(join(sb.repo, ".a")); // ~/.a re-applied
+  expect(await linkTarget(join(sb.home, ".b"))).toBe(join(sb.repo, ".b")); // ~/.b intact
 });
 
 test("rollback --dry-run previews the undo without touching anything", async () => {
@@ -310,4 +317,45 @@ test("rollback restores a link orphaned (and reaped) by the same run", async () 
 
   expect(await rollback(sb.ctx)).toBe(0);
   expect(await linkTarget(join(sb.home, ".b"))).toBe(join(sb.repo, ".b")); // restored
+});
+
+test("a run with a failed step is left uncommitted (so rollback --list flags it)", async () => {
+  // committed must mean "succeeded", not "reached the end" — a half-applied run has to be
+  // distinguishable from a clean one, or an operator skips the run that needs rolling back.
+  const sb = await sandbox(
+    `[[section]]\nname = "S"\nlink = [{ src = ".z", dst = "~/.z" }]\nrun = [{ on = "sync", cmd = "exit 3" }]\n`,
+  );
+  await sb.write(".z", "z");
+  expect(await reconcile("sync", sb.ctx, {})).toBe(1); // the failed run step fails the sync
+  expect(await linkTarget(join(sb.home, ".z"))).toBe(join(sb.repo, ".z")); // link still applied
+  const runs = await listRuns(sb.ctx.env);
+  expect(runs[0]?.committed).toBe(false); // NOT marked clean despite reaching the end
+});
+
+test("rollback drops the reversed destinations from the manifest (no phantom drift)", async () => {
+  const sb = await sandbox(`[[section]]\nname = "S"\nlink = [{ src = ".z", dst = "~/.z" }]\n`);
+  await sb.write(".z", "z");
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  const dst = join(sb.home, ".z");
+  expect((await readManifest(sb.ctx.env)).some((e) => e.dst === dst)).toBe(true); // owned
+
+  expect(await rollback(sb.ctx)).toBe(0);
+  expect((await readManifest(sb.ctx.env)).some((e) => e.dst === dst)).toBe(false); // un-owned
+});
+
+test("--resume continues the interrupted run rather than opening a second one", async () => {
+  const sb = await sandbox(
+    `[[section]]\nname = "S"\nlink = [{ src = ".a", dst = "~/.a" }, { src = ".b", dst = "~/.b" }]\n`,
+  );
+  await sb.write(".a", "a");
+  await sb.write(".b", "b");
+  // An interrupted (uncommitted) run that recorded ~/.a as done.
+  const prior = new Journal(sb.ctx.env, newRunId());
+  await prior.done("link", join(sb.home, ".a"), { kind: "remove" });
+  prior.close();
+
+  expect(await reconcile("sync", sb.ctx, { resume: true })).toBe(0);
+  const runs = await listRuns(sb.ctx.env);
+  expect(runs).toHaveLength(1); // reused the interrupted run — did NOT open a second
+  expect(runs[0]?.committed).toBe(true); // and it's now completed cleanly
 });

@@ -27,7 +27,6 @@ export interface ReconcileCtx {
   // Transaction state (present for mutating sync/repair runs):
   readonly journal?: Journal;
   readonly backupRoot?: string;
-  readonly resumeDone?: ReadonlySet<string>;
   // Resources mark themselves here when they make a change that needs an end-of-run
   // finalize (e.g. osx adds "osx" after a `defaults write`, so finalizeOsx knows to
   // restart the UI). Generic so no single resource's state leaks into the shared ctx.

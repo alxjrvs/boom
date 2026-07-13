@@ -105,7 +105,8 @@ Resources:
 
 - `link` / `copy` `{ src, dst, mode? }`, `glob { pattern, into }`
 - `brewfile = "FILE"`, `mise = true`
-- `run = [{ on = "sync"|"verify"|"uninstall", cmd }]` — the inline imperative escape
+- `run = [{ on = "sync"|"verify"|"uninstall", cmd, timeout? }]` — the inline imperative
+  escape; `timeout` (seconds) caps a step's wall-clock so a hung command can't block reconcile
 - `hook = [{ name, with? }]` — load `hooks/<name>.ts`, the TS resource-type extension
 
 A section may carry `when = { os, host, profile }` to gate by machine; overlay
@@ -126,7 +127,14 @@ On-disk state lives in a single **bun:sqlite** database at
 `${XDG_STATE_HOME:-~/.local/state}/boom/state.db` (`src/engine/db.ts`): the per-run
 transaction journal (intent/done rows + undo token, a `committed` flag) and the `manifest`
 of owned destinations. Each journal row commits atomically (WAL), so an interrupted run
-leaves whole rows — there's no torn-record to guard against on read. Mutating runs also
+leaves whole rows — there's no torn-record to guard against on read. A mutating run holds
+an exclusive lockfile under the state dir (`src/lib/lock.ts`) so two concurrent
+sync/repair runs can't race on destinations or clobber each other's manifest; a stale lock
+from a crashed run (dead pid) is reclaimed. `committed` is set only when the run finished
+with zero failures, so `rollback --list` distinguishes a clean run from a half-applied one;
+each destructive filesystem op journals its undo *before* the write, so a crash mid-op is
+still reversible. `source --resume` continues the interrupted run in place (its id + backup
+tree) rather than opening a new one. Mutating runs also
 **back up** any displaced file under `…/backups/<run-id>/`. `boom rollback` replays a run's
 `done` rows in reverse (remove created links, restore backups) — like a Mother Box, it
 remembers everything and can put it back; `--dry-run` previews the replay. The manifest

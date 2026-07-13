@@ -101,7 +101,8 @@ cmd>` (it wraps the server in `op run --env-file` so secrets resolve from `op://
 ## The `boomfile.toml`
 
 Your dotfiles repo's config is a typed, validated TOML document, grouped into
-sections that run in phase order (`link → copy → glob → packages → run → hook`):
+sections that run in phase order
+(`link → copy → glob → packages → osx_default → run → hook`):
 
 ```toml
 [[section]]
@@ -146,6 +147,18 @@ boom code cmux           # one cmux workspace per repo
 `code claude` flattens every repo into a symlink farm so each is `@`-taggable for
 agent dispatch even with no running agents; `code cmux` opens one workspace per
 repo. Both honor `--dry-run` and only spawn the backend tool when it's present.
+
+## Security model
+
+boom reconciles from a git remote **you** point it at, and a boomfile's `run` steps and
+`hook` modules are executed as your user during `sync`/`repair`. Sync pulls the config
+repo *before* running those steps, so **anyone who can push to your config remote can run
+arbitrary code on your machine on the next sync** — treat write access to that repo as
+equivalent to shell access. Pin to a tag or SHA (`boom source set owner/repo@v1.2.3`) if
+you want a fixed, reviewed state instead of tracking a moving branch. boom does no
+credential handling of its own: git/SSH auth is whatever already works in your shell.
+Downloaded release binaries are checksum-verified against the release's `SHA256SUMS`
+(both `install.sh` and `boom upgrade`).
 
 ## Develop
 

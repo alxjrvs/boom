@@ -55,6 +55,7 @@ export function newRunId(): string {
 
 export class Journal {
   private readonly db: Database;
+  private closed = false;
   readonly runId: string;
 
   constructor(env: Env, runId: string) {
@@ -80,10 +81,20 @@ export class Journal {
     this.db.run("INSERT INTO sides (run_id, op, label) VALUES (?, ?, ?)", [this.runId, op, label]);
     return Promise.resolve();
   }
-  commit(): Promise<void> {
+  // Mark the run cleanly committed. Split from close() so the caller only sets this when the
+  // run actually succeeded (zero failures) — a run that reached the end with failed items
+  // stays committed=0, which is exactly what `rollback --list` reads as "interrupted /
+  // needs attention" (a half-applied run being labelled clean was the old trap).
+  markCommitted(): void {
     this.db.run("UPDATE runs SET committed = 1 WHERE run_id = ?", [this.runId]);
+  }
+  // Release the DB handle. Idempotent, and separate from markCommitted() so reconcile can
+  // always close in a finally — an early return (e.g. a malformed overlay) no longer leaks
+  // the open WAL connection for the process lifetime.
+  close(): void {
+    if (this.closed) return;
+    this.closed = true;
     this.db.close();
-    return Promise.resolve();
   }
 }
 
@@ -95,6 +106,10 @@ export async function pruneRuns(env: Env, keep = 10): Promise<void> {
     const ids = (db.query("SELECT run_id FROM runs ORDER BY run_id").all() as { run_id: string }[]).map(
       (r) => r.run_id,
     );
+    // Pure count-bound (drop oldest beyond `keep`), committed or not — this bounds growth
+    // even when a run fails every sync. The most-recent run (the only one `--resume` or an
+    // untargeted `rollback` ever reaches) is always inside the kept window, so its backups
+    // are never reaped out from under it; older interrupted runs are superseded history.
     const drop = ids.slice(0, Math.max(0, ids.length - keep));
     const delRun = db.query("DELETE FROM runs WHERE run_id = ?");
     const delOps = db.query("DELETE FROM ops WHERE run_id = ?");
@@ -114,11 +129,14 @@ export async function pruneRuns(env: Env, keep = 10): Promise<void> {
 export async function readRun(
   env: Env,
   runId?: string,
-): Promise<{ runId: string; done: DoneRecord[]; sides: SideRecord[] } | undefined> {
+): Promise<{ runId: string; committed: boolean; done: DoneRecord[]; sides: SideRecord[] } | undefined> {
   return withDb(env, (db) => {
     const id = runId ?? latestRunId(db);
     if (!id) return undefined;
-    if (!db.query("SELECT 1 FROM runs WHERE run_id = ?").get(id)) return undefined;
+    const runRow = db.query("SELECT committed FROM runs WHERE run_id = ?").get(id) as
+      | { committed: number }
+      | undefined;
+    if (!runRow) return undefined;
     const done = (
       db.query("SELECT op, dst, undo FROM ops WHERE run_id = ? AND t = 'done' ORDER BY id").all(id) as {
         op: string;
@@ -129,7 +147,7 @@ export async function readRun(
     const sides = db
       .query("SELECT op, label FROM sides WHERE run_id = ? ORDER BY id")
       .all(id) as SideRecord[];
-    return { runId: id, done, sides };
+    return { runId: id, committed: runRow.committed === 1, done, sides };
   });
 }
 

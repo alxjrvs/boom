@@ -71,7 +71,9 @@ export async function resetConfigRepo(ctx: BoomContext, opts: ResetOptions = {})
   }
 
   // Confirm before discarding a dirty working tree (nothing to lose on a clean one, so no
-  // prompt then). --force/--yes signal intent; a non-TTY proceeds silently (scriptable).
+  // prompt then). --force/--yes signal intent and always proceed; an interactive terminal is
+  // prompted; a non-TTY without either now REFUSES (see lib/confirm.ts) rather than silently
+  // discarding local changes — a scripted reset must pass --yes to consent explicitly.
   if (
     !isClean(path, ctx.env) &&
     !confirm(`discard local changes in ${path}?`, { yes: opts.force || opts.yes })

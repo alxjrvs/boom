@@ -45,6 +45,11 @@ jobs:
           ./build/boom man > /dev/null
           ./build/boom skill > /dev/null
 
+      # Validate the shipped example against the live schema, so a schema change can't
+      # silently invalidate the config every new user is pointed at while CI stays green.
+      - name: Smoke — example boomfile validates
+        run: BOOM_CONFIG=examples/dotfiles ./build/boom validate
+
   version-guard:
     # Every PR must move package.json's version exactly one semver step from main —
     # patch (x.y.z+1), minor (x.y+1.0), or major (x+1.0.0) — or leave it unchanged.
@@ -85,6 +90,6 @@ jobs:
       - run: bun install --frozen-lockfile
       - name: Cross-compile release matrix
         run: |
-          for t in bun-darwin-arm64 bun-darwin-x64 bun-linux-x64; do
+          for t in bun-darwin-arm64 bun-darwin-x64 bun-linux-x64 bun-linux-arm64; do
             bun build src/index.ts --compile --target="$t" --outfile "build/boom-$t"
           done

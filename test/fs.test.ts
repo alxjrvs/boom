@@ -1,7 +1,10 @@
 // expandHome resolves ~ and $HOME in osx_default string values, which `defaults
 // write` would otherwise store verbatim (e.g. `screencapture location`).
 import { expect, test } from "bun:test";
-import { expandHome, expandTilde } from "../src/lib/fs.ts";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { expandHome, expandTilde, restoreFrom } from "../src/lib/fs.ts";
 
 const env = { HOME: "/Users/alxjrvs" };
 
@@ -27,4 +30,30 @@ test("expandHome passes through unchanged when HOME is unset", () => {
 
 test("expandTilde still only handles ~, not $HOME (unchanged behavior)", () => {
   expect(expandTilde("$HOME/x", env)).toBe("$HOME/x");
+});
+
+test("restoreFrom replaces the current file with the backup", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "boom-fs-"));
+  const dst = join(dir, "dst");
+  const from = join(dir, "backup");
+  await writeFile(dst, "CURRENT");
+  await writeFile(from, "BACKUP");
+  await restoreFrom(from, dst);
+  expect(await readFile(dst, "utf8")).toBe("BACKUP");
+});
+
+test("restoreFrom leaves the current file intact when the backup is missing (non-destructive)", async () => {
+  // The old order rm'd dst before moving the backup in, so a failed move lost the current
+  // file outright. A missing backup must instead leave dst exactly as it was.
+  const dir = await mkdtemp(join(tmpdir(), "boom-fs-"));
+  const dst = join(dir, "dst");
+  await writeFile(dst, "CURRENT");
+  let threw = false;
+  try {
+    await restoreFrom(join(dir, "does-not-exist"), dst);
+  } catch {
+    threw = true;
+  }
+  expect(threw).toBe(true);
+  expect(await readFile(dst, "utf8")).toBe("CURRENT"); // NOT lost
 });

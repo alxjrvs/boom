@@ -222,3 +222,47 @@ test("brewfile: sync passes --no-upgrade; update/sync --upgrade omits it", async
   expect(argvLines[1]).not.toContain("--no-upgrade"); // sync --upgrade (= update)
   expect(argvLines[2]).toContain("--no-upgrade"); // verify mirrors sync's default
 });
+
+// A fake `mise` on PATH: `install` just logs + exits 0; `ls --missing` prints whatever
+// MISE_MISSING holds and exits 0 (mimicking mise's real "missing tools are stdout, not a
+// non-zero exit" contract). Lets the reconcile paths run without a real mise install.
+async function fakeMise(
+  repo: string,
+  env: Record<string, string | undefined>,
+): Promise<() => Promise<string[]>> {
+  const bin = join(repo, ".fakebin-mise");
+  await mkdir(bin, { recursive: true });
+  const log = join(repo, "mise-calls.log");
+  await writeFile(
+    join(bin, "mise"),
+    '#!/bin/sh\nif [ "$1" = "ls" ]; then printf %s "$MISE_MISSING"; exit 0; fi\necho "$@" >> "$MISE_CALL_LOG"\nexit 0\n',
+  );
+  await chmod(join(bin, "mise"), 0o755);
+  env.PATH = `${bin}:${process.env.PATH ?? ""}`;
+  env.MISE_CALL_LOG = log;
+  return async () =>
+    (await readFile(log, "utf8").catch(() => ""))
+      .trim()
+      .split("\n")
+      .filter((l) => l.length > 0);
+}
+
+test("mise: sync runs `mise install`; verify keys drift off `ls --missing` stdout, not exit code", async () => {
+  const sb = await sandbox(`[[section]]\nname = "Tools"\nmise = true\n`);
+  const env = sb.ctx.env as Record<string, string | undefined>;
+  const calls = await fakeMise(sb.repo, env);
+
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  expect(sb.out()).toContain("mise tools installed");
+
+  // Empty `ls --missing` stdout → everything installed → verify ok (0).
+  expect(await reconcile("verify", sb.ctx, {})).toBe(0);
+
+  // A declared-but-missing tool makes `ls --missing` print a line (still exit 0); verify
+  // must read that as drift and warn (exit 2), proving it keys off stdout, not the code.
+  env.MISE_MISSING = "node 20.0.0";
+  expect(await reconcile("verify", sb.ctx, {})).toBe(2);
+  expect(sb.out()).toContain("mise tools missing");
+
+  expect(await calls()).toContain("install");
+});

@@ -28,6 +28,10 @@ export const GlobSchema = v.strictObject({
 export const RunSchema = v.strictObject({
   on: v.picklist(["sync", "verify", "uninstall"]),
   cmd: v.string(),
+  // Optional wall-clock cap (seconds). A hung `run` step would otherwise block the whole
+  // reconcile indefinitely; with this set, boom kills the step and reports a timeout
+  // failure. Omit for no limit (the historical behavior).
+  timeout: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
 });
 
 export const HookSchema = v.strictObject({

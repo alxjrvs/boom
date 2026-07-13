@@ -77,11 +77,24 @@ export async function backupTo(dst: string, backupRoot: string): Promise<string>
   return target;
 }
 
-// Restore a backed-up file to `dst`, replacing whatever boom currently has there.
+// Restore a backed-up file to `dst`, replacing whatever boom currently has there — without
+// destroying the current file until the backup is safely in place. The old order (rm dst,
+// then move the backup in) lost the current file outright if the move failed (backup
+// pruned, EXDEV copy error, EACCES). Instead: move the current file aside, move the backup
+// in, and only then drop the aside copy — restoring the aside file if the move fails, so a
+// failed rollback leaves `dst` exactly as it was rather than empty.
 export async function restoreFrom(from: string, dst: string): Promise<void> {
-  await rm(dst, { recursive: true, force: true });
   await mkdir(dirname(dst), { recursive: true });
-  await moveAcross(from, dst);
+  const aside = `${dst}.boom-restore.${process.pid}`;
+  const hadCurrent = await pathExists(dst);
+  if (hadCurrent) await moveAcross(dst, aside);
+  try {
+    await moveAcross(from, dst);
+  } catch (e) {
+    if (hadCurrent) await moveAcross(aside, dst); // put the current file back
+    throw e;
+  }
+  if (hadCurrent) await rm(aside, { recursive: true, force: true });
 }
 
 // Byte-equal compare of two files (for `copy` verify); false if either is unreadable.

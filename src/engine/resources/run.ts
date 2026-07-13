@@ -22,6 +22,11 @@ export async function reconcileRun(entry: Run, ctx: ReconcileCtx): Promise<void>
   // Run from the dotfiles repo, not the invocation cwd, so sync is cwd-independent:
   // a step like `lefthook install` targets the repo's `.git`, not whatever directory
   // `boom` was called from. Steps that name absolute / `~`-anchored paths are unaffected.
-  const { code } = runShell(entry.cmd, ctx.env, { quietStdout: ctx.json, cwd: ctx.repo });
-  if (code !== 0) ctx.report.fail(`${entry.cmd} (exit ${code})`);
+  const { code, timedOut } = runShell(entry.cmd, ctx.env, {
+    quietStdout: ctx.json,
+    cwd: ctx.repo,
+    timeoutMs: entry.timeout ? entry.timeout * 1000 : undefined,
+  });
+  if (timedOut) ctx.report.fail(`${entry.cmd} (timed out after ${entry.timeout}s)`);
+  else if (code !== 0) ctx.report.fail(`${entry.cmd} (exit ${code})`);
 }

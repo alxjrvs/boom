@@ -6,6 +6,7 @@ import { colorEnabled } from "../lib/color.ts";
 import { displayPath, restoreFrom } from "../lib/fs.ts";
 import { Reporter } from "../lib/reporter.ts";
 import { listRuns, readRun } from "./journal.ts";
+import { removeManifestEntries } from "./state.ts";
 
 // `boom rollback --list` — enumerate the retained runs so the ids `--run-id` accepts are
 // discoverable, instead of forcing a hand `ls` of the state dir. Exit 0 always; it reads.
@@ -36,6 +37,7 @@ export async function rollback(ctx: BoomContext, runId?: string, dryRun = false)
   }
 
   report.header(`rollback ${run.runId}${dryRun ? " — dry run (no changes)" : ""}`);
+  const reversed: string[] = [];
   for (const rec of [...run.done].reverse()) {
     const disp = displayPath(rec.dst, ctx.env);
     // A destructive replay — preview it under --dry-run so an operator can see exactly what
@@ -52,10 +54,18 @@ export async function rollback(ctx: BoomContext, runId?: string, dryRun = false)
         await restoreFrom(rec.undo.from, rec.dst);
         report.ok(`restored ${disp}`);
       }
+      reversed.push(rec.dst);
     } catch (e) {
       report.fail(`${disp}: ${(e as Error).message}`);
     }
   }
+
+  // Drop from the manifest only the destinations we ACTUALLY reversed — they're no longer
+  // boom-owned (removed, or restored to a foreign file), so state matches disk. A dst whose
+  // reversal threw is deliberately left owned: the boom-created file is still there, so
+  // keeping the ownership record means the next sync can still reap it rather than orphaning
+  // an untracked, un-reapable file. (No manifest change on --dry-run — nothing moved.)
+  if (!dryRun) await removeManifestEntries(ctx.env, reversed);
 
   // Links/copies are reversed above; `run`/`hook` side effects can't be, so surface
   // them so the operator knows what state rollback did NOT restore.

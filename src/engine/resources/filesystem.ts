@@ -30,8 +30,12 @@ async function ensureParentDir(dir: string, mode: LinkMode, ctx: ReconcileCtx): 
   if (mode !== "overwrite") return false;
   await ctx.journal?.intent("mkdir", dir);
   const undo = await displace(dir, ctx.backupRoot, true);
-  await mkdir(dir, { recursive: true });
+  // Record the undo BEFORE the create: displace has already moved the conflicting file into
+  // the backup tree, so if mkdir throws (or the process dies) the `done` row is what lets
+  // rollback restore it. Writing `done` only after a successful create leaves that displaced
+  // file orphaned with no journal row pointing at it — unrecoverable.
   await ctx.journal?.done("mkdir", dir, undo);
+  await mkdir(dir, { recursive: true });
   return true;
 }
 
@@ -54,26 +58,28 @@ async function applyLink(
     else report.plan(`${disp} would be linked`);
     return;
   }
-  if (ctx.resumeDone?.has(dst)) {
-    report.skip(`${disp} (resumed — already applied)`);
-    return;
-  }
   if (!(await ensureParentDir(dirname(dst), mode, ctx))) {
     report.skip(`${disp} parent exists but is not a directory — skipped`);
     return;
   }
+  // In both branches the `done` (undo) row is written BEFORE ensureSymlink — the create is
+  // the wide, fail-prone window (I/O that can throw or hang). Journalling the undo first
+  // means a crash mid-create is still reversible: for a fresh link the undo is a plain
+  // remove (a no-op if the link was never created); for an overwrite the displaced original
+  // is already in the backup tree with a `done` row that restores it. `report.ok` still
+  // fires only after the create succeeds.
   if (!conflict) {
     await ctx.journal?.intent("link", dst);
-    await ensureSymlink(src, dst);
     await ctx.journal?.done("link", dst, { kind: "remove" });
+    await ensureSymlink(src, dst);
     report.ok(`${disp} linked`);
     return;
   }
   if (mode === "overwrite") {
     await ctx.journal?.intent("link", dst);
     const undo = await displace(dst, ctx.backupRoot, true);
-    await ensureSymlink(src, dst);
     await ctx.journal?.done("link", dst, undo);
+    await ensureSymlink(src, dst);
     report.ok(`${disp} overwritten`);
     return;
   }
@@ -160,20 +166,18 @@ export async function reconcileCopy(entry: Link, ctx: ReconcileCtx): Promise<voi
         report.plan(`${disp} would be copied`);
         return;
       }
-      if (ctx.resumeDone?.has(dst)) {
-        report.skip(`${disp} (resumed — already applied)`);
-        return;
-      }
       await ctx.journal?.intent("copy", dst);
       // Only displace when a file is actually there (copyFile overwrites in place); with no
       // backup root the undo is a plain remove of the copy we're about to write.
       const undo: UndoToken = (await pathExists(dst))
         ? await displace(dst, ctx.backupRoot, true)
         : { kind: "remove" };
+      // Record the undo before the copy (same rationale as applyLink): if copyFile/chmod
+      // throws after a displace, rollback still restores the displaced original.
+      await ctx.journal?.done("copy", dst, undo);
       await mkdir(dirname(dst), { recursive: true });
       await copyFile(src, dst);
       await chmod(dst, mode);
-      await ctx.journal?.done("copy", dst, undo);
       report.ok(`${disp} copied`);
       return;
     }
