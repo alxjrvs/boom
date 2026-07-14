@@ -1,9 +1,10 @@
 name: pages
 
-# Deploy the docs site to GitHub Pages. The landing page (site/index.html) and its
-# stylesheet (site/styles.css) are hand-authored; the doc pages (spec)
-# are generated from the repo's own markdown by `bun run site/build.ts`
-# — so a docs edit is a markdown edit, no HTML by hand. We build, then upload site/.
+# Deploy the docs site to GitHub Pages. The landing page (site/index.html) is
+# hand-authored and self-contained (inline <style>/<script>); the doc pages (spec)
+# are generated from the repo's own markdown by `bun run site/build.ts`, which lifts
+# that shared chrome — so a docs edit is a markdown edit, no HTML by hand. We build,
+# then upload site/.
 # Enable Pages with "GitHub Actions" as the source (Settings → Pages, or the Pages API
 # build_type=workflow) for this to have somewhere to publish to.
 on:

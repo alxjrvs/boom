@@ -25,10 +25,11 @@
 <meta name="twitter:title" content="BoomTube — the one-binary declarative machine reconciler">
 <meta name="twitter:description" content="The file goes in — the machine comes out. Declare your machine in one boomfile.toml; reconcile, prove, and roll it back.">
 <meta name="twitter:image" content="https://alxjrvs.github.io/boom/og.png">
+<meta name="twitter:image:alt" content="BoomTube — the one-binary declarative machine reconciler.">
 <script type="application/ld+json">
 {"@context":"https://schema.org","@graph":[
-{"@type":"SoftwareApplication","name":"BoomTube","description":"A declarative machine reconciler: one typed boomfile.toml declares your whole machine — shell, packages, macOS defaults, secrets. Reconcile, prove, and roll back any change. One self-contained binary, zero runtime dependencies.","applicationCategory":"DeveloperApplication","operatingSystem":"macOS, Linux","url":"https://alxjrvs.github.io/boom/","downloadUrl":"https://github.com/alxjrvs/boom","softwareVersion":"0.13.0","author":{"@type":"Person","name":"alxjrvs"},"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}},
-{"@type":"WebSite","name":"BoomTube","url":"https://alxjrvs.github.io/boom/"}
+{"@type":"SoftwareApplication","name":"BoomTube","description":"A declarative machine reconciler: one typed boomfile.toml declares your whole machine — shell, packages, macOS defaults, secrets. Reconcile, prove, and roll back any change. One self-contained binary, zero runtime dependencies.","applicationCategory":"DeveloperApplication","operatingSystem":"macOS, Linux","url":"https://alxjrvs.github.io/boom/","downloadUrl":"https://github.com/alxjrvs/boom","softwareVersion":"0.13.0","image":"https://alxjrvs.github.io/boom/og.png","sameAs":["https://github.com/alxjrvs/boom"],"author":{"@type":"Person","name":"alxjrvs"},"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}},
+{"@type":"WebSite","name":"BoomTube","url":"https://alxjrvs.github.io/boom/","inLanguage":"en"}
 ]}
 </script>
 <style>
@@ -109,7 +110,7 @@
   .starburst.sm{min-width:74px;min-height:74px;font-size:11px;padding:12px;}
   .balloon{position:relative;background:#fbf7ff;color:var(--ink);border:4px solid var(--ink);border-radius:18px;
     padding:16px 18px;box-shadow:var(--sh-sm);margin-bottom:20px;}
-  .balloon h5{margin:0 0 5px;font-size:17px;color:var(--ink);} .balloon p{margin:0;font-size:14.5px;color:#2c2440;line-height:1.5;}
+  .balloon h4{margin:0 0 5px;font-size:17px;color:var(--ink);} .balloon p{margin:0;font-size:14.5px;color:#2c2440;line-height:1.5;}
   .balloon code{color:#0C6E86;background:rgba(12,110,134,.1);border-radius:3px;padding:.05em .3em;}
   .balloon::after{content:"";position:absolute;left:34px;bottom:-22px;border:12px solid transparent;border-top-color:var(--ink);}
   .balloon::before{content:"";position:absolute;left:37px;bottom:-13px;border:9px solid transparent;border-top-color:#fbf7ff;z-index:1;}
@@ -122,8 +123,15 @@
     border-bottom:3px solid rgba(5,4,10,var(--p));}
   .bar .logo{visibility:hidden;}   /* geometry + landing anchor for the traveling hero BOOM! */
   @media(prefers-reduced-motion:reduce){header.bar{--p:1;} .bar .logo{visibility:visible;} .bigword{transform:none!important;}}
-  :root[data-theme="light"] header.bar{background:rgba(26,19,48,calc(var(--p)*0.92));}
-  :root[data-theme="light"] .bar-nav a{color:#C9C2E4;} :root[data-theme="light"] .brand .l1,:root[data-theme="light"] .bang .stem{color:var(--magenta);}
+  /* light theme: the bar fills LIGHT to match the page, so a single dark nav color reads
+     both at the top (transparent, over light content) and when the bar materializes.
+     The wordmark then uses the darkened brand palette so its colored letters stay legible. */
+  :root[data-theme="light"] header.bar{background:rgba(242,238,251,calc(var(--p)*0.94));}
+  :root[data-theme="light"] .bar-nav a{color:#4C4368;}
+  :root[data-theme="light"] .bar-nav a:hover{color:#8F6708;}
+  :root[data-theme="light"] .logo .l1{color:#C01A5B;} :root[data-theme="light"] .logo .l2{color:#0C6F8B;}
+  :root[data-theme="light"] .logo .l3{color:#5B2BD0;} :root[data-theme="light"] .logo .l4{color:#B5820A;}
+  :root[data-theme="light"] .bang .stem{background:#C01A5B;}
   .bar-in{display:flex;align-items:center;gap:14px;height:62px;}
   .brand{display:flex;align-items:center;text-decoration:none;}
   .brand:hover{text-decoration:none;}
@@ -289,7 +297,7 @@
 
   /* ---- LOOP: verbs + bold pipeline rail + speech balloon ---- */
   .loopgrid{display:grid;grid-template-columns:1fr 1.15fr;gap:20px;}
-  .loopgrid h4{margin:0 0 12px;font-size:21px;color:var(--panel-text);}
+  .loopgrid h3{margin:0 0 12px;font-size:21px;color:var(--panel-text);}
   .vlist{display:flex;flex-direction:column;gap:12px;}
   .vrow{font-family:var(--font-mono);font-size:15px;color:var(--panel-muted);display:flex;gap:12px;align-items:baseline;}
   .vrow b{font-family:var(--font-display);font-weight:800;font-size:20px;color:var(--violet);min-width:112px;text-transform:uppercase;}
@@ -309,7 +317,7 @@
   .print pre{margin:0;padding:18px 20px;overflow-x:auto;font-family:var(--font-mono);font-size:14px;line-height:1.85;color:var(--panel-text);}
   .k-sec{color:var(--s-sec);font-weight:700;} .k-key{color:var(--s-key);} .k-str{color:var(--s-str);}
   .k-num{color:var(--s-num);} .k-cmt{color:var(--s-cmt);font-style:italic;} .k-pun{color:var(--s-pun);}
-  .legend h4{margin:0 0 14px;font-size:21px;color:var(--panel-text);}
+  .legend h3{margin:0 0 14px;font-size:21px;color:var(--panel-text);}
   .legend ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:11px;}
   .legend li{font-size:15px;color:var(--panel-muted);line-height:1.45;}
   .legend b{font-family:var(--font-mono);color:var(--s-key);font-weight:700;}
@@ -323,7 +331,7 @@
   .rchip b{color:var(--magenta);} :root[data-theme="light"] .rchip b{color:#C21A63;}
   .rrow{display:grid;grid-template-columns:200px 1fr;gap:18px;padding:18px 0;}
   .rrow + .rrow{border-top:3px solid var(--line-2);}
-  .rrow h4{margin:0;font-size:21px;color:var(--magenta);} :root[data-theme="light"] .rrow h4{color:#C21A63;}
+  .rrow h3{margin:0;font-size:21px;color:var(--magenta);} :root[data-theme="light"] .rrow h3{color:#C21A63;}
   .rrow p{margin:0;color:var(--panel-muted);font-size:14.5px;line-height:1.5;}
   .rrow code{font-family:var(--font-mono);color:var(--s-key);font-weight:600;}
   .churn{margin-top:22px;font-size:15px;color:var(--on);}
@@ -338,9 +346,9 @@
   .step .n{font-family:var(--font-display);font-weight:800;font-size:48px;line-height:.82;color:var(--solar);}
   :root[data-theme="light"] .step .n{color:#B5820A;}
   .step .body{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.1fr);gap:14px 22px;align-items:start;}
-  .step h4{margin:2px 0 8px;font-size:23px;line-height:.98;color:var(--panel-text);}
+  .step h3{margin:2px 0 8px;font-size:23px;line-height:.98;color:var(--panel-text);}
   .step p{margin:0;font-size:15px;line-height:1.55;color:var(--panel-muted);}
-  .step p code,.step h4 code{font-family:var(--font-mono);color:var(--s-key);font-weight:600;font-size:.9em;}
+  .step p code,.step h3 code{font-family:var(--font-mono);color:var(--s-key);font-weight:600;font-size:.9em;}
   .step pre{margin:0;align-self:start;background:var(--ink);color:#e7e2f4;border:2px solid var(--line-2);border-radius:6px;
     padding:14px 15px;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.7;}
   .step pre .c{color:#4DEFFF;} .step pre .d{color:#9a92b6;} .step pre .k{color:#FF6FB0;} .step pre .s{color:#FFD066;}
@@ -350,7 +358,7 @@
   .note{display:flex;gap:16px;padding:20px 22px;border:3px solid var(--crit);border-radius:var(--rad);margin-top:26px;
     background:var(--panel);color:var(--panel-text);box-shadow:var(--sh);}
   .note .bar{width:6px;border-radius:2px;background:var(--crit);flex:none;}
-  .note h5{margin:0 0 6px;font-size:18px;color:var(--panel-text);}
+  .note h4{margin:0 0 6px;font-size:18px;color:var(--panel-text);}
   .note p{margin:0;font-size:15px;line-height:1.55;color:var(--panel-muted);}
   .note code{font-family:var(--font-mono);color:var(--s-key);font-weight:600;}
 
@@ -513,7 +521,7 @@
     </div>
     <div class="loopgrid">
       <div class="panel lead-v">
-        <h4>The verbs</h4>
+        <h3>The verbs</h3>
         <div class="vlist">
           <div class="vrow"><b>sync</b> makes reality match the file</div>
           <div class="vrow"><b>verify</b> reports drift — changes nothing</div>
@@ -522,7 +530,7 @@
         </div>
       </div>
       <div class="panel lead-v">
-        <h4>Every run walks this order</h4>
+        <h3>Every run walks this order</h3>
         <div class="pipe">
           <div class="pstep"><span class="i">01</span>link</div>
           <div class="pstep"><span class="i">02</span>copy</div>
@@ -533,7 +541,7 @@
           <div class="pstep"><span class="i">07</span>hook</div>
         </div>
         <div class="balloon">
-          <h5>Can't say it declaratively? Write a hook.</h5>
+          <h4>Can't say it declaratively? Write a hook.</h4>
           <p>A <code>hooks/&lt;name&gt;.ts</code> exports <code>sync</code>/<code>verify</code>/<code>repair</code> on a typed HookApi — the exact contract the built-in resources run on. It's the escape hatch, and it plays by the same rules.</p>
         </div>
       </div>
@@ -563,7 +571,7 @@
 <span class="k-key">when</span> <span class="k-pun">=</span> { <span class="k-key">os</span> = <span class="k-str">"darwin"</span> }   <span class="k-cmt"># gate by machine</span></pre>
       </div>
       <div class="panel legend lead-c">
-        <h4>What a section can hold</h4>
+        <h3>What a section can hold</h3>
         <ul>
           <li><b>link · copy</b> — symlink or copy files into place</li>
           <li><b>glob</b> — link everything matching a pattern</li>
@@ -590,12 +598,12 @@
         <span class="rchip"><b>boom source --fix</b> — mend drift</span>
         <span class="rchip"><b>boom rollback</b> — undo</span>
       </div>
-      <div class="rrow"><h4>Source</h4><p>Point BoomTube at your dotfiles repo and sync from it; inspect, push, or reset the managed config. <code>boom source set owner/repo</code></p></div>
-      <div class="rrow"><h4>Code portals</h4><p>Open portals to your repos — symlink them all into one dir for agents, or spin up a workspace each. <code>boom code …</code></p></div>
-      <div class="rrow"><h4>Prove &amp; recover</h4><p>The file is validated on every load; doctor the install, then roll back any journaled run. <code>boom doctor · rollback</code></p></div>
-      <div class="rrow"><h4>Housekeeping</h4><p>Find where things live, self-upgrade, shell completions, the man page, a Claude skill, MCP servers. <code>boom where · upgrade · …</code></p></div>
+      <div class="rrow"><h3>Source</h3><p>Point BoomTube at your dotfiles repo and sync from it; inspect, push, or reset the managed config. <code>boom source set owner/repo</code></p></div>
+      <div class="rrow"><h3>Code portals</h3><p>Open portals to your repos — symlink them all into one dir for agents, or spin up a separate workspace for each. <code>boom code …</code></p></div>
+      <div class="rrow"><h3>Prove &amp; recover</h3><p>The file is validated on every load; doctor the install, then roll back any journaled run. <code>boom doctor · rollback</code></p></div>
+      <div class="rrow"><h3>Housekeeping</h3><p>Find where things live, self-upgrade, shell completions, the man page, a Claude skill, MCP servers. <code>boom where · upgrade · …</code></p></div>
     </div>
-    <p class="churn"><b>Still taking shape.</b> This is the map, not the manual — the <a href="https://alxjrvs.github.io/boom/">docs</a> carry the exact reference, every flag and verb.</p>
+    <p class="churn"><b>Still taking shape.</b> This is the map, not the manual — the <a href="spec.html">docs</a> carry the exact reference, every flag and verb.</p>
   </section>
 
   <!-- QUICK START -->
@@ -611,7 +619,7 @@
           <div class="n" aria-hidden="true">01</div>
           <div class="body">
             <div>
-              <h4>Install BoomTube</h4>
+              <h3>Install BoomTube</h3>
               <p>One self-contained binary — grab it with curl, or tap it from Homebrew (the repo is its own tap).</p>
             </div>
             <pre><span class="c">curl</span> -fsSL https://raw.githubusercontent.com/alxjrvs/boom/main/install.sh | sh
@@ -624,7 +632,7 @@
           <div class="n" aria-hidden="true">02</div>
           <div class="body">
             <div>
-              <h4>Write a <code>boomfile.toml</code></h4>
+              <h3>Write a <code>boomfile.toml</code></h3>
               <p>Author it by hand at the root of your dotfiles repo. Each <code>[[section]]</code> declares resources — links, packages, macOS defaults. Start with one link and grow it.</p>
             </div>
             <pre><span class="d"># boomfile.toml — at your dotfiles repo root</span>
@@ -641,7 +649,7 @@ brewfile = <span class="s">"Brewfile"</span></pre>
           <div class="n" aria-hidden="true">03</div>
           <div class="body">
             <div>
-              <h4>Commit it with your dotfiles</h4>
+              <h3>Commit it with your dotfiles</h3>
               <p>BoomTube reconciles from a git remote, not a local folder — so the boomfile ships inside your dotfiles repo. Commit and push to a repo you own.</p>
             </div>
             <pre><span class="c">git</span> add boomfile.toml
@@ -653,7 +661,7 @@ brewfile = <span class="s">"Brewfile"</span></pre>
           <div class="n" aria-hidden="true">04</div>
           <div class="body">
             <div>
-              <h4>Point BoomTube at the repo</h4>
+              <h3>Point BoomTube at the repo</h3>
               <p>One reference, once. This clones your repo, remembers it, and runs the first sync. Pin a reviewed state with <code>@ref</code> whenever you want it fixed.</p>
             </div>
             <pre><span class="c">boom</span> source set owner/dotfiles
@@ -665,7 +673,7 @@ brewfile = <span class="s">"Brewfile"</span></pre>
           <div class="n" aria-hidden="true">05</div>
           <div class="body">
             <div>
-              <h4>Reconcile — prove — undo</h4>
+              <h3>Reconcile — prove — undo</h3>
               <p>From here on it's one loop. <code>source</code> makes reality match the file, <code>verify</code> reports drift without touching a thing, <code>rollback</code> walks the last run backward.</p>
             </div>
             <pre><span class="c">boom</span> source           <span class="d"># make it so</span>
@@ -679,7 +687,7 @@ brewfile = <span class="s">"Brewfile"</span></pre>
     <div class="note">
       <div class="bar" aria-hidden="true"></div>
       <div>
-        <h5>Whoever can write that repo can run code on your machine.</h5>
+        <h4>Whoever can write that repo can run code on your machine.</h4>
         <p>BoomTube reconciles from a git remote you choose; <code>run</code> steps and <code>hook</code> modules execute as you. Treat push access to that repo like shell access, and pin to a tag or SHA when you want a fixed, reviewed state. Release binaries are checksum-verified.</p>
       </div>
     </div>
@@ -693,7 +701,7 @@ brewfile = <span class="s">"Brewfile"</span></pre>
       <h2 class="disp">The portal's open. <span class="go">Go build!</span></h2>
       <div class="links">
         <a href="https://github.com/alxjrvs/boom">GitHub</a>
-        <a href="https://alxjrvs.github.io/boom/">Docs</a>
+        <a href="spec.html">Docs</a>
         <span class="wm-ink" aria-label="BoomTube"><span class="a" aria-hidden="true">B</span><span class="b" aria-hidden="true">o</span><span class="c" aria-hidden="true">o</span><span class="d" aria-hidden="true">m</span></span>
       </div>
       <div class="meta">v0.13.0 · TypeScript on Bun · @stricli/core · valibot · smol-toml · early</div>
