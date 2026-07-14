@@ -48,7 +48,7 @@ jobs:
       # Validate the shipped example against the live schema, so a schema change can't
       # silently invalidate the config every new user is pointed at while CI stays green.
       - name: Smoke — example boomfile validates
-        run: BOOM_CONFIG=examples/dotfiles ./build/boom validate
+        run: BOOM_CONFIG=examples/dotfiles ./build/boom doctor --config
 
   version-guard:
     # Every PR must move package.json's version exactly one semver step from main —
