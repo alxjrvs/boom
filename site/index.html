@@ -195,7 +195,7 @@
   :root[data-theme="light"] .bigbang .stem{background:#C01A5B;}
   .bigbang .dot{position:relative;width:.25em;height:.25em;flex:none;}
   .bigbang .dot .mk{position:relative;z-index:1;width:100%;height:100%;display:block;filter:drop-shadow(5px 5px 0 rgba(0,0,0,.5));}
-  .bigbang .dot .rays{position:absolute;z-index:0;left:50%;top:50%;transform:translate(-50%,-50%);width:235%;height:235%;pointer-events:none;opacity:0;}
+  .bigbang .dot .rays{position:absolute;z-index:0;left:50%;top:50%;transform:translate(-50%,-50%);width:320%;height:320%;pointer-events:none;opacity:0;}
   /* the wormhole animates individual glyphs on scroll; hint the compositor */
   .bigword .l1,.bigword .l2,.bigword .l3,.bigword .l4,.bigbang,
   .logo .l1,.logo .l2,.logo .l3,.logo .l4,.bang{will-change:transform,opacity;}
@@ -415,7 +415,7 @@
     <div class="cover">
       <span class="starburst vstamp" aria-label="Version 0.13.0"><span class="vs-k" aria-hidden="true">version</span><span class="vs-n" aria-hidden="true">0.13.0</span></span>
       <h1 class="bigword disp" aria-label="BoomTube">
-        <span class="l1" aria-hidden="true">B</span><span class="l2" aria-hidden="true">O</span><span class="l3" aria-hidden="true">O</span><span class="l4" aria-hidden="true">M</span><span class="bigbang" aria-hidden="true"><span class="stem"></span><span class="dot"><canvas class="rays" data-mark="burst-big" width="440" height="440"></canvas><canvas class="mk" data-mark="marktrans" width="620" height="620"></canvas></span></span>
+        <span class="l1" aria-hidden="true">B</span><span class="l2" aria-hidden="true">O</span><span class="l3" aria-hidden="true">O</span><span class="l4" aria-hidden="true">M</span><span class="bigbang" aria-hidden="true"><span class="stem"></span><span class="dot"><canvas class="rays" data-mark="fuzz" width="440" height="440"></canvas><canvas class="mk" data-mark="marktrans" width="620" height="620"></canvas></span></span>
       </h1>
       <p class="bwtube" aria-hidden="true">tube</p>
     </div>
@@ -765,12 +765,23 @@ function burstBig(x,S){x.clearRect(0,0,S,S);const c=S/2;
       x.beginPath();x.moveTo(S*0.16,-S*0.018);x.lineTo(S*ln,0);x.lineTo(S*0.16,S*0.018);x.closePath();x.fill();x.restore();}}
   x.globalAlpha=1;x.restore();}
 
+/* ---- warm fuzz: a soft, feathered warm glow (no distinct rays) for the hero implosion ---- */
+function warmFuzz(x,S){x.clearRect(0,0,S,S);const c=S/2;
+  const g=x.createRadialGradient(c,c,0,c,c,c);
+  g.addColorStop(0,"rgba(255,244,214,0.95)");   // hot cream core
+  g.addColorStop(0.22,"rgba(255,201,60,0.72)"); // solar
+  g.addColorStop(0.5,"rgba(255,104,60,0.34)");  // warm orange
+  g.addColorStop(0.78,"rgba(255,46,134,0.12)"); // magenta haze
+  g.addColorStop(1,"rgba(255,46,134,0)");
+  x.fillStyle=g;x.beginPath();x.arc(c,c,c,0,TAU);x.fill();}
+
 /* ---- mount ---- */
 document.querySelectorAll("canvas[data-mark]").forEach(cv=>{
   const x=cv.getContext("2d"),m=cv.dataset.mark;
   if(m==="master")master(x,cv.width);
   else if(m==="marktrans")marktrans(x,cv.width);
   else if(m==="burst-big")burstBig(x,cv.width);
+  else if(m==="fuzz")warmFuzz(x,cv.width);
 });
 
 /* ---- copy install ---- */
@@ -794,13 +805,14 @@ tbtn.addEventListener("click",()=>{
 
 /* ---- wormhole scroll morph -------------------------------------------------------
    The hero BOOM! is the NEAR mouth of a wormhole; the nav logo is the FAR mouth.
-   Scroll drives one progress p over D px. It's a FIFO pipeline keyed to each glyph's
-   distance from the portal: M (nearest) is first IN and first OUT, B is last — and a
-   glyph only EMERGES from the nav portal after it has fully ENTERED the hero portal.
-   Both portals' hexes counter-rotate, and only while p is changing (static when parked,
-   so no idle rAF). Once every glyph is through, the hero portal flares, bursts, and
-   vanishes; the nav portal then shrinks to become the "!" dot. Reduced-motion skips it
-   (CSS pins the bar open + shows a static logo); doc pages have no .bigword and bail. */
+   Scroll drives one progress p over D px. FIFO pipeline keyed to each glyph's distance
+   from the portal: M (nearest) first IN / first OUT, B last, the "!" bar last of all —
+   and a glyph only EMERGES from the nav portal after it has fully ENTERED the hero one.
+   Glyphs don't spin: they're scaled + MORPHED, stretched along the travel vector toward
+   the portal (spaghettified) and un-stretched on the way out. The hexes counter-rotate,
+   driven off p (static when parked → no idle rAF). Once everything's through, the hero
+   portal IMPLODES and blooms a warm fuzz; the nav portal shrinks to become the "!" dot.
+   Reduced-motion skips it (CSS pins the bar open + static logo); doc pages bail. */
 const bar=document.querySelector("header.bar");
 const heroWord=document.querySelector(".bigword");
 const cover=document.querySelector(".cover");
@@ -808,53 +820,55 @@ const logo=bar&&bar.querySelector(".logo");
 if(bar&&heroWord&&cover&&logo&&!matchMedia("(prefers-reduced-motion: reduce)").matches){
   const q=(s,r)=>(r||document).querySelector(s);
   const heroL=[...heroWord.querySelectorAll(".l1,.l2,.l3,.l4")];
-  const heroBang=q(".bigbang",heroWord), heroStem=q(".bigbang .stem",heroWord);
-  const heroDot=q(".bigbang .dot",heroWord), heroMk=q(".dot .mk",heroWord), heroRays=q(".dot .rays",heroWord);
+  const heroStem=q(".bigbang .stem",heroWord), heroMk=q(".dot .mk",heroWord), heroRays=q(".dot .rays",heroWord);
   const tube=q(".bwtube",cover);
   const headL=[...logo.querySelectorAll(".l1,.l2,.l3,.l4")];
-  const headBang=q(".bang",logo), headStem=q(".bang .stem",logo), headMk=q(".bang canvas",logo);
-  if(heroStem)heroStem.style.transformOrigin="center bottom";
-  if(headStem)headStem.style.transformOrigin="center bottom";
+  const headStem=q(".bang .stem",logo), headMk=q(".bang canvas",logo);
 
   const D=560, cl=(v,a,b)=>v<a?a:v>b?b:v, seg=(a,b,t)=>cl((t-a)/(b-a),0,1);
   const eIn=t=>t*t*t, eOut=t=>1-(1-t)*(1-t)*(1-t), eIO=t=>t<.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2;
   // per-glyph pipeline windows by BOOM index i (0=B..3=M); rank r=3-i → M first, B last.
   const DR=0.085, EN=0.18, GAP=0.03, EX=0.20;
   const win=i=>{const es=(3-i)*DR, ee=es+EN, xs=ee+GAP; return {es,ee,xs,xe:xs+EX};};
+  const STEM={es:0.44,ee:0.58, xs:0.78,xe:0.94};      // the "!" bar: last in, last out
+  // anisotropic morph, t 0(rest)→1(gone): stretch ALONG travel, thin PERPENDICULAR.
+  const stretch=t=>[(1-t*t*t)*(1+1.8*t), (1-t)*(1-0.7*t)];
+  const morph=(el,dx,dy,ang,t,tt,op)=>{const s=stretch(t);   // tt = fraction of the way to the portal
+    el.style.transform=`translate(${(dx*tt).toFixed(1)}px,${(dy*tt).toFixed(1)}px) rotate(${ang.toFixed(3)}rad) scale(${s[0].toFixed(3)},${s[1].toFixed(3)}) rotate(${(-ang).toFixed(3)}rad)`;
+    el.style.opacity=op.toFixed(3);};
+  const suckOp=s=>1-eIn(cl((s-0.35)/0.65,0,1));
 
   const ctr=el=>{const r=el.getBoundingClientRect();return [r.left+r.width/2, r.top+r.height/2];};
-  let hVec=[], nVec=[], ticking=false;
-  const measure=()=>{                          // suck/emerge vectors: each glyph → its portal centre
-    heroL.concat(headL).forEach(el=>{el.style.transform="";el.style.opacity="";});
-    heroBang.style.transform="";heroBang.style.opacity="";logo.style.opacity="";headMk.style.transform="";
-    const hp=ctr(heroDot), np=ctr(headBang);
-    hVec=heroL.map(el=>{const c=ctr(el);return [hp[0]-c[0], hp[1]-c[1]];});
-    nVec=headL.map(el=>{const c=ctr(el);return [np[0]-c[0], np[1]-c[1]];});
+  const vec=(el,P)=>{const c=ctr(el);const dx=P[0]-c[0],dy=P[1]-c[1];return [dx,dy,Math.atan2(dy,dx)];};
+  const clr=[...heroL,...headL,heroStem,headStem,heroMk,headMk,heroRays].filter(Boolean);
+  let hVec=[], nVec=[], hStem=null, nStem=null, ticking=false;
+  const measure=()=>{                          // suck/emerge vectors (+angle) to each portal centre
+    clr.forEach(el=>{el.style.transform="";el.style.opacity="";});logo.style.opacity="";
+    const hp=ctr(heroMk), np=ctr(headMk);
+    hVec=heroL.map(el=>vec(el,hp)); nVec=headL.map(el=>vec(el,np));
+    hStem=heroStem&&vec(heroStem,hp); nStem=headStem&&vec(headStem,np);
   };
   const update=()=>{
     ticking=false;
     const p=cl(window.scrollY/D,0,1), spin=p*TAU*2.4;
     bar.style.setProperty("--p",seg(0,0.4,p).toFixed(3));
-    // hero glyphs funnel IN — spiral toward the portal, shrinking, fading as they arrive
-    heroL.forEach((el,i)=>{const w=win(i), s=eIn(seg(w.es,w.ee,p)), v=hVec[i];
-      el.style.transform=`translate(${(v[0]*s).toFixed(1)}px,${(v[1]*s).toFixed(1)}px) rotate(${(s*TAU*1.5).toFixed(2)}rad) scale(${(1-s).toFixed(3)})`;
-      el.style.opacity=(1-eIn(cl((s-0.35)/0.65,0,1))).toFixed(3);});
-    if(heroStem){const s=eIn(seg(0.02,0.22,p));heroStem.style.transform=`scaleY(${(1-s).toFixed(3)})`;heroStem.style.opacity=(1-s).toFixed(3);}
+    // hero glyphs funnel IN — scaled + morphed (stretched) toward the portal, no spin
+    heroL.forEach((el,i)=>{const w=win(i), s=seg(w.es,w.ee,p), v=hVec[i];morph(el,v[0],v[1],v[2],s,eIn(s),suckOp(s));});
+    if(hStem){const s=seg(STEM.es,STEM.ee,p);morph(heroStem,hStem[0],hStem[1],hStem[2],s,eIn(s),suckOp(s));}
     if(tube)tube.style.opacity=(1-seg(0,0.28,p)).toFixed(3);
-    // hero portal: spin, then flare → burst → vanish once all glyphs are in
-    if(heroMk&&p<0.7)drawHex(heroMk.getContext("2d"),heroMk.width,false,spin);
-    heroBang.style.transform=`scale(${(1+0.55*seg(0.46,0.57,p)).toFixed(3)})`;
-    heroBang.style.opacity=(1-seg(0.5,0.66,p)).toFixed(3);
-    if(heroRays){const b=Math.sin(seg(0.42,0.66,p)*Math.PI);heroRays.style.opacity=(b*0.95).toFixed(3);heroRays.style.transform=`translate(-50%,-50%) scale(${(0.5+b*1.15).toFixed(3)})`;}
+    // hero portal: spin, then IMPLODE while a warm fuzz blooms and fades
+    if(heroMk){if(p<0.76)drawHex(heroMk.getContext("2d"),heroMk.width,false,spin);
+      heroMk.style.transform=`scale(${(1-eIn(seg(0.56,0.72,p))).toFixed(3)})`;
+      heroMk.style.opacity=(1-seg(0.6,0.74,p)).toFixed(3);}
+    if(heroRays){const b=Math.sin(seg(0.54,0.78,p)*Math.PI);heroRays.style.opacity=(b*0.9).toFixed(3);
+      heroRays.style.transform=`translate(-50%,-50%) scale(${(0.35+b*1.5).toFixed(3)})`;}
     // nav portal: bloom in as the far mouth, spin, then shrink to the "!" dot
     logo.style.opacity=seg(0.14,0.22,p).toFixed(3);
     if(headMk){drawHex(headMk.getContext("2d"),headMk.width,false,spin);
       headMk.style.transform=`scale(${(1+2.4*(1-eIO(seg(0.55,0.92,p)))).toFixed(3)})`;}
-    // nav glyphs emerge OUT — each only once its own entry has completed (FIFO)
-    headL.forEach((el,i)=>{const w=win(i), s=eOut(seg(w.xs,w.xe,p)), v=nVec[i];
-      el.style.transform=`translate(${(v[0]*(1-s)).toFixed(1)}px,${(v[1]*(1-s)).toFixed(1)}px) rotate(${((1-s)*TAU*1.2).toFixed(2)}rad) scale(${Math.max(0.001,s).toFixed(3)})`;
-      el.style.opacity=eOut(cl(s*1.6,0,1)).toFixed(3);});
-    if(headStem){const s=seg(0.82,0.96,p);headStem.style.transform=`scaleY(${s.toFixed(3)})`;headStem.style.opacity=s.toFixed(3);}
+    // nav glyphs emerge OUT (each only after its own entry completed), un-morphing into place
+    headL.forEach((el,i)=>{const w=win(i), u=eOut(seg(w.xs,w.xe,p)), v=nVec[i];morph(el,v[0],v[1],v[2],1-u,1-u,cl(u*1.6,0,1));});
+    if(nStem){const u=eOut(seg(STEM.xs,STEM.xe,p));morph(headStem,nStem[0],nStem[1],nStem[2],1-u,1-u,cl(u*1.6,0,1));}
   };
   measure();update();
   addEventListener("scroll",()=>{if(!ticking){ticking=true;requestAnimationFrame(update);}},{passive:true});
