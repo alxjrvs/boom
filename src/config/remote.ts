@@ -1,7 +1,7 @@
 // Config source is always a git remote (repo-only): `boom source set` takes a
 // remote reference — `owner/repo`, `github:owner/repo`, a full git URL, optionally
 // `@ref` — clone it into the boom-managed cache dir, and record the breadcrumb.
-// engine/sync.ts owns the ongoing fetch/pull-and-report on every sync/verify/fix;
+// engine/sync.ts owns the ongoing fetch/pull-and-report on every sync/verify;
 // this file owns only the initial (re-)clone.
 import { mkdir, rename, rm } from "node:fs/promises";
 import { dirname, isAbsolute } from "node:path";

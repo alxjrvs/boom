@@ -135,7 +135,8 @@ test("rollback restores a file displaced by an overwrite", async () => {
   const sb = await sandbox(`[[section]]\nname = "S"\nlink = [{ src = ".z", dst = "~/.z" }]\n`);
   await sb.write(".z", "new");
   await writeFile(join(sb.home, ".z"), "ORIGINAL"); // a foreign file in the way
-  expect(await reconcile("fix", sb.ctx, {})).toBe(0); // fix overwrites → backs the original up
+  // --fix (overwrite mode) clobbers the foreign file → backs the original up first
+  expect(await reconcile("sync", sb.ctx, { linkMode: "overwrite" })).toBe(0);
   expect(await linkTarget(join(sb.home, ".z"))).toBe(join(sb.repo, ".z"));
   expect(await rollback(sb.ctx)).toBe(0);
   expect(await readFile(join(sb.home, ".z"), "utf8")).toBe("ORIGINAL");
@@ -151,7 +152,9 @@ test("glob self-heals a stale non-directory left at `into` (e.g. a link→glob m
   // A broken symlink at the shared `into` dir — mkdir(recursive) throws EEXIST on this
   // (it only no-ops for a real directory), which is exactly the crash being fixed here.
   await symlink(join(sb.repo, "gone"), join(sb.home, ".claude/skills"));
-  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  // Clearing a foreign squatter is an overwrite, so the self-heal is the --fix path;
+  // skip-by-default sync leaves the stale link in place rather than clobbering it.
+  expect(await reconcile("sync", sb.ctx, { linkMode: "overwrite" })).toBe(0);
   expect((await stat(join(sb.home, ".claude/skills"))).isDirectory()).toBe(true);
   expect(await linkTarget(join(sb.home, ".claude/skills/a.md"))).toBe(join(sb.repo, "skills/a.md"));
 });

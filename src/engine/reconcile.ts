@@ -1,6 +1,6 @@
 // The reconcile core: load + validate the config, run each section under a verb, reap
 // orphaned links, and return the exit code (verify: 0/2/1; mutating verbs: 0/1). For
-// sync/fix it opens a transaction journal (+ backups) so the run is rollback-able and
+// sync it opens a transaction journal (+ backups) so the run is rollback-able and
 // resumable, and persists the manifest of owned destinations.
 import { join } from "node:path";
 import { loadConfig, loadOptionalConfigFile, NO_CONFIG_REPO_MSG, resolveConfigDir } from "../config/load.ts";
@@ -28,11 +28,11 @@ export interface ReconcileOptions {
   readonly json?: boolean;
   readonly resume?: boolean;
   readonly profiles?: string[];
-  // Only consulted for verb "sync"/"fix": commit local config-repo changes before
+  // Only consulted for verb "sync": commit local config-repo changes before
   // pulling, instead of the default autostash.
   readonly commit?: boolean;
   readonly commitMessage?: string;
-  // Only consulted for verb "sync"/"fix": also upgrade outdated brewfile formulae
+  // Only consulted for verb "sync": also upgrade outdated brewfile formulae
   // (what `boom source --upgrade` sets). Default false — plain sync reconciles declared
   // state, it doesn't force package upgrades as a side effect.
   readonly upgrade?: boolean;
@@ -59,7 +59,7 @@ async function reapOrphans(ctx: ReconcileCtx, prior: readonly ManifestEntry[]): 
   };
   const reap = async (dst: string, disp: string, why: string): Promise<void> => {
     head();
-    if (ctx.verb === "verify") ctx.report.warn(`${disp} ${why} — boom fix to reap`);
+    if (ctx.verb === "verify") ctx.report.warn(`${disp} ${why} — boom source --fix to reap`);
     else if (ctx.dryRun) ctx.report.note(`would reap ${disp}`);
     else {
       // Same transaction as every other mutation here: journaled with a backup, so
@@ -103,7 +103,7 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
     // verbs are 0/1), shared with doctor/validate via Reporter.finishJson.
     if (json) return report.finishJson(ctx.process.stdout, verb === "verify");
     // Human output: the shared Reporter epilogue owns the blank line + 0/2/1 mapping.
-    // verify has a warning tier; the mutating verbs (sync/fix/uninstall) do not.
+    // verify has a warning tier; the mutating verbs (sync/uninstall) do not.
     return verb === "verify"
       ? report.finish({
           ok: "verify: all checks passed",
@@ -131,9 +131,9 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
     return finish();
   }
 
-  const mutating = (verb === "sync" || verb === "fix") && !dryRun;
+  const mutating = verb === "sync" && !dryRun;
 
-  // A mutating run holds an exclusive lock: two concurrent sync/fix runs would race on
+  // A mutating run holds an exclusive lock: two concurrent sync runs would race on
   // the same destinations and clobber each other's manifest. A live holder is a clean
   // failure; a stale lock from a crashed run is reclaimed (see lib/lock.ts).
   let releaseLock: (() => void) | undefined;
@@ -173,7 +173,9 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
       verb,
       dryRun,
       json,
-      linkMode: opts.linkMode ?? "overwrite",
+      // Safe by default: never clobber a file boom doesn't own. `boom source --fix` sets
+      // "overwrite" to repair drift; `boom source set` (no linkMode) inherits this skip.
+      linkMode: opts.linkMode ?? "skip",
       upgrade: opts.upgrade ?? false,
       env: ctx.env,
       report,

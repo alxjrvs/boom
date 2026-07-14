@@ -2,7 +2,7 @@ import type { Reporter } from "../lib/reporter.ts";
 import type { Journal } from "./journal.ts";
 import type { ManifestEntry } from "./state.ts";
 
-export type Verb = "sync" | "verify" | "fix" | "uninstall";
+export type Verb = "sync" | "verify" | "uninstall";
 export type LinkMode = "overwrite" | "skip";
 
 // Shared state threaded through every resource handler for one reconcile run.
@@ -14,7 +14,7 @@ export interface ReconcileCtx {
   // stdout so the only thing there is the structured envelope.
   readonly json: boolean;
   readonly linkMode: LinkMode;
-  // Gates brewfile's `--no-upgrade`: sync/fix reconcile declared state only,
+  // Gates brewfile's `--no-upgrade`: sync reconciles declared state only,
   // `boom source --upgrade` opts into upgrading outdated formulae too. Casks are unaffected
   // either way — Homebrew Bundle only upgrades a cask when its Brewfile entry sets
   // `greedy: true`, regardless of this flag.
@@ -24,7 +24,7 @@ export interface ReconcileCtx {
   // Destinations boom owns this run — populated as handlers run (drives orphan
   // reaping + the persisted manifest).
   readonly declared: ManifestEntry[];
-  // Transaction state (present for mutating sync/fix runs):
+  // Transaction state (present for a mutating sync run):
   readonly journal?: Journal;
   readonly backupRoot?: string;
   // Resources mark themselves here when they make a change that needs an end-of-run

@@ -1,5 +1,7 @@
 // The reconcile verbs — thin wrappers over the one engine loop (engine/reconcile.ts),
-// parameterized by verb. Exit code comes from the engine (verify: 0/2/1).
+// parameterized by verb. Exit code comes from the engine (verify: 0/2/1). There is no
+// separate `fix`/`repair` verb: repairing drift is `boom source --fix`, the flag that
+// forces overwrite instead of sync's safe skip-by-default.
 import { buildCommand } from "@stricli/core";
 import type { BoomContext } from "../context.ts";
 import { reconcile } from "../engine/reconcile.ts";
@@ -23,11 +25,10 @@ const profileFlag = {
 } as const;
 const jsonFlag = { kind: "boolean", optional: true, brief: "Emit a structured JSON report" } as const;
 
-type OnlyFlags = { only?: string[]; json?: boolean; profile?: string[] };
 type VerifyFlags = { only?: string[]; json?: boolean; profile?: string[] };
 type SyncFlags = {
   dryRun?: boolean;
-  skip?: boolean;
+  fix?: boolean;
   resume?: boolean;
   json?: boolean;
   only?: string[];
@@ -37,10 +38,10 @@ type SyncFlags = {
   upgrade?: boolean;
 };
 
-// overwrite is the default — --skip is the one way to opt out of clobbering a
-// conflicting target.
-function linkModeOf(flags: { skip?: boolean }): LinkMode {
-  return flags.skip ? "skip" : "overwrite";
+// skip is the default — sync never clobbers a file boom doesn't own. --fix opts into
+// overwriting conflicting targets (the drift-repair that used to be `boom fix`).
+function linkModeOf(flags: { fix?: boolean }): LinkMode {
+  return flags.fix ? "overwrite" : "skip";
 }
 
 export const syncCommand = buildCommand<SyncFlags, [], BoomContext>({
@@ -48,7 +49,11 @@ export const syncCommand = buildCommand<SyncFlags, [], BoomContext>({
   parameters: {
     flags: {
       dryRun: { kind: "boolean", optional: true, brief: "Show what would change; change nothing" },
-      skip: { kind: "boolean", optional: true, brief: "Skip conflicting targets instead of overwriting" },
+      fix: {
+        kind: "boolean",
+        optional: true,
+        brief: "Repair drift: overwrite conflicting targets instead of skipping them",
+      },
       resume: { kind: "boolean", optional: true, brief: "Continue an interrupted sync (skip done steps)" },
       commit: {
         kind: "boolean",
@@ -70,7 +75,7 @@ export const syncCommand = buildCommand<SyncFlags, [], BoomContext>({
       profile: profileFlag,
       json: jsonFlag,
     },
-    aliases: { s: "skip", m: "message" },
+    aliases: { m: "message" },
   },
   async func(flags) {
     this.process.exitCode = await reconcile("sync", this, {
@@ -99,26 +104,6 @@ export const verifyCommand = buildCommand<VerifyFlags, [], BoomContext>({
   async func(flags) {
     this.process.exitCode = await reconcile("verify", this, {
       only: flags.only,
-      json: flags.json,
-      profiles: flags.profile,
-    });
-  },
-});
-
-export const fixCommand = buildCommand<OnlyFlags & { dryRun?: boolean }, [], BoomContext>({
-  docs: { brief: "Fix drift (sync, overwriting conflicts)" },
-  parameters: {
-    flags: {
-      dryRun: { kind: "boolean", optional: true, brief: "Show what would be fixed; change nothing" },
-      only: onlyFlag,
-      profile: profileFlag,
-      json: jsonFlag,
-    },
-  },
-  async func(flags) {
-    this.process.exitCode = await reconcile("fix", this, {
-      only: flags.only,
-      dryRun: flags.dryRun,
       json: flags.json,
       profiles: flags.profile,
     });

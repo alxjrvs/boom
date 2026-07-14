@@ -82,7 +82,7 @@ brew install boom</pre>
     <div class="sec-head">
       <p class="caption">And a way back!</p>
       <h2 class="display">THREE VERBS &mdash;&mdash; ONE LOOP!</h2>
-      <p style="max-width:70ch"><code>sync</code> / <code>verify</code> / <code>fix</code> (and their quiet sibling <code>uninstall</code>) are <strong>one verb-parameterized loop</strong> over a resource registry — the same walk over the same resources every time; only the verb changes. <code>rollback</code> is the escape hatch: it replays the journal, not the loop.</p>
+      <p style="max-width:70ch"><code>sync</code> / <code>verify</code> (and their quiet sibling <code>uninstall</code>) are <strong>one verb-parameterized loop</strong> over a resource registry — the same walk over the same resources every time; only the verb changes. Repairing drift is not a fourth verb — it&rsquo;s <code>boom source --fix</code>, sync with overwrite. <code>rollback</code> is the escape hatch: it replays the journal, not the loop.</p>
     </div>
 
     <div class="gridloop">
@@ -92,7 +92,6 @@ brew install boom</pre>
           <div class="codebox">
             <pre tabindex="0" role="region" aria-label="boom source flags"><span class="k">boom</span> source             <span class="c"># symlink / copy / install / run from boomfile.toml</span>
 <span class="k">boom</span> source <span class="f">--dry-run</span>   <span class="c"># preview every change; touch nothing</span>
-<span class="k">boom</span> source <span class="f">--skip</span>      <span class="c"># skip conflicting targets instead of overwriting them</span>
 <span class="k">boom</span> source <span class="f">--commit</span>    <span class="c"># commit local config-repo edits before pulling</span>
 <span class="k">boom</span> source <span class="f">--resume</span>    <span class="c"># continue an interrupted sync (skips completed steps)</span></pre>
           </div>
@@ -119,7 +118,7 @@ brew install boom</pre>
         <header><h3>Fix! <span class="ep">panel three</span></h3></header>
         <div class="kbody">
           <div class="codebox">
-            <pre tabindex="0" role="region" aria-label="boom fix"><span class="k">boom</span> fix             <span class="c"># fix drift (sync, overwriting conflicts)</span></pre>
+            <pre tabindex="0" role="region" aria-label="boom source --fix"><span class="k">boom</span> source <span class="f">--fix</span>       <span class="c"># repair drift: overwrite conflicting targets</span></pre>
           </div>
           <p><strong>DRIFT &mdash;&mdash; DESTROYED!</strong></p>
         </div>
@@ -139,9 +138,9 @@ brew install boom</pre>
     <div class="note-cap tilt-l">
       <p class="caption right">But know this!</p>
       <ul class="note-list">
-        <li><code>sync</code>/<code>fix</code> pull the config repo first (<code>pull --rebase --autostash</code>) — local edits ride along and land back on top. A failed pull is <em>reported</em>, never blocking: boom reconciles from the last-known-good local clone.</li>
+        <li><code>sync</code> pulls the config repo first (<code>pull --rebase --autostash</code>) — local edits ride along and land back on top. A failed pull is <em>reported</em>, never blocking: boom reconciles from the last-known-good local clone.</li>
         <li><code>verify</code> counts <em>&ldquo;N commits behind&rdquo;</em> as drift and warns on uncommitted or unpushed changes — without touching the working tree.</li>
-        <li>A file already squatting at a <code>link</code> destination is <strong>overwritten by default</strong>; pass <code>--skip</code> to spare it.</li>
+        <li>A file already squatting at a <code>link</code> destination is <strong>skipped by default</strong> (boom never clobbers a file it doesn&rsquo;t own); pass <code>--fix</code> to overwrite it.</li>
       </ul>
     </div>
   </div>
@@ -188,7 +187,7 @@ brew install boom</pre>
         <span class="phase" role="listitem">run</span><span class="arr" aria-hidden="true">&rarr;</span>
         <span class="phase" role="listitem">hook</span>
       </div>
-      <p>Imperative escapes are <code>run</code> steps (a shell command) or a <strong>hook</strong>: a <code>hooks/&lt;name&gt;.ts</code> module exporting <code>sync</code>/<code>verify</code>/<code>fix</code> that receives a typed <code>HookApi</code>. Hooks are the extension point for anything the declarative resources can&rsquo;t express.</p>
+      <p>Imperative escapes are <code>run</code> steps (a shell command) or a <strong>hook</strong>: a <code>hooks/&lt;name&gt;.ts</code> module exporting <code>sync</code>/<code>verify</code>/<code>uninstall</code> that receives a typed <code>HookApi</code>. Hooks are the extension point for anything the declarative resources can&rsquo;t express.</p>
       <p>Multi-machine setups gate sections with <code>when</code>, or layer overlay files (<code>boomfile.&lt;os|host|profile&gt;.toml</code>).</p>
     </div>
   </div>

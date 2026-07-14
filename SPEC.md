@@ -17,20 +17,20 @@ A `boom` invocation does one of two things:
 1. **Reconcile verbs** over a config repo's `boomfile.toml` — the `sync` verb runs on
    the bare `boom source` command (and its explicit `boom source sync` spelling); the
    rest are their own top-level commands:
-   - `boom source` / `boom source sync` — reconcile the machine to the boomfile, running the `sync` verb (`--upgrade` also upgrades outdated brewfile formulae)
+   - `boom source` / `boom source sync` — reconcile the machine to the boomfile, running the `sync` verb (`--fix` repairs drift by overwriting conflicts; `--upgrade` also upgrades outdated brewfile formulae)
    - `boom verify` — check drift, exit 0 ok / 2 warn / 1 fail (`--json` for a report)
-   - `boom fix` — fix drift (sync, overwriting conflicts)
    - `boom uninstall`
    These share **one verb-parameterized loop** (`src/engine/reconcile.ts`) over a
    resource-type registry — siblings, not separate scripts. `boom rollback` undoes
    the most recent sync (`--run-id` targets an older one, `--list` enumerates them);
    `source --resume` continues an interrupted one. A
-   conflicting (non-boom-owned) file at a `link` destination is **overwritten by
-   default**; `source --skip` opts out instead. `sync` is the one canonical reconcile
-   name; bare `boom source` is its shorthand (the namespace's default command), not a
-   separate alias.
+   conflicting (non-boom-owned) file at a `link` destination is **skipped by
+   default** (boom never clobbers a file it doesn't own); `source --fix` opts into
+   overwriting it — that's how drift is repaired, so there's no separate `fix` verb.
+   `sync` is the one canonical reconcile name; bare `boom source` is its shorthand
+   (the namespace's default command), not a separate alias.
 
-   The `sync` verb / `fix` (never `verify`/`uninstall`) also sync the config repo's own git
+   The `sync` verb (never `verify`/`uninstall`) also syncs the config repo's own git
    state against its remote first (`src/engine/sync.ts`): by default `pull --rebase
    --autostash`s, so any uncommitted local edits ride along and land back on top;
    `source --commit` commits local edits first instead of autostashing them, so
@@ -63,7 +63,7 @@ Sync is a pre-reconcile step (`src/engine/sync.ts`), not a resource: `verify` fe
 and reports drift without touching the working tree — "N commits behind origin",
 plus separate warnings for uncommitted local changes and committed-but-unpushed local
 commits, since a clean behind-count alone would otherwise read as "up to date" while
-either kind of local drift sits unreported; the `sync` verb / `fix` pull first and report what
+either kind of local drift sits unreported; the `sync` verb pulls first and reports what
 moved, then reconcile proceeds against whatever's on disk either way — a failed pull
 (including a `git rev-list` failure while checking drift) is reported as a failure but
 never blocks reconciling from the last-known-good local clone.
@@ -116,7 +116,7 @@ files `boomfile.<os|host|profile>.toml` are merged onto the base. `--profile`
 
 ### Hooks = the resource-type extension contract
 
-`hooks/<name>.ts` default-exports (or names) `sync`/`verify`/`fix`/`uninstall`
+`hooks/<name>.ts` default-exports (or names) `sync`/`verify`/`uninstall`
 functions receiving a `HookApi`: `{ with, verb, dryRun, env, ok, warn, fail, note }`.
 Loaded by runtime `import()` (works inside the compiled binary). This replaces the
 bash `_NAME_<verb>` hooks and is the public extension point.
@@ -129,7 +129,7 @@ transaction journal (intent/done rows + undo token, a `committed` flag) and the 
 of owned destinations. Each journal row commits atomically (WAL), so an interrupted run
 leaves whole rows — there's no torn-record to guard against on read. A mutating run holds
 an exclusive lockfile under the state dir (`src/lib/lock.ts`) so two concurrent
-sync/fix runs can't race on destinations or clobber each other's manifest; a stale lock
+sync runs can't race on destinations or clobber each other's manifest; a stale lock
 from a crashed run (dead pid) is reclaimed. `committed` is set only when the run finished
 with zero failures, so `rollback --list` distinguishes a clean run from a half-applied one;
 each destructive filesystem op journals its undo *before* the write, so a crash mid-op is
@@ -138,7 +138,7 @@ tree) rather than opening a new one. Mutating runs also
 **back up** any displaced file under `…/backups/<run-id>/`. `boom rollback` replays a run's
 `done` rows in reverse (remove created links, restore backups) — like a Mother Box, it
 remembers everything and can put it back; `--dry-run` previews the replay. The manifest
-drives orphan reaping (verify warns; sync/fix reap), and a legacy TSV manifest is
+drives orphan reaping (verify warns; sync reaps), and a legacy TSV manifest is
 imported once on upgrade. Breadcrumbs (`config`, `code`) record the config repo (path +
 remote) and code dir.
 
@@ -160,8 +160,9 @@ remote) and code dir.
 src/
   cli.ts · index.ts        @stricli app + entrypoint (one dispatch: route-map lookup →
                            discovered user cmd, else Stricli — no hardcoded cases)
-  commands/                verify/fix/uninstall + source (reconcile.ts; source runs
-                           the sync verb and namespaces the set/status/diff/push/reset
+  commands/                verify/uninstall + source (reconcile.ts; source runs the
+                           sync verb — `--fix` overwrites conflicts — and namespaces
+                           the set/status/diff/push/reset
                            route map — set is the bootstrap),
                            where, rollback, upgrade, validate, doctor, code, mcp (add
                            route), completions, man, skill

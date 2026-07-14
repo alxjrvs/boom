@@ -45,8 +45,9 @@ packages, running steps and hooks \\(em and opens
 portals to your code workspaces.
 It is a single self-contained binary.
 The reconcile verbs (\\fBsource\\fR/\\fBsync\\fR, verify,
-fix, uninstall) share one loop over a resource
-registry, and rollback undoes the most recent sync.
+uninstall) share one loop over a resource registry;
+\\fBsource --fix\\fR repairs drift by overwriting
+conflicts, and rollback undoes the most recent sync.
 .SH COMMANDS
 ${commands}
 .SH SUBCOMMANDS

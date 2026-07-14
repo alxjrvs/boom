@@ -8,7 +8,7 @@ import { completionsCommand } from "./commands/completions.ts";
 import { doctorCommand } from "./commands/doctor.ts";
 import { manCommand } from "./commands/man.ts";
 import { mcpRouteMap } from "./commands/mcp.ts";
-import { fixCommand, uninstallCommand, verifyCommand } from "./commands/reconcile.ts";
+import { uninstallCommand, verifyCommand } from "./commands/reconcile.ts";
 import { rollbackCommand } from "./commands/rollback.ts";
 import { skillCommand } from "./commands/skill.ts";
 import { sourceRouteMap } from "./commands/source.ts";
@@ -20,7 +20,6 @@ import { VERSION } from "./lib/version.ts";
 export const routes = buildRouteMap({
   routes: {
     verify: verifyCommand,
-    fix: fixCommand,
     uninstall: uninstallCommand,
     source: sourceRouteMap,
     where: whereCommand,

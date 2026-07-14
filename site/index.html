@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>BoomTube — the one-binary workspace manager (boom)</title>
-<meta name="description" content="BoomTube (boom) — a workspace manager. One self-contained binary provisions your machine and code workspaces from a declarative boomfile.toml: sync, verify, fix, roll back — and opens portals to your code. Named for Jack Kirby's Boom Tube.">
+<meta name="description" content="BoomTube (boom) — a workspace manager. One self-contained binary provisions your machine and code workspaces from a declarative boomfile.toml: sync, verify, roll back — and opens portals to your code. Named for Jack Kirby's Boom Tube.">
 <link rel="canonical" href="https://alxjrvs.github.io/boom/">
 <!-- Light-only design: tell the UA so form controls / scrollbars don't render dark. -->
 <meta name="color-scheme" content="light">
@@ -13,7 +13,7 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="BoomTube">
 <meta property="og:title" content="BoomTube — the one-binary workspace manager">
-<meta property="og:description" content="One self-contained binary provisions your machine and code workspaces from a declarative boomfile.toml — sync, verify, fix, roll back. Named for Jack Kirby's Boom Tube.">
+<meta property="og:description" content="One self-contained binary provisions your machine and code workspaces from a declarative boomfile.toml — sync, verify, roll back. Named for Jack Kirby's Boom Tube.">
 <meta property="og:url" content="https://alxjrvs.github.io/boom/">
 <meta property="og:image" content="https://alxjrvs.github.io/boom/og.png">
 <meta property="og:image:width" content="1200">
@@ -21,7 +21,7 @@
 <meta property="og:image:alt" content="BOOMTUBE — a Jack Kirby boom-tube portal beside the wordmark; the one-binary workspace manager, boom.">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="BoomTube — the one-binary workspace manager">
-<meta name="twitter:description" content="One self-contained binary provisions your machine and code workspaces from a declarative boomfile.toml — sync, verify, fix, roll back.">
+<meta name="twitter:description" content="One self-contained binary provisions your machine and code workspaces from a declarative boomfile.toml — sync, verify, roll back.">
 <meta name="twitter:image" content="https://alxjrvs.github.io/boom/og.png">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='48' fill='%230b0a12'/%3E%3Ccircle cx='50' cy='50' r='36' fill='%237a1fa2'/%3E%3Ccircle cx='50' cy='50' r='27' fill='%23e2231a'/%3E%3Ccircle cx='50' cy='50' r='18' fill='%23ffcf00'/%3E%3Ccircle cx='50' cy='50' r='9' fill='%23fff8e7'/%3E%3C/svg%3E">
 <link rel="apple-touch-icon" href="icon-180.png">
@@ -37,7 +37,7 @@
   "operatingSystem": "macOS, Linux",
   "url": "https://alxjrvs.github.io/boom/",
   "downloadUrl": "https://github.com/alxjrvs/boom",
-  "description": "A workspace manager: one self-contained binary that provisions your machine and code workspaces from a declarative boomfile.toml — sync, verify, fix, roll back.",
+  "description": "A workspace manager: one self-contained binary that provisions your machine and code workspaces from a declarative boomfile.toml — sync, verify, roll back.",
   "license": "https://github.com/alxjrvs/boom/blob/main/LICENSE",
   "author": { "@type": "Person", "name": "alxjrvs", "url": "https://github.com/alxjrvs" },
   "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
@@ -274,7 +274,7 @@
       </div>
 
       <div class="cconn" aria-hidden="true">
-        <span class="fwd">sync &middot; fix &rarr;</span>
+        <span class="fwd">sync &rarr;</span>
         <span class="back">&larr; verify &middot; rollback</span>
       </div>
 
@@ -285,7 +285,7 @@
       </div>
 
       <div class="cconn" aria-hidden="true">
-        <span class="fwd">sync &middot; fix &rarr;</span>
+        <span class="fwd">sync &rarr;</span>
         <span class="back">&larr; verify &middot; rollback</span>
       </div>
 
@@ -303,7 +303,7 @@
       </div>
     </div>
 
-    <p class="concept-note lede">Point <code>boom</code> at your repo and step through: <strong>sync</strong> makes the machine match the file, <strong>verify</strong> proves it, <strong>fix</strong> mends drift — and <strong>rollback</strong> walks it all back, every journaled step retraced.</p>
+    <p class="concept-note lede">Point <code>boom</code> at your repo and step through: <strong>sync</strong> makes the machine match the file (<strong>--fix</strong> overwrites drift), <strong>verify</strong> proves it — and <strong>rollback</strong> walks it all back, every journaled step retraced.</p>
   </div>
 </section>
 
@@ -347,8 +347,8 @@ curl -fsSL https://raw.githubusercontent.com/alxjrvs/boom/main/install.sh | sh</
             <pre tabindex="0" role="region" aria-label="Keep the machine in sync"><span class="k">boom</span> source   <span class="c"># pull the repo, reconcile</span>
 <span class="k">boom</span> verify   <span class="c"># hunt for drift</span></pre>
           </div>
-          <p>The repo is the source of truth. <code>verify</code> reports drift (exit <code>0</code> ok, <code>2</code> warn, <code>1</code> fail); <code>fix</code> mends it.</p>
-          <p><code>boom source</code> overwrites conflicting files by default — pass <code>--skip</code> to spare them.</p>
+          <p>The repo is the source of truth. <code>verify</code> reports drift (exit <code>0</code> ok, <code>2</code> warn, <code>1</code> fail); <code>source --fix</code> mends it.</p>
+          <p><code>boom source</code> skips conflicting files it doesn&rsquo;t own by default — pass <code>--fix</code> to overwrite them.</p>
         </div>
       </article>
     </div>
@@ -368,7 +368,7 @@ curl -fsSL https://raw.githubusercontent.com/alxjrvs/boom/main/install.sh | sh</
     <div class="cards">
       <a class="card" href="guide.html#reconcile">
         <h3>The Reconcile Loop</h3>
-        <p><code>sync</code> / <code>verify</code> / <code>fix</code> — one loop over every resource. And <code>rollback</code>, for the way back.</p>
+        <p><code>sync</code> / <code>verify</code> — one loop over every resource (<code>--fix</code> overwrites drift). And <code>rollback</code>, for the way back.</p>
         <span class="go">Step through &rarr;</span>
       </a>
       <a class="card" href="guide.html#boomfile">
