@@ -29,17 +29,31 @@ const TOOLS: ReadonlyArray<{ cmd: string; why: string }> = [
 
 const KEYCHAIN_ITEM = "op-claude-agent";
 
-export async function doctor(ctx: BoomContext, json = false): Promise<number> {
+// `configOnly` (the `--config` flag) is the folded-in `boom validate`: parse + schema-check
+// the boomfile and overlays alone, as a read-only CI gate — no tools/keychain/state checks,
+// pass/fail 0/1 (no warning tier), and a missing config repo is a *failure*, not a warning.
+export async function doctor(ctx: BoomContext, json = false, configOnly = false): Promise<number> {
   const report = new Reporter(ctx.process.stdout, ctx.process.stderr, colorEnabled(ctx.env), json);
 
   report.header("Config");
   const repo = await resolveConfigDir(ctx.env, ctx.cwd);
   if (!repo) {
-    report.warn(NO_CONFIG_REPO_MSG);
+    // Strict for a CI gate, lenient for a health check: without a config repo `--config`
+    // fails (there's nothing to validate) while full doctor warns (boom can still run).
+    if (configOnly) report.fail(NO_CONFIG_REPO_MSG);
+    else report.warn(NO_CONFIG_REPO_MSG);
   } else {
-    // Same parse `boom validate` runs (base boomfile + every overlay), shared so the two
-    // commands can't disagree; here it's one section among doctor's broader preconditions.
+    // The base boomfile + every overlay; here it's one section among doctor's broader
+    // preconditions, or the whole job under `--config`.
     await validateConfigFiles(repo, report);
+  }
+
+  if (configOnly) {
+    if (json) return report.finishJson(ctx.process.stdout, false);
+    return report.finish({
+      ok: "doctor: config OK",
+      fail: (f) => `doctor: ${f} invalid file(s)`,
+    });
   }
 
   report.header("Config repo");

@@ -15,14 +15,14 @@ export function reconcileBrewfile(file: string, ctx: ReconcileCtx): void {
   const path = join(ctx.repo, file);
   // Homebrew Bundle upgrades outdated formulae by default — `sync` should only
   // reconcile declared state, not silently upgrade packages as a side effect, so it
-  // opts out unless the caller asked for upgrades (`update` = sync --upgrade). Casks
-  // are unaffected by this flag: Bundle only upgrades a cask when its Brewfile entry
-  // sets `greedy: true`, upgrade or not.
-  const noUpgrade = ctx.upgrade ? [] : ["--no-upgrade"];
+  // opts out unless the caller asked for it (`boom source --update`). Casks are
+  // unaffected by this flag: Bundle only upgrades a cask when its Brewfile entry
+  // sets `greedy: true`, update or not.
+  const noUpgrade = ctx.update ? [] : ["--no-upgrade"];
   switch (ctx.verb) {
     case "sync": {
       if (ctx.dryRun) {
-        report.plan(`would run: brew bundle --file=${path}${ctx.upgrade ? "" : " --no-upgrade"}`);
+        report.plan(`would run: brew bundle --file=${path}${ctx.update ? "" : " --no-upgrade"}`);
         return;
       }
       if (

@@ -54,7 +54,7 @@ separate verb: it's `boom source --fix` (sync, but overwriting conflicts).
 boom source             # make it so: symlink / copy / install / run from boomfile.toml
 boom source --dry-run   # preview every change; touch nothing
 boom source --fix       # repair drift: overwrite conflicting targets (skipped by default)
-boom source --upgrade   # also upgrade outdated brewfile formulae, not just declared state
+boom source --update    # also update outdated brewfile formulae, not just declared state
 boom source --commit    # commit local config-repo edits before pulling
 boom source --resume    # continue an interrupted sync (skips completed steps)
 
@@ -87,7 +87,7 @@ boom source reset --force # …including commits no remote has (refused otherwis
 ### Housekeeping
 
 ```sh
-boom validate           # parse + schema-check the boomfile; change nothing
+boom doctor --config    # parse + schema-check the boomfile; change nothing (exit 0/1)
 boom doctor             # check boom's own preconditions (tools, keychain, state)
 boom where config|code|engine   # resolve where boom keeps things
 boom upgrade            # upgrade the boom binary itself

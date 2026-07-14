@@ -1,12 +1,11 @@
-// `boom validate` — parse + schema-check the boomfile (and every overlay) without
-// touching the machine. Lets a dotfiles repo CI-check its config the way `boom source`
-// would load it, but read-only. Exit 0 if every file is valid, 1 otherwise.
+// Config-file validation: parse + schema-check the boomfile and every overlay without
+// touching the machine. The user-facing entry point is `boom doctor --config` (a read-only
+// CI gate); this module is just the shared parse used there and in full `boom doctor`, so
+// the check can't drift between the two paths.
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
-import { CONFIG_FILE, loadConfigFile, NO_CONFIG_REPO_MSG, resolveConfigDir } from "../config/load.ts";
-import type { BoomContext } from "../context.ts";
-import { colorEnabled } from "../lib/color.ts";
-import { Reporter } from "../lib/reporter.ts";
+import { CONFIG_FILE, loadConfigFile } from "../config/load.ts";
+import type { Reporter } from "../lib/reporter.ts";
 
 // Overlay files are boomfile.<os|host|profile>.toml beside the base boomfile.toml.
 // Validate every one present, regardless of which would activate, so a typo in an
@@ -14,9 +13,7 @@ import { Reporter } from "../lib/reporter.ts";
 const OVERLAY_RE = /^boomfile\..+\.toml$/;
 
 // Parse + schema-check the base boomfile and every overlay, reporting one line each.
-// Shared with `boom doctor`'s Config section so the parse check can't drift between the
-// two commands (doctor is the same check plus tools/keychain/state; validate is it alone,
-// as a read-only CI gate). Reports into the caller's Reporter; drives the caller's exit.
+// Reports into the caller's Reporter; the caller (doctor) drives the exit code.
 export async function validateConfigFiles(repo: string, report: Reporter): Promise<void> {
   const entries = await readdir(repo);
   const files = [CONFIG_FILE, ...entries.filter((f) => OVERLAY_RE.test(f)).sort()];
@@ -28,26 +25,4 @@ export async function validateConfigFiles(repo: string, report: Reporter): Promi
       report.fail((e as Error).message);
     }
   }
-}
-
-export async function validateConfig(ctx: BoomContext, json = false): Promise<number> {
-  const report = new Reporter(ctx.process.stdout, ctx.process.stderr, colorEnabled(ctx.env), json);
-  report.header("Validate");
-
-  const repo = await resolveConfigDir(ctx.env, ctx.cwd);
-  if (!repo) {
-    report.fail(NO_CONFIG_REPO_MSG);
-    // No warning tier: validate is pass/fail (a file parses or it doesn't).
-    if (json) return report.finishJson(ctx.process.stdout, false);
-    ctx.process.stdout.write("\n");
-    return 1;
-  }
-
-  await validateConfigFiles(repo, report);
-
-  if (json) return report.finishJson(ctx.process.stdout, false);
-  return report.finish({
-    ok: "validate: config OK",
-    fail: (f) => `validate: ${f} invalid file(s)`,
-  });
 }

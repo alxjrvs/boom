@@ -15,10 +15,10 @@ export interface ReconcileCtx {
   readonly json: boolean;
   readonly linkMode: LinkMode;
   // Gates brewfile's `--no-upgrade`: sync reconciles declared state only,
-  // `boom source --upgrade` opts into upgrading outdated formulae too. Casks are unaffected
+  // `boom source --update` opts into upgrading outdated formulae too. Casks are unaffected
   // either way — Homebrew Bundle only upgrades a cask when its Brewfile entry sets
   // `greedy: true`, regardless of this flag.
-  readonly upgrade: boolean;
+  readonly update: boolean;
   readonly env: Record<string, string | undefined>;
   readonly report: Reporter;
   // Destinations boom owns this run — populated as handlers run (drives orphan

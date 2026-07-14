@@ -17,7 +17,7 @@ A `boom` invocation does one of two things:
 1. **Reconcile verbs** over a config repo's `boomfile.toml` — the `sync` verb runs on
    the bare `boom source` command (and its explicit `boom source sync` spelling); the
    rest are their own top-level commands:
-   - `boom source` / `boom source sync` — reconcile the machine to the boomfile, running the `sync` verb (`--fix` repairs drift by overwriting conflicts; `--upgrade` also upgrades outdated brewfile formulae)
+   - `boom source` / `boom source sync` — reconcile the machine to the boomfile, running the `sync` verb (`--fix` repairs drift by overwriting conflicts; `--update` also updates outdated brewfile formulae)
    - `boom verify` — check drift, exit 0 ok / 2 warn / 1 fail (`--json` for a report)
    - `boom uninstall`
    These share **one verb-parameterized loop** (`src/engine/reconcile.ts`) over a
@@ -39,7 +39,7 @@ A `boom` invocation does one of two things:
    `source --commit` so the default message/behavior can't drift between the two.
 
 2. **Discovered subcommands** — built-ins are the `@stricli` route map (`source`,
-   `code`, `mcp`, `where`, `rollback`, `upgrade`, `validate`, `doctor`, `completions`,
+   `code`, `mcp`, `where`, `rollback`, `upgrade`, `doctor`, `completions`,
    `man`, `skill`); user commands resolve at runtime from `<config>/commands/<name>.ts`.
    The route map is the **single registry, with no hardcoded dispatch anywhere**: `mcp`
    is an ordinary route (its `-- <server args>` ride through verbatim via the scanner's
@@ -164,7 +164,8 @@ src/
                            sync verb — `--fix` overwrites conflicts — and namespaces
                            the set/status/diff/push/reset
                            route map — set is the bootstrap),
-                           where, rollback, upgrade, validate, doctor, code, mcp (add
+                           where, rollback, upgrade, doctor (--config folds in the
+                           former validate), code, mcp (add
                            route), completions, man, skill
                            catalog.ts (names+briefs + nested subcommands derived from the
                            route map for completions + man + skill); flags.ts (shared parsers)

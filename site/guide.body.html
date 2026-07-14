@@ -254,7 +254,7 @@ brew install boom</pre>
     </div>
     <div class="panel tilt-r">
       <div class="codebox">
-        <pre tabindex="0" role="region" aria-label="Housekeeping commands"><span class="k">boom</span> validate           <span class="c"># parse + schema-check the boomfile; change nothing</span>
+        <pre tabindex="0" role="region" aria-label="Housekeeping commands"><span class="k">boom</span> doctor <span class="f">--config</span>    <span class="c"># parse + schema-check the boomfile; change nothing (exit 0/1)</span>
 <span class="k">boom</span> doctor             <span class="c"># check boom's own preconditions (tools, keychain, state)</span>
 <span class="k">boom</span> where config|code|engine   <span class="c"># resolve where boom keeps things</span>
 <span class="k">boom</span> upgrade            <span class="c"># upgrade the boom binary itself</span>

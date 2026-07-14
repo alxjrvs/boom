@@ -1,6 +1,6 @@
 {
   "name": "boom",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "BoomTube — a workspace manager (executable: boom). Provision your machine and code workspaces from a declarative boomfile.toml (sync/verify), open portals to your code, and get out of the way so you can work.",
   "type": "module",
   "private": true,

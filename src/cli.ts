@@ -13,7 +13,6 @@ import { rollbackCommand } from "./commands/rollback.ts";
 import { skillCommand } from "./commands/skill.ts";
 import { sourceRouteMap } from "./commands/source.ts";
 import { upgradeCommand } from "./commands/upgrade.ts";
-import { validateCommand } from "./commands/validate.ts";
 import { whereCommand } from "./commands/where.ts";
 import { VERSION } from "./lib/version.ts";
 
@@ -25,7 +24,6 @@ export const routes = buildRouteMap({
     where: whereCommand,
     rollback: rollbackCommand,
     upgrade: upgradeCommand,
-    validate: validateCommand,
     doctor: doctorCommand,
     code: codeRouteMap,
     mcp: mcpRouteMap,

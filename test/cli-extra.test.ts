@@ -12,7 +12,6 @@ import { manPage } from "../src/commands/man.ts";
 import { skillDoc } from "../src/commands/skill.ts";
 import type { BoomContext } from "../src/context.ts";
 import { doctor } from "../src/engine/doctor.ts";
-import { validateConfig } from "../src/engine/validate.ts";
 import { colorEnabled } from "../src/lib/color.ts";
 import { hasCommand } from "../src/lib/proc.ts";
 
@@ -35,10 +34,12 @@ test("command list (derived from the route map) is unique and includes the core 
   const names = commandNames();
   expect(new Set(names).size).toBe(names.length);
   // mcp is a real route now, so it must appear in the derived list like any other.
-  for (const v of ["verify", "uninstall", "source", "mcp", "doctor", "validate"]) {
+  for (const v of ["verify", "uninstall", "source", "mcp", "doctor"]) {
     expect(names).toContain(v);
   }
+  // `validate` was folded into `doctor --config`; it must not resurface as a command.
   expect(names).not.toContain("watchtower");
+  expect(names).not.toContain("validate");
 });
 
 // ---- completions ------------------------------------------------------------
@@ -53,8 +54,10 @@ test("zsh completion is a #compdef with described commands", () => {
   const s = completionScript("zsh");
   expect(s.startsWith("#compdef boom")).toBe(true);
   expect(s).toContain("_describe");
-  expect(s).toContain(`'validate:${commandList().find((c) => c.name === "validate")?.brief}'`);
-  // An apostrophe in a brief is escaped for the single-quoted zsh literal.
+  // `verify`'s brief has no apostrophe, so it round-trips verbatim into the zsh literal.
+  expect(s).toContain(`'verify:${commandList().find((c) => c.name === "verify")?.brief}'`);
+  // …while `doctor`'s brief ("boom's own preconditions") exercises the apostrophe escape:
+  // a `'` is closed, escaped as `\'`, and reopened for the single-quoted zsh literal.
   expect(s).toContain("'\\''");
 });
 
@@ -145,24 +148,24 @@ test("skill --install writes SKILL.md under the Claude config dir", async () => 
   expect(out()).toContain(`installed skill → ${file}`);
 });
 
-// ---- validate ----------------------------------------------------------------
+// ---- doctor --config (the folded-in `boom validate`) ------------------------
 
-test("validate accepts a valid base + overlay and reports each file", async () => {
+test("doctor --config accepts a valid base + overlay and reports each file", async () => {
   const repo = await base();
   await writeFile(join(repo, "boomfile.toml"), `[[section]]\nname = "base"\n`);
   await writeFile(join(repo, "boomfile.linux.toml"), `[[section]]\nname = "linux"\n`);
   const { ctx, out } = ctxFor({ BOOM_CONFIG: repo, NO_COLOR: "1" }, repo);
-  expect(await validateConfig(ctx)).toBe(0);
+  expect(await doctor(ctx, false, true)).toBe(0);
   expect(out()).toContain("boomfile.toml");
   expect(out()).toContain("boomfile.linux.toml");
   expect(out()).toContain("config OK");
 });
 
-test("validate --json emits a versioned report envelope", async () => {
+test("doctor --config --json emits a versioned report envelope", async () => {
   const repo = await base();
   await writeFile(join(repo, "boomfile.toml"), `[[section]]\nname = "base"\n`);
   const { ctx, out } = ctxFor({ BOOM_CONFIG: repo, NO_COLOR: "1" }, repo);
-  expect(await validateConfig(ctx, true)).toBe(0);
+  expect(await doctor(ctx, true, true)).toBe(0);
   const env = JSON.parse(out());
   expect(env.schemaVersion).toBe(1);
   expect(env.ok).toBe(true);
@@ -170,18 +173,18 @@ test("validate --json emits a versioned report envelope", async () => {
   expect(Array.isArray(env.records)).toBe(true);
 });
 
-test("validate fails (exit 1) on a schema-invalid overlay", async () => {
+test("doctor --config fails (exit 1) on a schema-invalid overlay", async () => {
   const repo = await base();
   await writeFile(join(repo, "boomfile.toml"), `[[section]]\nname = "base"\n`);
   await writeFile(join(repo, "boomfile.darwin.toml"), `[[section]]\nlink = "not-an-array"\n`);
   const { ctx } = ctxFor({ BOOM_CONFIG: repo, NO_COLOR: "1" }, repo);
-  expect(await validateConfig(ctx)).toBe(1);
+  expect(await doctor(ctx, false, true)).toBe(1);
 });
 
-test("validate fails when no dotfiles repo resolves", async () => {
+test("doctor --config fails when no dotfiles repo resolves (strict CI gate)", async () => {
   const empty = await base();
   const { ctx } = ctxFor({ XDG_STATE_HOME: await base(), NO_COLOR: "1" }, empty);
-  expect(await validateConfig(ctx)).toBe(1);
+  expect(await doctor(ctx, false, true)).toBe(1);
 });
 
 // ---- doctor ------------------------------------------------------------------

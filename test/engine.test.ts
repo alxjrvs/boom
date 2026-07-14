@@ -188,7 +188,7 @@ test("hook runs a TS resource module with its inputs", async () => {
 // A fake `brew` on PATH that just logs its argv — real `brew bundle` isn't installable
 // in CI, but the argv it's invoked with is exactly the behavior under test: plain
 // sync must not silently upgrade outdated formulae (Homebrew Bundle's own default),
-// and `update`/`sync --upgrade` must be the one opt-in path that does.
+// and `sync --update` must be the one opt-in path that does.
 async function fakeBrew(
   repo: string,
   env: Record<string, string | undefined>,
@@ -209,19 +209,19 @@ async function fakeBrew(
   };
 }
 
-test("brewfile: sync passes --no-upgrade; update/sync --upgrade omits it", async () => {
+test("brewfile: sync passes --no-upgrade; sync --update omits it", async () => {
   const sb = await sandbox(`[[section]]\nname = "Pkg"\nbrewfile = "Brewfile"\n`);
   await writeFile(join(sb.repo, "Brewfile"), "");
   const calls = await fakeBrew(sb.repo, sb.ctx.env as Record<string, string | undefined>);
 
   expect(await reconcile("sync", sb.ctx, {})).toBe(0);
-  expect(await reconcile("sync", sb.ctx, { upgrade: true })).toBe(0);
+  expect(await reconcile("sync", sb.ctx, { update: true })).toBe(0);
   expect(await reconcile("verify", sb.ctx, {})).toBe(0);
 
   const argvLines = await calls();
   expect(argvLines).toHaveLength(3);
   expect(argvLines[0]).toContain("--no-upgrade"); // plain sync
-  expect(argvLines[1]).not.toContain("--no-upgrade"); // sync --upgrade (= update)
+  expect(argvLines[1]).not.toContain("--no-upgrade"); // sync --update
   expect(argvLines[2]).toContain("--no-upgrade"); // verify mirrors sync's default
 });
 

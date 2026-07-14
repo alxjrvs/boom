@@ -35,7 +35,7 @@ type SyncFlags = {
   profile?: string[];
   commit?: boolean;
   message?: string;
-  upgrade?: boolean;
+  update?: boolean;
 };
 
 // skip is the default — sync never clobbers a file boom doesn't own. --fix opts into
@@ -66,10 +66,10 @@ export const syncCommand = buildCommand<SyncFlags, [], BoomContext>({
         optional: true,
         brief: 'Commit message for --commit (default: "boom: local changes")',
       },
-      upgrade: {
+      update: {
         kind: "boolean",
         optional: true,
-        brief: "Also upgrade outdated brewfile formulae, not just reconcile declared state",
+        brief: "Also update outdated brewfile formulae, not just reconcile declared state",
       },
       only: onlyFlag,
       profile: profileFlag,
@@ -87,7 +87,7 @@ export const syncCommand = buildCommand<SyncFlags, [], BoomContext>({
       linkMode: linkModeOf(flags),
       commit: flags.commit,
       commitMessage: flags.message,
-      upgrade: flags.upgrade,
+      update: flags.update,
     });
   },
 });
