@@ -96,8 +96,8 @@ export async function reconcileLink(entry: Link, ctx: ReconcileCtx): Promise<voi
 
   switch (ctx.verb) {
     case "sync":
-    case "repair": {
-      const mode: LinkMode = ctx.verb === "repair" ? "overwrite" : ctx.linkMode;
+    case "fix": {
+      const mode: LinkMode = ctx.verb === "fix" ? "overwrite" : ctx.linkMode;
       await applyLink(src, dst, disp, mode, ctx);
       // `mode` on a link sets the *target's* mode (chmod follows the symlink to the
       // repo file) — which is exactly what tools reading through the link, e.g. ssh on
@@ -153,7 +153,7 @@ export async function reconcileCopy(entry: Link, ctx: ReconcileCtx): Promise<voi
 
   switch (ctx.verb) {
     case "sync":
-    case "repair": {
+    case "fix": {
       // Mirrors link's "already linked" skip and osx's change-gate: re-copying,
       // re-chmoding, journaling, and backing up an already-current file every run
       // violates the one-loop verb contract (verify already calls this state "copy

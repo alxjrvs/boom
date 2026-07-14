@@ -40,7 +40,7 @@ packages, runs steps and hooks, and can undo any change.
 - **One config source.** \`boom source set <owner/repo>\` clones the repo into a managed
   cache dir, records it, and syncs it. That is also the fresh-machine bootstrap.
 - **The reconcile loop is one verb over one registry.** \`source\` (the sync verb),
-  \`verify\`, \`repair\`, and \`uninstall\` walk the same resources; only the verb changes.
+  \`verify\`, \`fix\`, and \`uninstall\` walk the same resources; only the verb changes.
 - **One canonical name per command — there are no aliases.**
 
 ## Commands
@@ -55,7 +55,7 @@ config repo. \`code\` is a namespace: \`boom code <init|claude|cmux>\`. Run
 
 - **Check before changing.** \`boom verify\` exits **0** ok / **2** warnings / **1**
   failures — gate on it. \`boom source --dry-run\` previews every change and touches nothing.
-- **Machine-readable output.** \`--json\` on \`source\`/\`verify\`/\`repair\` emits a structured
+- **Machine-readable output.** \`--json\` on \`source\`/\`verify\`/\`fix\` emits a structured
   report (with a \`schemaVersion\`); parse that instead of scraping stdout.
 - **Scope a run** with \`--only <section>\` (repeatable) and \`--profile <name>\`.
 - **Destructive commands to use with care:** \`boom source reset --force\` discards local

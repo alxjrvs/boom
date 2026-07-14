@@ -1,6 +1,7 @@
 // Doc-lint: guards the docs against silently rotting when a verb is renamed. The engine
-// was rebranded (botu → boom; apply/fix → sync/repair); these assertions fail loudly if a
-// retired name or a dangling man reference creeps back into the shipped metadata.
+// was rebranded (botu → boom; apply/verify/fix → sync/verify/repair) and the drift verb
+// was later renamed (repair → fix, giving sync/verify/fix); these assertions fail loudly
+// if a retired name or a dangling man reference creeps back into the shipped metadata.
 //
 // `cli.ts` is imported first (before `man.ts`) on purpose: catalog→cli→man is a module
 // cycle, and loading man.ts first lands cli.ts's route map in a temporal-dead-zone read of
@@ -10,9 +11,11 @@ import pkg from "../package.json" with { type: "json" };
 import { app } from "../src/cli.ts";
 import { manPage } from "../src/commands/man.ts";
 
-// The verb names boom retired. `fix` is too common a word to grep bare, so match the
-// pre-rebrand marketing string that actually shipped in package.json.
-const RETIRED = ["apply/verify/fix", "apply / verify / fix"];
+// The verb-set marketing strings boom retired: the pre-boom `apply/…` set, and the
+// interim `…/repair` name the drift verb carried before it became `fix`. Match the full
+// slash-joined strings that actually shipped in package.json — `fix`/`repair` are too
+// common to grep bare.
+const RETIRED = ["apply/verify/fix", "apply / verify / fix", "sync/verify/repair"];
 
 test("the app route map builds (guards the catalog↔cli↔man import cycle)", () => {
   expect(app).toBeDefined();
@@ -20,7 +23,7 @@ test("the app route map builds (guards the catalog↔cli↔man import cycle)", (
 
 test("package.json description uses the current verb names, not the retired ones", () => {
   for (const s of RETIRED) expect(pkg.description).not.toContain(s);
-  expect(pkg.description).toContain("sync/verify/repair");
+  expect(pkg.description).toContain("sync/verify/fix");
   expect(pkg.description).not.toContain("botu");
 });
 

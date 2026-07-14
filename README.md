@@ -3,7 +3,7 @@
 **BoomTube** is a **workspace manager** — it provisions your machine and your
 code workspaces fast, then gets out of your way so you can work. Its executable,
 **`boom`**, reconciles your machine from a declarative `boomfile.toml` —
-`sync` / `verify` / `repair` — rolls back any change, and opens portals to your
+`sync` / `verify` / `fix` — rolls back any change, and opens portals to your
 code workspaces. One self-contained binary, compiled from **TypeScript on
 [Bun](https://bun.com)**, with zero runtime dependencies on your machine.
 
@@ -46,7 +46,7 @@ fresh-machine one-liner is `curl install.sh | sh && boom source set owner/repo`.
 
 ## The reconcile loop
 
-`sync` / `verify` / `repair` / `uninstall` are **one verb-parameterized loop** over
+`sync` / `verify` / `fix` / `uninstall` are **one verb-parameterized loop** over
 a resource registry — siblings, not separate scripts.
 
 ```sh
@@ -59,11 +59,11 @@ boom source --resume    # continue an interrupted sync (skips completed steps)
 
 boom verify             # check for drift — exit 0 ok / 2 warn / 1 fail
 boom verify --json      # …as a structured drift report
-boom repair             # repair drift (sync, overwriting conflicts)
+boom fix             # fix drift (sync, overwriting conflicts)
 boom rollback           # undo the most recent sync (restores backed-up files)
 ```
 
-`sync`/`repair` sync the config repo against its remote first (`pull --rebase
+`sync`/`fix` sync the config repo against its remote first (`pull --rebase
 --autostash`, so local edits ride along and land back on top). `verify` reports
 "N commits behind" as drift — plus separate warnings for uncommitted or unpushed
 local changes — without touching the working tree. A failed pull is *reported* but
@@ -129,7 +129,7 @@ hook = [{ name = "op-agent", with = { vault = "claude-agent" } }]   # → hooks/
 ```
 
 Imperative escapes are `run` steps (a shell command) or a **hook** — a
-`hooks/<name>.ts` module exporting `sync`/`verify`/`repair` that receives a typed
+`hooks/<name>.ts` module exporting `sync`/`verify`/`fix` that receives a typed
 `HookApi`. That's the extension point for anything the declarative resources can't
 express. Multi-machine setups gate sections with `when`, or layer overlay files
 (`boomfile.<os|host|profile>.toml`).
@@ -151,7 +151,7 @@ repo. Both honor `--dry-run` and only spawn the backend tool when it's present.
 ## Security model
 
 boom reconciles from a git remote **you** point it at, and a boomfile's `run` steps and
-`hook` modules are executed as your user during `sync`/`repair`. Sync pulls the config
+`hook` modules are executed as your user during `sync`/`fix`. Sync pulls the config
 repo *before* running those steps, so **anyone who can push to your config remote can run
 arbitrary code on your machine on the next sync** — treat write access to that repo as
 equivalent to shell access. Pin to a tag or SHA (`boom source set owner/repo@v1.2.3`) if

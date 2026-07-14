@@ -21,7 +21,7 @@ export function reconcileBrewfile(file: string, ctx: ReconcileCtx): void {
   const noUpgrade = ctx.upgrade ? [] : ["--no-upgrade"];
   switch (ctx.verb) {
     case "sync":
-    case "repair": {
+    case "fix": {
       if (ctx.dryRun) {
         report.plan(`would run: brew bundle --file=${path}${ctx.upgrade ? "" : " --no-upgrade"}`);
         return;
@@ -37,7 +37,7 @@ export function reconcileBrewfile(file: string, ctx: ReconcileCtx): void {
     case "verify": {
       // Mirrors sync's --no-upgrade gate: otherwise a plain `verify` would flag
       // merely-outdated (but still declared) formulae as drift that `boom source`
-      // then won't repair, since sync itself no longer upgrades by default.
+      // then won't fix, since sync itself no longer upgrades by default.
       if (
         runArgv(["brew", "bundle", "check", `--file=${path}`, ...noUpgrade], ctx.env, {
           quietStdout: ctx.json,
@@ -57,7 +57,7 @@ export function reconcileMise(ctx: ReconcileCtx): void {
   if (!hasCommand("mise", ctx.env)) return;
   switch (ctx.verb) {
     case "sync":
-    case "repair": {
+    case "fix": {
       if (ctx.dryRun) {
         report.plan("would run: mise install");
         return;
