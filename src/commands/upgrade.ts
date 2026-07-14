@@ -84,6 +84,24 @@ async function latestRelease(): Promise<Release> {
   return { tag, version: tag.replace(/^v/, "") };
 }
 
+// Best-effort latest-version probe for the `[boom] upgrade_check_on_sync` nudge: returns the
+// latest release version, or undefined on any error (offline, rate-limited, no release) —
+// never throws, so a sync-time check can't fail the sync. A 5s deadline keeps a flaky
+// network from stalling reconcile.
+export async function fetchLatestVersion(): Promise<string | undefined> {
+  try {
+    const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
+      headers: { "User-Agent": "boom-upgrade", Accept: "application/vnd.github+json" },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) return undefined;
+    const body = (await res.json()) as { tag_name?: string };
+    return body.tag_name?.replace(/^v/, "") || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function fetchBytes(url: string): Promise<Uint8Array> {
   const res = await fetch(url, { headers: { "User-Agent": "boom-upgrade" } });
   if (!res.ok) throw new Error(`download failed: ${res.status} ${res.statusText} (${url})`);

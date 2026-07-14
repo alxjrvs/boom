@@ -1,5 +1,14 @@
 # An example boomfile.toml — a runnable reference for the resource types and phase order.
-# Copy the pieces you need into your own dotfiles repo; `boom validate` checks it.
+# Copy the pieces you need into your own dotfiles repo; `boom doctor --config` checks it.
+
+# A top-level [boom] table folds boom's own self-wiring into the reconcile it already runs:
+# keep the Claude skill fresh, nudge on a new release, and manage scheduled boom verify /
+# code fetch launchd timers (macOS) — instead of hand-rolling those as run/plist steps.
+[boom]
+skill_on_sync = true             # regenerate ~/.claude/skills/boom/SKILL.md each sync
+upgrade_check_on_sync = true     # warn when a newer boom release ships (offline-safe)
+verify_schedule = "15m"          # launchd timer: boom verify every 15m (macOS-only)
+code_fetch_schedule = "15m"      # launchd timer: git-fetch every code repo (keep origin warm)
 
 [[section]]
 name = "Shell + git"
@@ -130,17 +139,36 @@ into = "~/.config/zsh/"
 [[section]]
 name = "SSH perms"
 
-[[section.run]]
-on = "sync"
-cmd = "chmod 700 ~/.ssh"
+# `dir` ensures a standalone directory exists with a mode — the declarative form of the
+# mkdir -p/chmod run steps this used to be. `manage = true` would remove it on uninstall
+# (only if empty); omitted here since ~/.ssh holds user data.
+[[section.dir]]
+path = "~/.ssh"
+mode = "700"
 
-[[section.run]]
-on = "sync"
-cmd = "mkdir -p ~/.ssh/cm"
+[[section.dir]]
+path = "~/.ssh/cm"
+mode = "700"
 
-[[section.run]]
-on = "sync"
-cmd = "chmod 700 ~/.ssh/cm"
+[[section]]
+name = "Guardrails"
+
+# `check` runs on verify: every `present` regex must match the file, every `absent` must
+# not — folded into `boom verify`'s exit code and JSON report. The legible form of a
+# grep-in-a-run guardrail.
+[[section.check]]
+file = "~/.gitconfig"
+present = ["\\[user\\]"]
+message = "git identity not configured"
+
+[[section]]
+name = "LaunchAgents"
+when = { os = "darwin" }
+
+# `launchd` links a plist into ~/Library/LaunchAgents and owns its launchctl lifecycle
+# (load -w on sync, unload on uninstall) — no copy-pasted `launchctl unload; load -w` dance.
+[[section.launchd]]
+src = "launchd/com.example.agent.plist"
 
 [[section]]
 name = "lefthook"

@@ -11,7 +11,8 @@ import { commandList } from "./catalog.ts";
 
 // Where Claude Code keeps user skills: $CLAUDE_CONFIG_DIR (if the user relocated ~/.claude),
 // else ~/.claude. Returns undefined only when neither HOME nor CLAUDE_CONFIG_DIR is set.
-function skillInstallPath(env: Record<string, string | undefined>): string | undefined {
+// Exported so the `[boom] skill_on_sync` behavior can (re)install to the same path.
+export function skillInstallPath(env: Record<string, string | undefined>): string | undefined {
   const configDir = env.CLAUDE_CONFIG_DIR ?? (env.HOME ? join(env.HOME, ".claude") : undefined);
   return configDir ? join(configDir, "skills", "boom", "SKILL.md") : undefined;
 }

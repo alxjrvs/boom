@@ -39,7 +39,9 @@ async function ensureParentDir(dir: string, mode: LinkMode, ctx: ReconcileCtx): 
   return true;
 }
 
-async function applyLink(
+// Exported so the `launchd` resource can reuse the exact journaled link discipline (skip vs
+// overwrite, undo-before-create) for placing its plist, then layer launchctl on top.
+export async function applyLink(
   src: string,
   dst: string,
   disp: string,

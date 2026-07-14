@@ -1,6 +1,6 @@
 {
   "name": "boom",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "description": "BoomTube — a declarative machine reconciler (executable: boom). Converge your machine from a declarative boomfile.toml — dotfiles, packages, and tools (sync/verify) with drift detection and rollback — then open portals to your code.",
   "type": "module",
   "private": true,

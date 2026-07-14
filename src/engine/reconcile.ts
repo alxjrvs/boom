@@ -13,6 +13,7 @@ import { acquireLock } from "../lib/lock.ts";
 import { REPORT_SCHEMA_VERSION, Reporter } from "../lib/reporter.ts";
 import { displace, Journal, newRunId, pruneRuns, readRun } from "./journal.ts";
 import { finalizeResources, reconcileSection } from "./registry.ts";
+import { applyBoomSettings } from "./settings.ts";
 import { backupsDir, type ManifestEntry, readManifest, writeManifest } from "./state.ts";
 import { syncConfigRepo } from "./sync.ts";
 import type { LinkMode, ReconcileCtx, Verb } from "./types.ts";
@@ -224,6 +225,18 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
       await writeManifest(ctx.env, only ? mergeManifest(priorManifest, rctx.declared) : rctx.declared);
     } else if (verb === "uninstall" && !dryRun) {
       await writeManifest(ctx.env, []); // uninstall clears the manifest
+    }
+
+    // The top-level `[boom]` table: machine-global self-wiring (skill refresh, scheduled
+    // timers, upgrade check) folded into the reconcile. Skipped for a `--only` scoped run —
+    // it targets named sections, and these global behaviors aren't a section. Guarded like a
+    // resource: an unexpected throw becomes a reported failure, never an unwound run.
+    if (!only) {
+      try {
+        await applyBoomSettings(config.boom, rctx);
+      } catch (e) {
+        report.fail(`boom settings: ${(e as Error).message}`);
+      }
     }
 
     // End-of-run finalize hooks (each self-gates): the seam where a resource acts on its own

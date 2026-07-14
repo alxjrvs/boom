@@ -100,19 +100,43 @@ ahead-of-upstream) — `boom source push` or `boom source reset` first, then re-
 
 `boomfile.toml` is a TOML document validated against a schema (`src/config/schema.ts`,
 valibot). It is grouped into `[[section]]`s; within a section, resources run in a
-fixed phase order: `link → copy → glob → packages (brewfile/mise) → run → hook`.
-Resources:
+fixed phase order: `link → copy → glob → dir → packages (brewfile/mise) → osx_default →
+launchd → run → check → hook`. Resources:
 
 - `link` / `copy` `{ src, dst, mode? }`, `glob { pattern, into }`
-- `brewfile = "FILE"`, `mise = true`
+- `dir = [{ path, mode?, manage? }]` — ensure a standalone directory exists (declarative
+  `mkdir -p`/`chmod`); `manage = true` removes it on uninstall *only if empty*
+- `brewfile = "FILE"`, `mise = true`, `osx_default = [{ domain, key, type, value }]`
+- `launchd = [{ src, dst? }]` — link a macOS LaunchAgent plist into
+  `~/Library/LaunchAgents` and own its launchctl lifecycle (`load -w` on sync, `unload` on
+  uninstall); darwin-only, `dst` defaults to `~/Library/LaunchAgents/<basename(src)>`
 - `run = [{ on = "sync"|"verify"|"uninstall", cmd, timeout? }]` — the inline imperative
   escape; `timeout` (seconds) caps a step's wall-clock so a hung command can't block reconcile
+- `check = [{ file, present?, absent?, message?, missing_file? }]` — verify-time content
+  assertions: every `present` regex must match the file and every `absent` must not, folded
+  into `boom verify`'s exit code + JSON report (the declarative form of a `grep`-in-a-`run`)
 - `hook = [{ name, with? }]` — load `hooks/<name>.ts`, the TS resource-type extension
 
 A section may carry `when = { os, host, profile }` to gate by machine; overlay
 files `boomfile.<os|host|profile>.toml` are merged onto the base. `--profile`
 (repeatable) activates named profiles; os/host auto-match (overridable via
 `BOOM_OS`/`BOOM_HOST`).
+
+### `[boom]` — machine-global self-wiring
+
+A single top-level `[boom]` table folds boom-invoking-boom behaviors into the reconcile
+boom already runs, so a consumer stops hand-rolling `run`/plist boilerplate for them. Every
+field is opt-in; an absent (or all-off) table changes nothing. Applied once per run after
+the sections (`src/engine/settings.ts`), verb-aware (sync installs/refreshes, verify reports
+drift, uninstall tears the timers down):
+
+- `skill_on_sync = true` — regenerate `~/.claude/skills/boom/SKILL.md` from the running
+  binary each sync, so the self-describing skill can't lag a `boom upgrade`.
+- `upgrade_check_on_sync = true` / `upgrade_auto_on_sync = true` — after a sync, warn when a
+  newer release ships (offline-safe, never fails the sync), or actually self-upgrade.
+- `verify_schedule = "15m"` / `code_fetch_schedule = "15m"` — install/refresh a launchd timer
+  (macOS-only) that runs `boom verify` / `boom code fetch` on the interval, so drift is caught
+  and `origin/HEAD` stays warm for agent worktree cuts without a hand-authored plist.
 
 ### Hooks = the resource-type extension contract
 

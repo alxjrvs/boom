@@ -104,7 +104,7 @@ cmd>` (it wraps the server in `op run --env-file` so secrets resolve from `op://
 
 Your dotfiles repo's config is a typed, validated TOML document, grouped into
 sections that run in phase order
-(`link → copy → glob → packages → osx_default → run → hook`):
+(`link → copy → glob → dir → packages → osx_default → launchd → run → check → hook`):
 
 ```toml
 [[section]]
@@ -114,6 +114,7 @@ link = [
   { src = "ssh/config", dst = "~/.ssh/config", mode = "600" },
 ]
 glob = [{ pattern = "zsh/[0-9]*.zsh", into = "~/.config/zsh/" }]
+dir  = [{ path = "~/.ssh/cm", mode = "700" }]   # ensure a directory exists (no file to place)
 
 [[section]]
 name = "Packages"
@@ -123,7 +124,13 @@ mise = true
 [[section]]
 name = "macOS only"
 when = { os = "darwin" }          # gate by os / host / profile
+launchd = [{ src = "launchd/com.me.agent.plist" }]   # link + launchctl load -w, idempotent
 run  = [{ on = "sync", cmd = "defaults write com.apple.dock autohide -bool true" }]
+
+[[section]]
+name = "Guardrails"
+# Verify-time content assertions — legible where a grep-in-a-run would be escaping-heavy.
+check = [{ file = "~/.claude/settings.json", absent = ["osxkeychain"], message = "cached-PAT regression" }]
 
 [[section]]
 name = "Secrets"
@@ -135,6 +142,19 @@ Imperative escapes are `run` steps (a shell command) or a **hook** — a
 `HookApi`. That's the extension point for anything the declarative resources can't
 express. Multi-machine setups gate sections with `when`, or layer overlay files
 (`boomfile.<os|host|profile>.toml`).
+
+A top-level `[boom]` table folds boom's own self-wiring into the reconcile — refresh the
+Claude skill, nudge/auto-upgrade when a newer boom ships, and manage scheduled
+`boom verify` / `boom code fetch` launchd timers (macOS) — so you stop hand-rolling those
+as `run`/plist boilerplate:
+
+```toml
+[boom]
+skill_on_sync         = true     # regenerate ~/.claude/skills/boom/SKILL.md each sync
+upgrade_check_on_sync = true     # warn when a newer boom release is available (offline-safe)
+verify_schedule       = "15m"    # launchd timer: boom verify every 15m (macOS-only)
+code_fetch_schedule   = "15m"    # launchd timer: git-fetch every code repo (keep origin warm)
+```
 
 ## Code portals
 
