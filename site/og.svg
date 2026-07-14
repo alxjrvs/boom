@@ -88,6 +88,6 @@
     </g>
     <!-- tagline -->
     <text x="6" y="530" font-family="'Trebuchet MS', Verdana, sans-serif" font-weight="700"
-      font-size="30" fill="#f3e9cf">The one-binary workspace manager · <tspan fill="#22d3ff" font-family="monospace">boom</tspan></text>
+      font-size="30" fill="#f3e9cf">The one-binary machine reconciler · <tspan fill="#22d3ff" font-family="monospace">boom</tspan></text>
   </g>
 </svg>

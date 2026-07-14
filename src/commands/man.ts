@@ -32,7 +32,7 @@ export function manPage(version: string): string {
     .join("\n");
   return `.TH BOOM 1 "" "boom ${version}" "boom manual"
 .SH NAME
-boom \\- a workspace manager (provision a machine + open portals to your code)
+boom \\- a declarative machine reconciler (converge a machine + open portals to your code)
 .SH SYNOPSIS
 .B boom
 .I command

@@ -33,7 +33,9 @@ test("the man page has no dangling SEE ALSO refs and no stale framing", () => {
   // boom-verify(1) / boom-source(1) man pages were never shipped — don't advertise them.
   expect(m).not.toContain("boom-verify");
   expect(m).not.toContain("boom-source");
-  // The rebrand: "dotfiles + workspace engine" → "workspace manager".
+  // The rebrand history: "dotfiles + workspace engine" → "workspace manager" →
+  // "declarative machine reconciler". Both retired framings must stay out of the man page.
   expect(m).not.toContain("dotfiles + workspace engine");
+  expect(m).not.toContain("workspace manager");
   expect(m).toContain("github.com/alxjrvs/boom");
 });

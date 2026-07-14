@@ -32,7 +32,8 @@ export const routes = buildRouteMap({
     skill: skillCommand,
   },
   docs: {
-    brief: "boom — a workspace manager. Provision your machine and code workspaces from a boomfile.toml.",
+    brief:
+      "boom — a declarative machine reconciler. Converge your machine from a boomfile.toml, then open portals to your code.",
   },
 });
 

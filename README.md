@@ -1,11 +1,12 @@
 # BoomTube
 
-**BoomTube** is a **workspace manager** — it provisions your machine and your
-code workspaces fast, then gets out of your way so you can work. Its executable,
-**`boom`**, reconciles your machine from a declarative `boomfile.toml` —
-`sync` / `verify` — rolls back any change, and opens portals to your
-code workspaces. One self-contained binary, compiled from **TypeScript on
-[Bun](https://bun.com)**, with zero runtime dependencies on your machine.
+**BoomTube** is a **declarative machine reconciler** — it converges your machine
+to a state you declare once: dotfiles, packages, and tools from a single
+`boomfile.toml`, with drift detection and rollback. Its executable, **`boom`**,
+runs the reconcile loop — `sync` / `verify` — journals every change so it can be
+rolled back, then gets out of your way and opens portals to your code. One
+self-contained binary, compiled from **TypeScript on [Bun](https://bun.com)**,
+with zero runtime dependencies on your machine.
 
 Named for Jack Kirby's **Boom Tube** (the Fourth World portal): boom opens a
 portal to your machine's ideal state, and to your code.

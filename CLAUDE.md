@@ -2,10 +2,11 @@
 
 ## What this is
 
-**BoomTube** is a **workspace manager** — a single self-contained binary (the
-executable is **`boom`**), compiled from **TypeScript on Bun**, that provisions a
-machine from a declarative `boomfile.toml` and opens portals to your code
-workspaces: reconcile fast, get out of the way, get to work. It is a rewrite of
+**BoomTube** is a **declarative machine reconciler** — a single self-contained binary (the
+executable is **`boom`**), compiled from **TypeScript on Bun**, that converges a
+machine to a declared state (dotfiles, packages, tools) from a declarative
+`boomfile.toml`, with drift detection and rollback, then opens portals to your
+code: reconcile fast, get out of the way, get to work. It is a rewrite of
 the original bash engine (now removed); read [`SPEC.md`](SPEC.md) for the design
 of record.
 

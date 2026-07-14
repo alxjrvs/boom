@@ -1,11 +1,11 @@
 # BoomTube — design spec
 
-**BoomTube** is a **workspace manager**: a single self-contained binary
-(executable: **`boom`**), compiled from **TypeScript on Bun**, that reconciles a
-machine from a declarative `boomfile.toml` and opens portals to code workspaces —
-provisioning your workspace fast, then getting out of your way so you can work.
+**BoomTube** is a **declarative machine reconciler**: a single self-contained binary
+(executable: **`boom`**), compiled from **TypeScript on Bun**, that converges a
+machine to a declared state — dotfiles, packages, and tools from one
+`boomfile.toml`, with drift detection and rollback — then opens portals to your code.
 Named for Kirby's **Boom Tube** — the Fourth World's instant conduit between worlds —
-it opens portals to your machine's ideal state, and to your code.
+it opens a portal to your machine's ideal state, and to your code.
 
 It began as a bash prototype (extracted from `alxjrvs/dotFiles`) and was rewritten
 to TypeScript; this document is the design of record for that engine.

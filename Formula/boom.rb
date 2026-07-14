@@ -4,7 +4,7 @@
 #   brew install boom
 # sha256 values are filled in by the release workflow when a tag is cut.
 class Boom < Formula
-  desc "Installable dotfiles + workspace engine — apply/verify/fix from boomfile.toml"
+  desc "Declarative machine reconciler — sync/verify dotfiles, packages, and tools from boomfile.toml"
   homepage "https://github.com/alxjrvs/boom"
   version "0.12.0"
 

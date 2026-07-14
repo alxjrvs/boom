@@ -99,7 +99,7 @@ const head = (o: { title: string; desc: string; slug: string; ogType?: string })
 <meta property="og:image" content="${SITE_URL}/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="BOOMTUBE — a Jack Kirby boom-tube portal beside the wordmark; the one-binary workspace manager, boom.">
+<meta property="og:image:alt" content="BOOMTUBE — a Jack Kirby boom-tube portal beside the wordmark; the one-binary declarative machine reconciler, boom.">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="${t}">
 <meta name="twitter:description" content="${d}">
