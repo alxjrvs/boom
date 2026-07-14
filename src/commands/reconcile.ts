@@ -105,18 +105,18 @@ export const verifyCommand = buildCommand<VerifyFlags, [], BoomContext>({
   },
 });
 
-export const repairCommand = buildCommand<OnlyFlags & { dryRun?: boolean }, [], BoomContext>({
-  docs: { brief: "Repair drift (sync, overwriting conflicts)" },
+export const fixCommand = buildCommand<OnlyFlags & { dryRun?: boolean }, [], BoomContext>({
+  docs: { brief: "Fix drift (sync, overwriting conflicts)" },
   parameters: {
     flags: {
-      dryRun: { kind: "boolean", optional: true, brief: "Show what would be repaired; change nothing" },
+      dryRun: { kind: "boolean", optional: true, brief: "Show what would be fixed; change nothing" },
       only: onlyFlag,
       profile: profileFlag,
       json: jsonFlag,
     },
   },
   async func(flags) {
-    this.process.exitCode = await reconcile("repair", this, {
+    this.process.exitCode = await reconcile("fix", this, {
       only: flags.only,
       dryRun: flags.dryRun,
       json: flags.json,

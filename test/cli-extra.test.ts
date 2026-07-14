@@ -35,7 +35,7 @@ test("command list (derived from the route map) is unique and includes the core 
   const names = commandNames();
   expect(new Set(names).size).toBe(names.length);
   // mcp is a real route now, so it must appear in the derived list like any other.
-  for (const v of ["verify", "repair", "uninstall", "source", "mcp", "doctor", "validate"]) {
+  for (const v of ["verify", "fix", "uninstall", "source", "mcp", "doctor", "validate"]) {
     expect(names).toContain(v);
   }
   expect(names).not.toContain("watchtower");

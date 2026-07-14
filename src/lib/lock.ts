@@ -1,4 +1,4 @@
-// A cross-process lock for mutating reconcile runs. Two concurrent `boom sync`/`repair`
+// A cross-process lock for mutating reconcile runs. Two concurrent `boom sync`/`fix`
 // runs would race on the same filesystem destinations and, worse, clobber each other's
 // manifest (writeManifest is a full DELETE+reinsert) — the slower run silently drops the
 // other's ownership records, so those links later look orphaned and get reaped. This is

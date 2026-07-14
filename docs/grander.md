@@ -34,7 +34,7 @@ manifest. (`src/engine/journal.ts`, `state.ts`, `rollback.ts`.)
 
 ### 3. Hook contract → the resource-type API → **M2**
 The hook is the public extension point: `hooks/<name>.ts` modules exporting
-`sync`/`verify`/`repair` that receive a typed `HookApi`. Built-in resources
+`sync`/`verify`/`fix` that receive a typed `HookApi`. Built-in resources
 (link/copy/glob/run/packages) implement the same verb contract in a registry
 (`src/engine/registry.ts`, `resources/`). No JSON-config manifest — the *config*
 is TOML data, but the *extension* contract is typed TypeScript.
@@ -46,7 +46,7 @@ activates named profiles, os/host auto-match. (`src/config/profile.ts`.)
 
 ## What stayed true
 
-"One model, two surfaces" survived the rewrite intact: `sync`/`verify`/`repair`/
+"One model, two surfaces" survived the rewrite intact: `sync`/`verify`/`fix`/
 `uninstall` are still one verb-parameterized loop (`src/engine/reconcile.ts`),
 and subcommands are still discovered, never a hardcoded dispatch table — just in
 TypeScript now.

@@ -154,7 +154,7 @@ const renderGuide = (): string => {
 <head>
 ${head({
     title: "Guide — boom",
-    desc: "How to use boom: install, bootstrap a machine, the reconcile loop (sync / verify / repair, and rollback), the boomfile.toml reference, config-repo git, code portals, and housekeeping.",
+    desc: "How to use boom: install, bootstrap a machine, the reconcile loop (sync / verify / fix, and rollback), the boomfile.toml reference, config-repo git, code portals, and housekeeping.",
     slug: "guide",
   })}
 </head>

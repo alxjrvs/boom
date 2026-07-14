@@ -568,7 +568,7 @@ footer .credits strong { color: var(--gold); }
 .cnode-title { font-family: var(--display); text-transform: uppercase; letter-spacing: .03em; font-size: clamp(1.1rem, 3vw, 1.5rem); margin: .55rem 0 .1rem; }
 .cnode-sub { margin: 0; font-size: clamp(.78rem, 2vw, .9rem); }
 .cnode code { font-size: .92em; }
-/* the connector carries the two-way loop: forward sync/repair, return verify/rollback */
+/* the connector carries the two-way loop: forward sync/fix, return verify/rollback */
 .cconn { flex: 0 0 auto; display: flex; flex-direction: column; gap: .35rem; align-items: center;
   font-family: var(--display); text-transform: uppercase; letter-spacing: .04em;
   font-size: clamp(.72rem, 1.8vw, .98rem); line-height: 1; white-space: nowrap; }
