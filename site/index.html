@@ -47,7 +47,7 @@
     --maxw:1180px;
     /* bold comic-ink system: heavy strokes, hard offsets, no hairlines */
     --rad:6px; --sh:6px 6px 0 rgba(0,0,0,.6); --sh-sm:4px 4px 0 rgba(0,0,0,.55);
-    --panel:#15121F; --panel-2:#1D1934;
+    --panel:#15121F; --panel-2:#1D1934; --panel-line:#2E2748;
     --panel-text:#ECE8F7; --panel-muted:#B4ADCB;
     --s-sec:#FF5FA6; --s-key:#4DEFFF; --s-str:#FFD066; --s-num:#4EE6A0; --s-cmt:#9A92B6; --s-pun:#948CAE;
     --on:var(--text); /* text color on the current band (set per <section>) */
@@ -56,7 +56,7 @@
     --bg:#E9E4F4; --surface:#F2EEFB; --surface-2:#FBFAFE;
     --line:#D3CBE6; --line-2:#C4BADF;
     --text:#191230; --muted:#4C4368; --faint:#6B6386;
-    --panel:#FAF8FE; --panel-2:#F2EEFB;
+    --panel:#FAF8FE; --panel-2:#F2EEFB; --panel-line:#D8CFEC;
     --panel-text:#191230; --panel-muted:#4C4368;
     --s-sec:#C21A63; --s-key:#0C6E86; --s-str:#8F5606; --s-num:#177A42; --s-cmt:#6A6088; --s-pun:#635B80;
     --sh:6px 6px 0 rgba(25,18,48,.2); --sh-sm:4px 4px 0 rgba(25,18,48,.18);
@@ -168,7 +168,7 @@
 
   /* ---- section scaffold: full-bleed colored BANDS + bold accent underbar ---- */
   /* full-bleed BOLD brand-color bands, flush, black ink gutter between them */
-  main>section{position:relative;padding:58px 0;background:transparent;}
+  main>section{position:relative;padding:58px 0;background:transparent;scroll-margin-top:72px;}
   main>section::before{content:"";position:absolute;inset:0 auto 0 50%;transform:translateX(-50%);width:100vw;
     background:radial-gradient(circle, color-mix(in srgb, var(--on) 14%, transparent) 1.4px, transparent 1.8px) 0 0/13px 13px, var(--band,transparent);
     border-top:6px solid var(--ink);z-index:-1;}
@@ -204,19 +204,13 @@
   /* the wormhole animates individual glyphs on scroll; hint the compositor */
   .bigword .l1,.bigword .l2,.bigword .l3,.bigword .l4,.bigbang,
   .logo .l1,.logo .l2,.logo .l3,.logo .l4,.bang{will-change:transform,opacity;}
-  .stamp{position:absolute;z-index:3;}
-  .cover .n1{top:2%;left:1%;} .cover .n2{bottom:2%;right:1%;} .cover .badge{top:-4%;right:3%;}
   .coverfoot{margin-top:26px;}
-  .tagline{margin:0;font-size:clamp(24px,4vw,46px);line-height:.92;}
-  .tagline .in{color:var(--cyan);} .tagline .out{color:var(--magenta);}
-  :root[data-theme="light"] .tagline .in{color:#0C6F8B;} :root[data-theme="light"] .tagline .out{color:#C01A5B;}
   .coverfoot .lede{max-width:60ch;margin:14px 0 0;font-size:17px;color:var(--text);line-height:1.6;}
   .coverfoot .lede b{color:var(--text);} .coverfoot .lede .mono{color:var(--cyan);font-weight:600;}
   :root[data-theme="light"] .coverfoot .lede .mono{color:#0C6F8B;}
   .cta{display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin-top:24px;}
   @media(max-width:640px){
     .bigword{font-size:clamp(66px,20vw,120px);}
-    .cover .n1,.cover .n2,.cover .badge{position:static;display:inline-flex;margin:10px 6px 0 0;}
     .vstamp{position:static;transform:rotate(-4deg);margin:0 auto 6px;}
   }
 
@@ -237,13 +231,6 @@
   .wm-ink .a{color:var(--magenta);} .wm-ink .b{color:var(--cyan);} .wm-ink .c{color:var(--violet);} .wm-ink .d{color:var(--solar);}
   :root[data-theme="light"] .wm-ink .a{color:#C01A5B;} :root[data-theme="light"] .wm-ink .b{color:#0C6F8B;}
   :root[data-theme="light"] .wm-ink .c{color:#5B2BD0;} :root[data-theme="light"] .wm-ink .d{color:#B5820A;}
-  /* the giant hero lockup: BOOM! over "TUBE" = BoomTube. TUBE is NOT part of the scroll-morph —
-     it stays in the page flow and fades out as you scroll (see the morph script). */
-  .bwtube{margin:.03em 0 0;font-family:var(--font-display);font-weight:800;text-transform:uppercase;
-    font-size:clamp(36px,9.5vw,116px);line-height:.8;letter-spacing:.02em;color:var(--text);
-    text-shadow:6px 6px 0 #2f2160;will-change:opacity;}
-  :root[data-theme="light"] .bwtube{text-shadow:6px 6px 0 rgba(25,18,48,.18);}
-
   .equation{display:flex;flex-wrap:nowrap;align-items:stretch;gap:10px;margin:0;}
   /* file/out cells: compact icon-over-label, kept as a horizontal 3-step flow in the right column */
   .eqcell{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;
@@ -393,13 +380,22 @@
 
   @media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto;}}
 </style>
+<!-- Progressive enhancement: the nav wordmark and bar background are revealed by the
+     scroll-morph script. With JS off, pin them open (same pins as the reduced-motion
+     block) so the header stays legible and the brand link isn't invisible. -->
+<noscript><style>
+  header.bar{--p:1;}
+  .bar .logo{opacity:1;}
+  .bigword .l1,.bigword .l2,.bigword .l3,.bigword .l4,.bigbang,
+  .logo .l1,.logo .l2,.logo .l3,.logo .l4,.bang{transform:none!important;opacity:1!important;}
+</style></noscript>
 </head>
 <body>
 <a class="skip" href="#top">Skip to content</a>
 
 <header class="bar">
   <div class="wrap bar-in">
-    <a class="brand" href="#top" aria-label="boom — home">
+    <a class="brand" href="#top" aria-label="BoomTube — home">
       <span class="logo" aria-hidden="true"><span class="l1">B</span><span class="l2">O</span><span class="l3">O</span><span class="l4">M</span><span class="bang"><span class="stem"></span><span class="hdot"><canvas class="hrays" data-mark="fuzz" width="240" height="240"></canvas><canvas data-mark="marktrans" width="72" height="72"></canvas></span></span></span>
     </a>
     <nav class="bar-nav" aria-label="Primary">
@@ -428,7 +424,7 @@
       <div class="herobody">
         <div class="herotext">
           <p class="definer">A declarative machine reconciler</p>
-          <p class="lede">Declare your dotfiles, packages, macOS defaults, and secrets in one file. BoomTube makes the real machine match — same fixed order, every run — and journals what it changed, so <b>rollback</b> can undo it. One binary, zero runtime deps. Nothing else to install.</p>
+          <p class="lede">Declare your dotfiles, packages, macOS defaults, and secrets in one file. BoomTube makes the real machine match — same fixed order, every run — and journals what it changed, so <b>rollback</b> can undo it. One binary, zero runtime deps.</p>
         </div>
         <div class="equation" role="img" aria-label="A boomfile.toml goes in. BoomTube reconciles. Your whole machine comes out.">
           <span class="eqcell file" aria-hidden="true">
@@ -481,7 +477,7 @@
           <canvas class="bst" data-mark="burst-big" width="640" height="640" style="width:230px;height:230px" aria-hidden="true"></canvas>
           <canvas class="mk" data-mark="master" width="540" height="540" style="width:180px;height:180px" aria-hidden="true"></canvas>
         </div>
-        <span class="sub">sync · verify · repair · rollback</span>
+        <span class="sub">sync · verify · rollback</span>
       </div>
       <div class="arrow" aria-hidden="true">→</div>
       <div class="panel flowp lead-g">
@@ -492,10 +488,10 @@
       </div>
     </div>
 
-    <div class="panel readout lead-c" aria-label="Example boom source run">
+    <div class="panel readout lead-c" role="figure" aria-label="Example boom source run">
       <div class="rhead">boom source — live readout</div>
       <pre><span class="t-p">➜</span> <span class="t-c">boom source</span>
-<span class="t-d">  syncing from github:alxjrvs/dotfiles (up to date)</span>
+<span class="t-d">  syncing from alxjrvs/dotfiles (up to date)</span>
 <span class="t-ok">  ✓</span> Shell + git   <span class="t-d">6 linked</span>
 <span class="t-ok">  ✓</span> Packages      <span class="t-d">brew 12 ok · mise 4 ok</span>
 <span class="t-w">  !</span> macOS only    <span class="t-d">1 default changed</span>
@@ -533,8 +529,8 @@
   <!-- THE LOOP -->
   <section id="loop" style="--band:var(--violet);--on:#fff">
     <div class="sec-head">
-      <h2 class="disp">Four verbs — one loop!</h2>
-      <p class="sub"><b>sync</b>, <b>verify</b>, <b>repair</b>, and <b>uninstall</b> aren't four scripts. They're the same walk over the same resources — only the action at each step changes. Teach BoomTube a new resource type once, and every verb already knows what to do with it.</p>
+      <h2 class="disp">Three verbs — one loop!</h2>
+      <p class="sub"><b>sync</b>, <b>verify</b>, and <b>uninstall</b> aren't three scripts. They're the same walk over the same resources — only the action at each step changes. Teach BoomTube a new resource type once, and every verb already knows what to do with it.</p>
     </div>
     <div class="loopgrid">
       <div class="panel lead-v">
@@ -542,9 +538,10 @@
         <div class="vlist">
           <div class="vrow"><b>sync</b> makes reality match the file</div>
           <div class="vrow"><b>verify</b> reports drift — changes nothing</div>
-          <div class="vrow"><b>repair</b> forces drift back into line</div>
           <div class="vrow"><b>uninstall</b> tears down what BoomTube placed</div>
+          <div class="vrow"><b>--fix</b> not a verb — a sync that overwrites drift instead of skipping it</div>
         </div>
+        <p style="margin:15px 0 0;font-size:13.5px">You run them as <code>boom source</code> (bare, or <code>source sync</code>), <code>boom verify</code>, and <code>boom uninstall</code>.</p>
       </div>
       <div class="panel lead-v">
         <h3>Every run walks this order</h3>
@@ -559,7 +556,7 @@
         </div>
         <div class="balloon">
           <h4>Can't say it declaratively? Write a hook.</h4>
-          <p>A <code>hooks/&lt;name&gt;.ts</code> exports <code>sync</code>/<code>verify</code>/<code>repair</code> on a typed HookApi — the exact contract the built-in resources run on. It's the escape hatch, and it plays by the same rules.</p>
+          <p>A <code>hooks/&lt;name&gt;.ts</code> exports <code>sync</code>/<code>verify</code>/<code>uninstall</code> on a typed HookApi — the exact contract the built-in resources run on. It's the escape hatch, and it plays by the same rules.</p>
         </div>
       </div>
     </div>
