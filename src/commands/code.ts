@@ -17,6 +17,7 @@ import {
   resolveCodeDir,
 } from "../engine/code.ts";
 import { cleanEnv, hasCommand, runArgv } from "../lib/proc.ts";
+import { bandsReporter } from "../lib/reporter.ts";
 import { str } from "./flags.ts";
 
 const initCommand = buildCommand<Record<never, never>, [string?], BoomContext>({
@@ -54,23 +55,25 @@ const claudeCommand = buildCommand<{ dryRun?: boolean }, [], BoomContext>({
     }
     const { links, collisions } = await planAgentsFarm(root);
     const farm = agentsFarmDir(this.env);
-    this.process.stdout.write(`==> boom code claude  (${root} → ${farm})\n`);
-    for (const { name, target } of links) this.process.stdout.write(`  • ${name} → ${rel(root, target)}\n`);
+    const report = bandsReporter(this.process, this.env, "code", { setup: "OPENING THE PORTAL…" });
+    report.header(`agent farm (${root} → ${farm})`);
+    for (const { name, target } of links) report.ok(`${name} → ${rel(root, target)}`);
     for (const { name, target } of collisions)
-      this.process.stdout.write(`  ! ${name} skipped (name already taken) → ${rel(root, target)}\n`);
-    this.process.stdout.write(
-      `  ${links.length} repo(s)${collisions.length ? `, ${collisions.length} collision(s)` : ""}\n`,
-    );
+      report.warn(`${name} skipped (name already taken) → ${rel(root, target)}`);
 
     if (flags.dryRun) {
-      this.process.stdout.write(`  [plan] would symlink the above into ${farm} and run: claude agents\n`);
+      report.plan(`would symlink the above into ${farm} and run: claude agents`);
+      report.finish({ ok: `${links.length} repo(s) planned` });
       return;
     }
     await materializeAgentsFarm(this.env, links);
     if (!hasCommand("claude", this.env)) {
-      this.process.stdout.write(`  farm ready — claude not found; run \`claude agents\` in ${farm}\n`);
+      report.warn(`farm ready — claude not found; run \`claude agents\` in ${farm}`);
+      report.finish({ ok: "farm ready", warn: (w) => `${w} note(s)` });
       return;
     }
+    // Verdict before handing the terminal to the interactive session.
+    report.finish({ ok: `${links.length} repo(s) linked — launching claude agents` });
     await Bun.spawn(["claude", "agents"], {
       cwd: farm,
       env: cleanEnv(this.env),
@@ -96,12 +99,19 @@ const cmuxCommand = buildCommand<{ dryRun?: boolean }, [], BoomContext>({
       return;
     }
     const repos = await findRepos(root);
-    this.process.stdout.write(`==> boom code cmux  (${root})\n`);
+    // verbose (stream, no krackle): the loop spawns `cmux open` with inherited stdout while the
+    // band is open, so a dense-mode krackle line would be corrupted by the child's output when
+    // closeBand's \r rewrite fires. Streaming avoids the in-place rewrite entirely.
+    const report = bandsReporter(this.process, this.env, "code", {
+      verbose: true,
+      setup: "OPENING WORKSPACES…",
+    });
+    report.header(`cmux workspaces (${root})`);
     const live = !flags.dryRun && hasCommand("cmux", this.env);
     for (const repo of repos) {
       if (!live) {
         const why = flags.dryRun ? "plan" : "cmux not found";
-        this.process.stdout.write(`  • ${rel(root, repo)} → [${why}] cmux workspace\n`);
+        report.plan(`${rel(root, repo)} → [${why}] cmux workspace`);
         continue;
       }
       await Bun.spawn(["cmux", "open", repo], {
@@ -110,9 +120,9 @@ const cmuxCommand = buildCommand<{ dryRun?: boolean }, [], BoomContext>({
         stdout: "inherit",
         stderr: "inherit",
       }).exited;
-      this.process.stdout.write(`  • ${rel(root, repo)} → launched\n`);
+      report.ok(`${rel(root, repo)} → launched`);
     }
-    this.process.stdout.write(`  ${repos.length} repo(s)\n`);
+    report.finish({ ok: `${repos.length} repo(s)` });
   },
 });
 
@@ -133,11 +143,14 @@ const fetchCommand = buildCommand<{ dryRun?: boolean }, [], BoomContext>({
       return;
     }
     const repos = await findRepos(root);
-    this.process.stdout.write(`==> boom code fetch  (${root})\n`);
+    const report = bandsReporter(this.process, this.env, "code fetch", {
+      setup: "FANNING OUT ACROSS THE CODE DIR…",
+    });
+    report.header(`git fetch (${root})`);
     let failed = 0;
     for (const repo of repos) {
       if (flags.dryRun) {
-        this.process.stdout.write(`  • ${rel(root, repo)} → [plan] git fetch\n`);
+        report.plan(`${rel(root, repo)} → git fetch`);
         continue;
       }
       // --quiet + --no-tags: keep the branch refs current without pulling every tag or
@@ -146,16 +159,17 @@ const fetchCommand = buildCommand<{ dryRun?: boolean }, [], BoomContext>({
         cwd: repo,
         quietStdout: true,
       });
-      if (code === 0) this.process.stdout.write(`  ✓ ${rel(root, repo)}\n`);
+      // A failed fetch (offline, auth) is tolerated — a warm-cache courtesy, not a gate — so it's
+      // a warning, not a failure; the verdict stays COMPLETE unless every repo fails (below).
+      if (code === 0) report.ok(rel(root, repo));
       else {
         failed++;
-        this.process.stdout.write(`  ✗ ${rel(root, repo)} (git fetch exit ${code})\n`);
+        report.warn(`${rel(root, repo)} (git fetch exit ${code})`);
       }
     }
-    this.process.stdout.write(`  ${repos.length} repo(s)${failed ? `, ${failed} failed` : ""}\n`);
-    // A failed fetch (offline, auth) shouldn't fail the whole run — this is a warm-cache
-    // courtesy, not a gate. Non-zero only if every repo failed (a real, systemic problem).
-    if (repos.length > 0 && failed === repos.length) this.process.exitCode = 1;
+    report.finish({ ok: `${repos.length} repo(s) fetched`, warn: (w) => `${w} repo(s) failed` });
+    // Non-zero only if every repo failed (a real, systemic problem), overriding finish's warn→2.
+    this.process.exitCode = repos.length > 0 && failed === repos.length ? 1 : 0;
   },
 });
 

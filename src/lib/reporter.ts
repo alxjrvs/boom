@@ -4,16 +4,21 @@
 //
 // Two human presentations share this one tally + record stream:
 //   • the classic surface (`==> Header`, indented ✓/→/✗ lines) — every non-reconcile command;
-//   • the "cosmic bands" surface (bands mode) — the reconcile loop (source/verify/uninstall),
-//     matching the site's design: a permanent `▎` bar per section in a cycling brand color, a
-//     trailing status glyph (a Kirby-krackle burst while working → ✓ done / ! attention), a grey
-//     setup band to open, and a `COMMAND...COMPLETE!` / `...FAILED!` verdict band to close. Quiet
-//     (the default) shows only bands + anything needing attention; --verbose shows every line.
-import { BAND_CYCLE, COSMIC, type ColorName, paint, paintHex } from "./color.ts";
+//   • the "cosmic bands" surface (bands mode) — every user-facing command, matching the site's
+//     design: a permanent `▎` bar per section in a cycling brand color, a trailing status glyph
+//     (a Kirby-krackle burst while working → ✓ done / ! attention), a grey setup band to open, and
+//     a `COMMAND...COMPLETE!` / `...FAILED!` verdict band to close. The default is *dense*: each
+//     section's marked band is followed by its detail lines (skips excepted). --verbose instead
+//     streams live — showing the held-back skips and the raw subprocess chatter (brew/mise/git).
+import { BAND_CYCLE, COSMIC, type ColorName, colorEnabled, paint, paintHex } from "./color.ts";
 
 interface Stream {
   write(s: string): void;
 }
+
+// stdout may carry isTTY (a real terminal) — bands-mode quiet uses it to draw a live krackle line
+// and rewrite it in place. Absent on the test/JSON fake streams, so those take the plain path.
+type OutStream = Stream & { isTTY?: boolean };
 
 export type ReportLevel = "ok" | "skip" | "warn" | "fail" | "note" | "plan" | "header";
 export interface ReportRecord {
@@ -131,8 +136,9 @@ export class Reporter {
     }
   }
 
-  // Route a leveled line in bands mode: verbose prints live under the (already-printed) band;
-  // quiet buffers it for the band's close; quiet with no open band shows only attention lines.
+  // Route a leveled line in bands mode: --verbose prints it live under the (already-printed) band;
+  // the dense default buffers it for the band's close; with no open band, only attention lines
+  // (warn/fail/plan) print (a stray ok/note without a section has nowhere to nest).
   private bandEmit(rec: ReportRecord): void {
     if (this.verbose) {
       this.writeSub(rec);
@@ -152,7 +158,7 @@ export class Reporter {
     const b = this.band;
     if (!b) return;
     this.band = undefined;
-    if (this.verbose) return; // its header + lines already streamed live; no trailing mark
+    if (this.verbose) return; // --verbose streams the header + lines live; no trailing mark
 
     const failed = this.failures > b.failAt;
     const warned = this.warnings > b.warnAt;
@@ -161,21 +167,23 @@ export class Reporter {
       : warned
         ? this.hx(COSMIC.warn, "!")
         : this.hx(COSMIC.ok, "✓");
-    const line = `${this.hx(b.color, `▎ ${b.label}`)}  ${mark}`;
-    // Interactive quiet drew `▎ LABEL  ✸` already; \r + clear-to-EOL, then the resolved line.
+    // `...` leads into the mark, echoing the verdict band's COMMAND...COMPLETE! motif.
+    const line = `${this.hx(b.color, `▎ ${b.label}...`)}${mark}`;
+    // Interactive drew `▎ LABEL...✸` already; \r + clear-to-EOL, then the resolved line in place.
+    // Non-interactive prints it fresh with a leading blank, so section blocks are separated.
     if (b.krackleShown) this.out.write(`\r\x1b[K${line}\n`);
     else this.out.write(`\n${line}\n`);
 
-    for (const rec of b.buf) {
-      if (this.verbose || rec.level === "warn" || rec.level === "fail" || rec.level === "plan") {
-        this.writeSub(rec);
-      }
-    }
+    // Dense by default: flush the section's detail below its marked band. Skips are the one
+    // exception — steady-state no-op noise, held back for --verbose (which streams instead).
+    for (const rec of b.buf) if (rec.level !== "skip") this.writeSub(rec);
   }
 
   // Draw the closing verdict band and return the exit code, replacing finish()'s summary line in
   // bands mode. Reads the tally (never mutates it), so the 0/2/1 ladder matches the classic path.
-  private verdict(hasWarnTier: boolean): number {
+  // `metaOverride` lets a command state its own outcome (upgrade: "v0.14.0 → v0.15.0") in place of
+  // the auto count; ignored on a failure, where the count (and the ✗ lines above) tell the story.
+  private verdict(hasWarnTier: boolean, metaOverride?: string): number {
     const f = this.failures;
     const w = this.warnings;
     const name = (this.command ?? "").toUpperCase();
@@ -183,11 +191,13 @@ export class Reporter {
     const warned = hasWarnTier && w > 0;
     const color = failed ? COSMIC.crit : warned ? COSMIC.warn : COSMIC.ok;
     const verb = failed ? "FAILED" : "COMPLETE";
-    const meta = failed
+    const autoMeta = failed
       ? `${f} failure(s)${w > 0 ? `, ${w} warning(s)` : ""}`
       : w > 0
         ? `${w} warning(s)`
         : "all clear";
+    const meta = !failed && metaOverride ? metaOverride : autoMeta;
+    // A blank line sets the verdict band off from the last section block.
     this.out.write(`\n${this.hx(color, `▎ ${name}...${verb}!`)}  ${this.hx(COSMIC.dim, meta)}\n`);
     return failed ? 1 : warned ? 2 : 0;
   }
@@ -219,10 +229,10 @@ export class Reporter {
       if (this.verbose) {
         this.out.write(`\n${this.hx(color, `▎ ${s}`)}\n`);
       } else if (this.interactive) {
-        // Live: the permanent bar + a krackle burst where the mark will land. No newline — close
-        // overwrites this exact line with \r. Nothing prints between (quiet buffers; subprocess
-        // output is silenced), so the cursor stays put.
-        this.out.write(`\n${this.hx(color, `▎ ${s}`)}  ${this.hx(COSMIC.solar, "✸")}`);
+        // Live: the permanent bar + a krackle burst where the mark will land, on its own blank-
+        // separated line. No trailing newline — close overwrites this line in place with \r.
+        // Nothing prints between (detail buffers; subprocess output is silenced), so it stays put.
+        this.out.write(`\n${this.hx(color, `▎ ${s}...`)}${this.hx(COSMIC.solar, "✸")}`);
         band.krackleShown = true;
       }
       return;
@@ -319,6 +329,9 @@ export class Reporter {
     ok: string;
     fail?: (failures: number, warnings: number) => string;
     warn?: (warnings: number) => string;
+    // Bands mode only: the verdict band's outcome text on success (e.g. "v0.14.0 → v0.15.0"),
+    // in place of the auto-generated count. Ignored on the classic surface and on failure.
+    meta?: string;
   }): number {
     const f = this.failures;
     const w = this.warnings;
@@ -330,7 +343,7 @@ export class Reporter {
     // classic summary. `msgs.warn` presence marks a warning-tier command (verify), same as below.
     if (this.bands) {
       this.closeBand();
-      return this.verdict(msgs.warn !== undefined);
+      return this.verdict(msgs.warn !== undefined, msgs.meta);
     }
     this.out.write("\n");
     if (f > 0) {
@@ -364,4 +377,25 @@ export class Reporter {
     out.write(`${JSON.stringify(this.envelope(schemaVersion))}\n`);
     return this.failures > 0 ? 1 : hasWarnTier && this.warnings > 0 ? 2 : 0;
   }
+}
+
+// Build a bands-mode Reporter for a command — the cosmic output form (site's design): a grey
+// setup band, marked `▎` section bands with their detail below, and a `COMMAND...COMPLETE!` /
+// `...FAILED!` verdict from finish(). Interactive (TTY + color, non-JSON) enables the live in-place
+// krackle. `verbose` defaults false — the dense-by-default form; a command that streams raw output
+// with no section band to nest under (diff/push stream git verbatim) passes verbose:true so its
+// lines still show. Under --json, bands turn off and the classic envelope (finishJson) is used.
+export function bandsReporter(
+  proc: { stdout: OutStream; stderr: Stream },
+  env: Record<string, string | undefined>,
+  command: string,
+  opts?: { json?: boolean; verbose?: boolean; setup?: string },
+): Reporter {
+  const json = opts?.json ?? false;
+  const color = colorEnabled(env);
+  const interactive = !json && color && Boolean(proc.stdout.isTTY);
+  const r = new Reporter(proc.stdout, proc.stderr, color, json, opts?.verbose ?? false, !json, interactive);
+  r.command = command;
+  if (opts?.setup) r.setup(opts.setup);
+  return r;
 }

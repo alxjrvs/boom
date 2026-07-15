@@ -158,7 +158,7 @@ test("doctor --config accepts a valid base + overlay and reports each file", asy
   expect(await doctor(ctx, false, true)).toBe(0);
   expect(out()).toContain("boomfile.toml");
   expect(out()).toContain("boomfile.linux.toml");
-  expect(out()).toContain("config OK");
+  expect(out()).toContain("DOCTOR...COMPLETE!"); // the cosmic verdict band replaces the plain summary
 });
 
 test("doctor --config --json emits a versioned report envelope", async () => {

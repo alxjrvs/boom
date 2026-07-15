@@ -7,10 +7,9 @@ import { mkdir } from "node:fs/promises";
 import { NO_CONFIG_REPO_MSG, readConfigBreadcrumb, resolveConfigDir } from "../config/load.ts";
 import { detectOs } from "../config/profile.ts";
 import type { BoomContext } from "../context.ts";
-import { colorEnabled } from "../lib/color.ts";
 import { remoteReachable } from "../lib/git.ts";
 import { hasCommand } from "../lib/proc.ts";
-import { Reporter } from "../lib/reporter.ts";
+import { bandsReporter } from "../lib/reporter.ts";
 import { boomStateDir } from "./state.ts";
 import { validateConfigFiles } from "./validate.ts";
 
@@ -33,7 +32,10 @@ const KEYCHAIN_ITEM = "op-claude-agent";
 // the boomfile and overlays alone, as a read-only CI gate — no tools/keychain/state checks,
 // pass/fail 0/1 (no warning tier), and a missing config repo is a *failure*, not a warning.
 export async function doctor(ctx: BoomContext, json = false, configOnly = false): Promise<number> {
-  const report = new Reporter(ctx.process.stdout, ctx.process.stderr, colorEnabled(ctx.env), json);
+  const report = bandsReporter(ctx.process, ctx.env, "doctor", {
+    json,
+    setup: "TAKING THE MACHINE'S PULSE…",
+  });
 
   report.header("Config");
   const repo = await resolveConfigDir(ctx.env, ctx.cwd);

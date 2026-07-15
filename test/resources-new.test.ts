@@ -75,9 +75,9 @@ test("dir: an un-owned dir is left on uninstall; a non-empty remove_on_uninstall
   expect(await reconcile("sync", sb.ctx, {})).toBe(0);
   const dir = join(sb.home, "Screenshots");
   await writeFile(join(dir, "shot.png"), "x"); // user data lands in it
-  expect(await reconcile("uninstall", sb.ctx, { verbose: true })).toBe(0);
+  expect(await reconcile("uninstall", sb.ctx, {})).toBe(0);
   expect(await pathExists(dir)).toBe(true); // not empty → kept
-  expect(sb.out()).toContain("not removed — not empty"); // verbose: the "kept" line folds under its band in quiet
+  expect(sb.out()).toContain("not removed — not empty"); // shows under its band in the dense default
 });
 
 test("dir: verify fails when the directory is missing", async () => {
@@ -99,9 +99,8 @@ test("dir: a corrected mode shows the change under --verbose; an already-correct
   await mkdir(join(sb.home, "box"), { recursive: true });
   await chmod(join(sb.home, "box"), 0o755); // pre-existing dir with the wrong mode
 
-  // The chmod that corrects the mode is a real change; --verbose surfaces the per-item line
-  // (quiet bands mode folds it under the section band, keeping the steady state to bands).
-  expect(await reconcile("sync", sb.ctx, { verbose: true })).toBe(0);
+  // The chmod that corrects the mode is a real change (an ok line), shown under its band by default.
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
   expect((await stat(join(sb.home, "box"))).mode & 0o777).toBe(0o700);
   expect(sb.out()).toContain("~/box (mode 700)");
 
@@ -167,8 +166,7 @@ test("check: repair converges on sync when the assertion fails, and is a no-op o
     `[[section]]\nname = "c"\ncheck = [{ path = "${conf}", present = ["ok"], repair = "printf ok > ~/.conf" }]\n`,
   );
   // File missing (default missing_file=fail → the assertion is unmet) → repair runs and creates it.
-  // verbose: "repaired" is a change line, folded under its band in quiet.
-  expect(await reconcile("sync", sb.ctx, { verbose: true })).toBe(0);
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0); // dense default shows the "repaired" change line
   expect(await Bun.file(join(sb.home, ".conf")).text()).toBe("ok");
   expect(sb.out()).toContain("repaired");
   // Second sync: already satisfied → the repair command does not run again.

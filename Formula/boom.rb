@@ -6,7 +6,7 @@
 class Boom < Formula
   desc "Declarative dev-machine setup — sync/verify dotfiles, packages, and tools from boomfile.toml"
   homepage "https://github.com/alxjrvs/boom"
-  version "0.15.0"
+  version "0.16.0"
 
   on_macos do
     on_arm do

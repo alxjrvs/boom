@@ -97,13 +97,12 @@ test("link: overwrite mode (boom source --fix) overwrites a foreign file at dst"
   const sb = await sandbox(`[[section]]\nname = "Shell"\nlink = [{ src = ".zshrc", dst = "~/.zshrc" }]\n`);
   await writeFile(join(sb.repo, ".zshrc"), "z\n");
   await writeFile(join(sb.home, ".zshrc"), "pre-existing, not ours\n");
-  // verbose: "overwritten" is a change line, shown under its band only in verbose.
-  expect(await reconcile("sync", sb.ctx, { linkMode: "overwrite", verbose: true })).toBe(0);
+  expect(await reconcile("sync", sb.ctx, { linkMode: "overwrite" })).toBe(0); // dense default shows "overwritten"
   expect(await linkTarget(join(sb.home, ".zshrc"))).toBe(join(sb.repo, ".zshrc"));
   expect(sb.out()).toContain("overwritten");
 });
 
-test("cosmic bands quiet default: sections are bands, detail is --verbose, the run bookends on setup + verdict", async () => {
+test("cosmic bands (dense default): marked section bands + their detail; --verbose adds the skips", async () => {
   const sb = await sandbox(
     `[[section]]\nname = "Quiet"\nlink = [{ src = ".keep", dst = "~/.keep" }, { src = ".foreign", dst = "~/.foreign" }]\n`,
   );
@@ -111,17 +110,17 @@ test("cosmic bands quiet default: sections are bands, detail is --verbose, the r
   await writeFile(join(sb.repo, ".foreign"), "f\n");
   await writeFile(join(sb.home, ".foreign"), "not ours\n"); // stays foreign → a skip
 
-  // First (quiet) run: only high-level bands — the grey setup band, the section band with its ✓
-  // mark, and the verdict band. The per-item change/skip detail is folded away.
+  // Default (dense): the grey setup band, the section's marked band with its change detail below,
+  // and the verdict band. Skips are the one thing held back for --verbose.
   expect(await reconcile("sync", sb.ctx, {})).toBe(0);
   const firstRun = sb.out();
   expect(firstRun).toContain("PREPARING FOR THE WORLD THAT'S COMING"); // grey setup band
-  expect(firstRun).toContain("▎ Quiet"); // the section band, with its permanent bar
-  expect(firstRun).not.toContain("~/.keep linked"); // the change detail is quiet (→ --verbose)
-  expect(firstRun).not.toContain("is not our symlink"); // the skip is quiet too
+  expect(firstRun).toContain("▎ Quiet...✓"); // the marked section band
+  expect(firstRun).toContain("~/.keep linked"); // the change detail shows under its band
+  expect(firstRun).not.toContain("is not our symlink"); // the skip is held back (→ --verbose)
   expect(firstRun).toContain("SYNC...COMPLETE!"); // the verdict band (command defaults to the verb)
 
-  // Verbose re-run: the band opens live and every line under it shows — the skips too.
+  // Verbose re-run: everything is in place now (both skips) — verbose streams them.
   const beforeVerbose = sb.out().length;
   expect(await reconcile("sync", sb.ctx, { verbose: true })).toBe(0);
   const verbose = sb.out().slice(beforeVerbose);
@@ -129,12 +128,12 @@ test("cosmic bands quiet default: sections are bands, detail is --verbose, the r
   expect(verbose).toContain("already linked"); // ~/.keep, now a skip
   expect(verbose).toContain("is not our symlink"); // ~/.foreign skip, shown under verbose
 
-  // A steady-state quiet re-sync still reports its high-level bands (every item a no-op → ✓).
+  // A steady-state dense re-sync: every item a no-op (skip), so the band marks ✓ with no detail.
   const beforeSteady = sb.out().length;
   expect(await reconcile("sync", sb.ctx, {})).toBe(0);
   const steady = sb.out().slice(beforeSteady);
-  expect(steady).toContain("▎ Quiet");
-  expect(steady).not.toContain("already linked"); // no per-item detail in quiet
+  expect(steady).toContain("▎ Quiet...✓");
+  expect(steady).not.toContain("already linked"); // skips stay held back in the dense default
   expect(steady).toContain("SYNC...COMPLETE!");
 });
 
@@ -218,8 +217,7 @@ test("hook runs a TS resource module with its inputs", async () => {
     join(sb.repo, "hooks/greet.ts"),
     `export function sync(api) { api.ok("hello " + api.with.who); }\n`,
   );
-  // verbose: the hook's ok() line is a change detail, folded under its band in quiet.
-  expect(await reconcile("sync", sb.ctx, { verbose: true })).toBe(0);
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0); // dense default shows the hook's ok() line
   expect(sb.out()).toContain("hello world");
 });
 

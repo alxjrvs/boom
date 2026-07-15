@@ -5,10 +5,10 @@
 import { basename, dirname, join } from "node:path";
 import { buildCommand } from "@stricli/core";
 import type { BoomContext } from "../context.ts";
-import { colorEnabled } from "../lib/color.ts";
 import { chmod, rename, rm } from "../lib/fs.ts";
+import type { Env } from "../lib/proc.ts";
 import { runArgv } from "../lib/proc.ts";
-import { Reporter } from "../lib/reporter.ts";
+import { bandsReporter, type Reporter } from "../lib/reporter.ts";
 import { VERSION } from "../lib/version.ts";
 
 const REPO = "alxjrvs/boom";
@@ -124,6 +124,95 @@ export function expectedHash(sums: string, asset: string): string | undefined {
 
 type UpgradeFlags = { force?: boolean; check?: boolean };
 
+// The upgrade flow, returning the verdict band's outcome text on success (e.g. "v0.14.0 → v0.15.0")
+// or undefined on any failure — where it has already reported the reason via report.fail(). The
+// caller turns that into `▎ UPGRADE...COMPLETE!` / `...FAILED!` through report.finish().
+async function runUpgrade(flags: UpgradeFlags, report: Reporter, env: Env): Promise<string | undefined> {
+  const target = releaseTarget();
+  if (!target) {
+    report.fail(`unsupported platform ${process.platform}/${process.arch}`);
+    return;
+  }
+
+  // The running executable. Refuse if we weren't launched as the compiled `boom` binary
+  // (e.g. `bun run src/index.ts` during dev → execPath is bun itself) so we never clobber the runtime.
+  const self = process.execPath;
+  if (basename(self) !== "boom") {
+    report.fail(`not a compiled boom binary (${self}); upgrade only replaces an installed boom`);
+    return;
+  }
+
+  let release: Release;
+  try {
+    release = await latestRelease();
+  } catch (err) {
+    report.fail(`could not resolve latest release: ${(err as Error).message}`);
+    return;
+  }
+
+  if (release.version === VERSION && !flags.force) return `already on the latest (${VERSION})`;
+  if (flags.check) return `latest is ${release.version} — you have ${VERSION}`;
+
+  const asset = `boom-${target}`;
+  const base = `https://github.com/${REPO}/releases/download/${release.tag}`;
+  report.note(`downloading ${asset} ${release.tag}`);
+
+  let bin: Uint8Array;
+  let sums: string;
+  try {
+    [bin, sums] = await Promise.all([
+      fetchBytes(`${base}/${asset}`),
+      fetchBytes(`${base}/SHA256SUMS`).then((b) => new TextDecoder().decode(b)),
+    ]);
+  } catch (err) {
+    report.fail((err as Error).message);
+    return;
+  }
+
+  const want = expectedHash(sums, asset);
+  if (!want) {
+    report.fail(`SHA256SUMS has no entry for ${asset}`);
+    return;
+  }
+  const got = sha256(bin);
+  if (got !== want) {
+    report.fail(`checksum mismatch for ${asset} — refusing to install (want ${want}, got ${got})`);
+    return;
+  }
+  report.ok("checksum verified");
+
+  // Stage beside the target (same filesystem → rename is atomic) then swap. `staged` is declared
+  // out here so the catch can clean it up no matter where the flow threw — stageBinary's own chmod,
+  // codesign, or the swap — never leaving a stray `.boom.upgrade.*`.
+  let staged: string | undefined;
+  try {
+    staged = await stageBinary(self, bin);
+
+    // macOS release binaries are signed on a real macOS host, so the download should already
+    // verify. Only re-sign ad-hoc as a fallback when it doesn't — re-signing a Developer-ID binary
+    // would clobber its signature and undo notarization. No-op on Linux. (Mirrors install.sh.)
+    if (process.platform === "darwin") {
+      const verified =
+        runArgv(["codesign", "--verify", "--strict", staged], env, { quietStdout: true }).code === 0;
+      if (!verified) {
+        const { code } = runArgv(["codesign", "--force", "--sign", "-", staged], env, { quietStdout: true });
+        if (code !== 0)
+          report.warn(
+            "ad-hoc re-sign failed — if boom is killed on launch, re-run after `xcode-select --install`",
+          );
+      }
+    }
+
+    await swapInto(self, staged);
+  } catch (err) {
+    if (staged) await rm(staged, { force: true });
+    report.fail(`install failed: ${(err as Error).message}`);
+    return;
+  }
+
+  return `${VERSION} → ${release.version}`;
+}
+
 export const upgradeCommand = buildCommand<UpgradeFlags, [], BoomContext>({
   docs: { brief: "Fetch the latest release and replace the running binary in place" },
   parameters: {
@@ -133,108 +222,12 @@ export const upgradeCommand = buildCommand<UpgradeFlags, [], BoomContext>({
     },
   },
   async func(flags) {
-    const report = new Reporter(this.process.stdout, this.process.stderr, colorEnabled(this.env));
-    report.header(`boom upgrade (current ${VERSION})`);
-
-    const target = releaseTarget();
-    if (!target) {
-      report.fail(`unsupported platform ${process.platform}/${process.arch}`);
-      this.process.exitCode = 1;
-      return;
-    }
-
-    // The running executable. Refuse if we weren't launched as the compiled `boom`
-    // binary (e.g. `bun run src/index.ts` during dev → execPath is bun itself) so we
-    // never clobber the runtime.
-    const self = process.execPath;
-    if (basename(self) !== "boom") {
-      report.fail(`not a compiled boom binary (${self}); upgrade only replaces an installed boom`);
-      this.process.exitCode = 1;
-      return;
-    }
-
-    let release: Release;
-    try {
-      release = await latestRelease();
-    } catch (err) {
-      report.fail(`could not resolve latest release: ${(err as Error).message}`);
-      this.process.exitCode = 1;
-      return;
-    }
-
-    if (release.version === VERSION && !flags.force) {
-      report.ok(`already on the latest version (${VERSION})`);
-      return;
-    }
-    if (flags.check) {
-      report.note(`latest is ${release.version} (you have ${VERSION}) — run \`boom upgrade\` to install`);
-      return;
-    }
-
-    const asset = `boom-${target}`;
-    const base = `https://github.com/${REPO}/releases/download/${release.tag}`;
-    report.plan(`downloading ${asset} ${release.tag}`);
-
-    let bin: Uint8Array;
-    let sums: string;
-    try {
-      [bin, sums] = await Promise.all([
-        fetchBytes(`${base}/${asset}`),
-        fetchBytes(`${base}/SHA256SUMS`).then((b) => new TextDecoder().decode(b)),
-      ]);
-    } catch (err) {
-      report.fail((err as Error).message);
-      this.process.exitCode = 1;
-      return;
-    }
-
-    const want = expectedHash(sums, asset);
-    if (!want) {
-      report.fail(`SHA256SUMS has no entry for ${asset}`);
-      this.process.exitCode = 1;
-      return;
-    }
-    const got = sha256(bin);
-    if (got !== want) {
-      report.fail(`checksum mismatch for ${asset} — refusing to install (want ${want}, got ${got})`);
-      this.process.exitCode = 1;
-      return;
-    }
-    report.ok("checksum verified");
-
-    // Stage beside the target (same filesystem → rename is atomic) then swap. `staged` is
-    // declared out here so the catch can clean it up no matter where the flow threw —
-    // stageBinary's own chmod, codesign, or the swap — never leaving a stray `.boom.upgrade.*`.
-    let staged: string | undefined;
-    try {
-      staged = await stageBinary(self, bin);
-
-      // macOS release binaries are signed on a real macOS host, so the download should
-      // already verify. Only re-sign ad-hoc as a fallback when it doesn't — re-signing a
-      // Developer-ID binary would clobber its signature and undo notarization. No-op on
-      // Linux. (Mirrors install.sh.)
-      if (process.platform === "darwin") {
-        const verified =
-          runArgv(["codesign", "--verify", "--strict", staged], this.env, { quietStdout: true }).code === 0;
-        if (!verified) {
-          const { code } = runArgv(["codesign", "--force", "--sign", "-", staged], this.env, {
-            quietStdout: true,
-          });
-          if (code !== 0)
-            report.warn(
-              "ad-hoc re-sign failed — if boom is killed on launch, re-run after `xcode-select --install`",
-            );
-        }
-      }
-
-      await swapInto(self, staged);
-    } catch (err) {
-      if (staged) await rm(staged, { force: true });
-      report.fail(`install failed: ${(err as Error).message}`);
-      this.process.exitCode = 1;
-      return;
-    }
-
-    report.ok(`upgraded ${VERSION} → ${release.version}  (${self})`);
+    // Dense bands (the default write path): the grey setup band, the download/checksum detail
+    // lines, and a verdict band carrying the outcome (e.g. "v0.14.0 → v0.15.0").
+    const report = bandsReporter(this.process, this.env, "upgrade", {
+      setup: "COMMUNING WITH THE SOURCE…",
+    });
+    const meta = await runUpgrade(flags, report, this.env);
+    this.process.exitCode = report.finish({ ok: "upgrade done", fail: (f) => `${f} failure(s)`, meta });
   },
 });
