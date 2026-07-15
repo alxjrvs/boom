@@ -110,11 +110,14 @@ Resources:
 - `dir = [{ path, mode?, remove_on_uninstall? }]` — ensure a standalone directory exists
   (declarative `mkdir -p`/`chmod`); `remove_on_uninstall = true` removes it on uninstall *only
   if empty*
-- `pkg = [{ manager = "brew"|"mise", file? }]` — satisfy a package manager (`brew` runs
-  `brew bundle` over `file` (default `Brewfile`); `mise` runs `mise install`). One array
+- `pkg = [{ manager = "brew"|"mise"|"apt"|"dnf", file? }]` — satisfy a package manager:
+  `brew` runs `brew bundle` over `file` (default `Brewfile`); `mise` runs `mise install`;
+  `apt`/`dnf` install a newline-separated `file` package list (Linux, via `sudo`). One array
   entry per manager; a new manager is one dispatch arm, not a new section key
 - `osx_default = [{ domain, key, value, type? }]` — a `defaults write`; `type` is inferred
-  from the TOML value (`bool`/`int`/`float`/`string`) and only stated to override an edge case
+  from the TOML value (`bool`/`int`/`float`/`string`) and only stated to override an edge
+  case. The prior value is journaled, so `boom rollback` restores it (or deletes a key boom
+  introduced)
 - `launchd = [{ src, dst? }]` — link a macOS LaunchAgent plist into
   `~/Library/LaunchAgents` and own its launchctl lifecycle (`load -w` on sync, `unload` on
   uninstall); darwin-only, `dst` defaults to `~/Library/LaunchAgents/<basename(src)>`
@@ -137,9 +140,10 @@ files `boomfile.<os|host|profile>.toml` are merged onto the base. `--profile`
 
 A single top-level `[boom]` table folds boom-invoking-boom behaviors into the reconcile
 boom already runs, so a consumer stops hand-rolling `run`/plist boilerplate for them. Every
-field is opt-in; an absent (or all-off) table changes nothing. Applied once per run after
-the sections (`src/engine/settings.ts`), verb-aware (sync installs/refreshes, verify reports
-drift, uninstall tears the timers down):
+field is opt-in; an absent (or all-off) table changes nothing. The behaviors are work items
+run through the *same* guarded loop as section resources (`runWorkItems`,
+`src/engine/settings.ts`) — so skill + timer writes are journaled and `boom rollback`-able —
+verb-aware (sync installs/refreshes, verify reports drift, uninstall tears the timers down):
 
 - `skill_on_sync = true` — regenerate `~/.claude/skills/boom/SKILL.md` from the running
   binary each sync, so the self-describing skill can't lag a `boom upgrade`.
@@ -172,8 +176,9 @@ each destructive filesystem op journals its undo *before* the write, so a crash 
 still reversible. `source --resume` continues the interrupted run in place (its id + backup
 tree) rather than opening a new one. Mutating runs also
 **back up** any displaced file under `…/backups/<run-id>/`. `boom rollback` replays a run's
-`done` rows in reverse (remove created links, restore backups) — like a Mother Box, it
-remembers everything and can put it back; `--dry-run` previews the replay. The manifest
+`done` rows in reverse (remove created links, restore backups, re-apply a macOS default's
+prior value) — like a Mother Box, it remembers everything and can put it back; `--dry-run`
+previews the replay. The manifest
 drives orphan reaping (verify warns; sync reaps), and a legacy TSV manifest is
 imported once on upgrade. Breadcrumbs (`config`, `code`) record the config repo (path +
 remote) and code dir.

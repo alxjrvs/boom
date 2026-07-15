@@ -19,9 +19,23 @@ import { reconcileRun } from "./resources/run.ts";
 import type { ReconcileCtx } from "./types.ts";
 
 // One unit of work + the label the error boundary reports it under.
-interface WorkItem {
+export interface WorkItem {
   readonly label: string;
   run(ctx: ReconcileCtx): void | Promise<void>;
+}
+
+// Run a list of work items under the per-item error boundary: an unexpected throw (EACCES,
+// ENOSPC, a glob error) becomes a reported failure and the run continues to a clean finish +
+// commit decision, instead of unwinding the whole loop with a stack trace. Shared by the
+// section resources and the `[boom]` self-wiring, so both go through the same loop.
+export async function runWorkItems(items: readonly WorkItem[], ctx: ReconcileCtx): Promise<void> {
+  for (const item of items) {
+    try {
+      await item.run(ctx);
+    } catch (e) {
+      ctx.report.fail(`${item.label}: ${(e as Error).message}`);
+    }
+  }
 }
 
 // A resource type: its work for a section, plus an optional once-per-run finalize.
@@ -71,20 +85,7 @@ const RESOURCES: readonly ResourceType[] = [
 ];
 
 export async function reconcileSection(section: Section, ctx: ReconcileCtx): Promise<void> {
-  // Per-resource error boundary: an unexpected throw (EACCES, ENOSPC, a glob error)
-  // becomes a reported failure and the run continues to a clean finish + commit
-  // decision, instead of unwinding the whole loop with a stack trace.
-  const guard = async (label: string, fn: () => void | Promise<void>): Promise<void> => {
-    try {
-      await fn();
-    } catch (e) {
-      ctx.report.fail(`${label}: ${(e as Error).message}`);
-    }
-  };
-
-  for (const res of RESOURCES) {
-    for (const item of res.items(section)) await guard(item.label, () => item.run(ctx));
-  }
+  for (const res of RESOURCES) await runWorkItems(res.items(section), ctx);
 }
 
 // Run every resource's end-of-run finalize once, after all sections and reaping. Each

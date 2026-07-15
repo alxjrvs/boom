@@ -48,7 +48,7 @@ export function osxMatches(type: OsxType, current: string, value: OsxValue): boo
   return current.trim() === want;
 }
 
-export function reconcileOsxDefault(entry: OsxDefault, ctx: ReconcileCtx): void {
+export async function reconcileOsxDefault(entry: OsxDefault, ctx: ReconcileCtx): Promise<void> {
   if (detectOs(ctx.env) !== "darwin") return;
   const { report } = ctx;
   const { domain, key } = entry;
@@ -82,6 +82,12 @@ export function reconcileOsxDefault(entry: OsxDefault, ctx: ReconcileCtx): void 
         report.skip(`${disp} = ${want} (unchanged)`);
         return;
       }
+      // Journal the prior value (or `null` if the key was unset) before writing, so `boom
+      // rollback` can `defaults write` it back — or `defaults delete` a key boom introduced.
+      // Recorded before the write, like the file resources: a crash mid-write is still
+      // reversible (restoring the unchanged prior is a harmless no-op).
+      await ctx.journal?.intent("osx", disp);
+      await ctx.journal?.done("osx", disp, { kind: "osx", domain, key, type, prior: ok ? cur : null });
       const p = Bun.spawnSync(["defaults", "write", domain, key, `-${type}`, String(value)], {
         env,
         stdout: "ignore",
@@ -116,6 +122,12 @@ export function finalizeOsx(ctx: ReconcileCtx): void {
   ctx.report.header("macOS finalize");
   // Best-effort: killall exits nonzero when a named process isn't running, which is normal
   // and not worth surfacing — the restart is a courtesy so changes show without a re-login.
-  Bun.spawnSync(["killall", "Dock", "Finder", "SystemUIServer"], { stdout: "ignore", stderr: "ignore" });
+  // cleanEnv (so it honors the run's PATH) matches the `defaults` calls above, and lets a
+  // sandboxed test intercept the restart instead of nuking the runner's real Dock/Finder.
+  Bun.spawnSync(["killall", "Dock", "Finder", "SystemUIServer"], {
+    env: cleanEnv(ctx.env),
+    stdout: "ignore",
+    stderr: "ignore",
+  });
   ctx.report.ok("restarted Dock/Finder/SystemUIServer (defaults changed)");
 }
