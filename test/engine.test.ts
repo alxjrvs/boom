@@ -97,12 +97,13 @@ test("link: overwrite mode (boom source --fix) overwrites a foreign file at dst"
   const sb = await sandbox(`[[section]]\nname = "Shell"\nlink = [{ src = ".zshrc", dst = "~/.zshrc" }]\n`);
   await writeFile(join(sb.repo, ".zshrc"), "z\n");
   await writeFile(join(sb.home, ".zshrc"), "pre-existing, not ours\n");
-  expect(await reconcile("sync", sb.ctx, { linkMode: "overwrite" })).toBe(0);
+  // verbose: "overwritten" is a change line, shown under its band only in verbose.
+  expect(await reconcile("sync", sb.ctx, { linkMode: "overwrite", verbose: true })).toBe(0);
   expect(await linkTarget(join(sb.home, ".zshrc"))).toBe(join(sb.repo, ".zshrc"));
   expect(sb.out()).toContain("overwritten");
 });
 
-test("quiet by default: skips + their section header are suppressed; a change and the summary still show", async () => {
+test("cosmic bands quiet default: sections are bands, detail is --verbose, the run bookends on setup + verdict", async () => {
   const sb = await sandbox(
     `[[section]]\nname = "Quiet"\nlink = [{ src = ".keep", dst = "~/.keep" }, { src = ".foreign", dst = "~/.foreign" }]\n`,
   );
@@ -110,29 +111,31 @@ test("quiet by default: skips + their section header are suppressed; a change an
   await writeFile(join(sb.repo, ".foreign"), "f\n");
   await writeFile(join(sb.home, ".foreign"), "not ours\n"); // stays foreign → a skip
 
-  // First (quiet) run: the created link shows; the foreign-file skip does not.
+  // First (quiet) run: only high-level bands — the grey setup band, the section band with its ✓
+  // mark, and the verdict band. The per-item change/skip detail is folded away.
   expect(await reconcile("sync", sb.ctx, {})).toBe(0);
   const firstRun = sb.out();
-  expect(firstRun).toContain("~/.keep linked"); // a real change is always shown
-  expect(firstRun).toContain("==> Quiet"); // the section has a shown line, so its header flushes
-  expect(firstRun).not.toContain("is not our symlink"); // the skip is quiet-suppressed
-  expect(firstRun).toContain("sync done"); // the summary always shows
+  expect(firstRun).toContain("PREPARING FOR THE WORLD THAT'S COMING"); // grey setup band
+  expect(firstRun).toContain("▎ Quiet"); // the section band, with its permanent bar
+  expect(firstRun).not.toContain("~/.keep linked"); // the change detail is quiet (→ --verbose)
+  expect(firstRun).not.toContain("is not our symlink"); // the skip is quiet too
+  expect(firstRun).toContain("SYNC...COMPLETE!"); // the verdict band (command defaults to the verb)
 
-  // Verbose re-run: now everything is in place (both are skips) — verbose surfaces the skip
-  // lines and the section header that quiet holds back.
+  // Verbose re-run: the band opens live and every line under it shows — the skips too.
   const beforeVerbose = sb.out().length;
   expect(await reconcile("sync", sb.ctx, { verbose: true })).toBe(0);
   const verbose = sb.out().slice(beforeVerbose);
-  expect(verbose).toContain("==> Quiet");
+  expect(verbose).toContain("▎ Quiet");
   expect(verbose).toContain("already linked"); // ~/.keep, now a skip
   expect(verbose).toContain("is not our symlink"); // ~/.foreign skip, shown under verbose
 
-  // A steady-state quiet re-sync (every item a skip) emits no section headers at all.
+  // A steady-state quiet re-sync still reports its high-level bands (every item a no-op → ✓).
   const beforeSteady = sb.out().length;
   expect(await reconcile("sync", sb.ctx, {})).toBe(0);
   const steady = sb.out().slice(beforeSteady);
-  expect(steady).not.toContain("==>");
-  expect(steady).toContain("sync done");
+  expect(steady).toContain("▎ Quiet");
+  expect(steady).not.toContain("already linked"); // no per-item detail in quiet
+  expect(steady).toContain("SYNC...COMPLETE!");
 });
 
 test("verify fails (exit 1) when a link is missing", async () => {
@@ -215,7 +218,8 @@ test("hook runs a TS resource module with its inputs", async () => {
     join(sb.repo, "hooks/greet.ts"),
     `export function sync(api) { api.ok("hello " + api.with.who); }\n`,
   );
-  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  // verbose: the hook's ok() line is a change detail, folded under its band in quiet.
+  expect(await reconcile("sync", sb.ctx, { verbose: true })).toBe(0);
   expect(sb.out()).toContain("hello world");
 });
 

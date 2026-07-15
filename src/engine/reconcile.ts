@@ -22,6 +22,15 @@ import type { LinkMode, ReconcileCtx, Verb } from "./types.ts";
 // reconcile module's constant keep working.
 export { REPORT_SCHEMA_VERSION };
 
+// The grey opening band, per verb — the bombastic "we're getting to work" splash the cosmic-bands
+// output opens on (site voice: high-energy, no comic-lore proper nouns). Keyed by verb; the
+// verdict band's label comes from the command name instead (SOURCE/VERIFY/…).
+const SETUP_COPY: Record<Verb, string> = {
+  sync: "PREPARING FOR THE WORLD THAT'S COMING…",
+  verify: "SCANNING THE MACHINE FOR DRIFT…",
+  uninstall: "UNMAKING WHAT WAS MADE…",
+};
+
 export interface ReconcileOptions {
   readonly only?: string[];
   readonly dryRun?: boolean;
@@ -33,6 +42,10 @@ export interface ReconcileOptions {
   // back (what `boom source --verbose` sets). Default false — quiet, the legible steady-state
   // output. Independent of `json`, which suppresses all human output regardless.
   readonly verbose?: boolean;
+  // The command name the verdict band echoes (`SOURCE...COMPLETE!`) — the user-facing spelling
+  // of the invocation, which can differ from the verb (`boom source` runs the sync verb).
+  // Defaults to the verb when unset.
+  readonly command?: string;
   // Only consulted for verb "sync": commit local config-repo changes before
   // pulling, instead of the default autostash.
   readonly commit?: boolean;
@@ -101,13 +114,23 @@ async function reapOrphans(ctx: ReconcileCtx, prior: readonly ManifestEntry[]): 
 
 export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOptions): Promise<number> {
   const json = opts.json ?? false;
+  const verbose = opts.verbose ?? false;
+  const color = colorEnabled(ctx.env);
+  // Interactive = a real TTY on stdout (and color on, and not JSON): the only case where quiet
+  // bands can draw a live krackle line and rewrite it in place. Piped/CI output prints only the
+  // resolved band. The cast is because the Stream contract is just { write }.
+  const interactive = !json && color && Boolean((ctx.process.stdout as { isTTY?: boolean }).isTTY);
+  // Human runs get the cosmic-bands surface; --json stays on the structured envelope (bands off).
   const report = new Reporter(
     ctx.process.stdout,
     ctx.process.stderr,
-    colorEnabled(ctx.env),
+    color,
     json,
-    opts.verbose ?? false,
+    verbose,
+    !json,
+    interactive,
   );
+  report.command = opts.command ?? verb;
 
   const finish = (): number => {
     // The same structured envelope for every verb (verify carries a warning tier, mutating
@@ -129,6 +152,8 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
     report.fail(NO_CONFIG_REPO_MSG);
     return finish();
   }
+  // Open on the grey setup band (bands mode only; a no-op in --json), before any section.
+  report.setup(SETUP_COPY[verb]);
   const dryRun = opts.dryRun ?? false;
   await syncConfigRepo(repo, ctx.env, report, verb, dryRun, {
     commit: opts.commit,
@@ -188,6 +213,7 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
       // "overwrite" to repair drift; `boom source set` (no linkMode) inherits this skip.
       linkMode: opts.linkMode ?? "skip",
       update: opts.update ?? false,
+      verbose,
       env: ctx.env,
       report,
       declared: [],

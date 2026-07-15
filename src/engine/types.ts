@@ -19,6 +19,9 @@ export interface ReconcileCtx {
   // either way — Homebrew Bundle only upgrades a cask when its Brewfile entry sets
   // `greedy: true`, regardless of this flag.
   readonly update: boolean;
+  // Verbose run: a spawned tool's chatter streams straight to the terminal. Quiet (the default)
+  // silences it under the section band, so noisy resources (brew/mise, `run` steps) branch on it.
+  readonly verbose: boolean;
   readonly env: Record<string, string | undefined>;
   readonly report: Reporter;
   // Destinations boom owns this run — populated as handlers run (drives orphan
