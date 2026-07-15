@@ -173,7 +173,7 @@ const svg = `<?xml version="1.0" encoding="UTF-8"?>
     <g transform="translate(4 150) rotate(-1.4)">
       <rect x="0" y="0" width="486" height="54" fill="#FFC93C" stroke="#000" stroke-width="4" rx="4"/>
       <text x="22" y="37" font-family="'Arial Narrow', Impact, sans-serif" font-weight="700"
-        font-size="25" letter-spacing="2" fill="#05040A">DECLARATIVE MACHINE RECONCILER</text>
+        font-size="25" letter-spacing="2" fill="#05040A">DECLARATIVE DEV-MACHINE SETUP</text>
     </g>
     <!-- BOOMTUBE wordmark: BOOM in the four brand signals, TUBE the calm cyan anchor -->
     <g font-family="Impact, 'Arial Narrow Bold', sans-serif" letter-spacing="1">

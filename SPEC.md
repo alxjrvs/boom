@@ -1,6 +1,6 @@
 # BoomTube — design spec
 
-**BoomTube** is a **declarative machine reconciler**: a single self-contained binary
+**BoomTube** is **declarative dev-machine setup**: a single self-contained binary
 (executable: **`boom`**), compiled from **TypeScript on Bun**, that converges a
 machine to a declared state — dotfiles, packages, and tools from one
 `boomfile.toml`, with drift detection and rollback — then opens portals to your code.

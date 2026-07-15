@@ -1,6 +1,6 @@
 # BoomTube
 
-**BoomTube** is a **declarative machine reconciler** — it converges your machine
+**BoomTube** is **declarative dev-machine setup** — it converges your machine
 to a state you declare once: dotfiles, packages, and tools from a single
 `boomfile.toml`, with drift detection and rollback. Its executable, **`boom`**,
 runs the reconcile loop — `sync` / `verify` — journals every change so it can be

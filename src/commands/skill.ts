@@ -24,7 +24,7 @@ export function skillDoc(version: string): string {
   return `---
 name: boom
 description: >-
-  Drive boom, a declarative machine reconciler (dotfiles, packages, tools) that converges a machine
+  Drive boom, declarative dev-machine setup (dotfiles, packages, tools) that converges a machine
   from a declarative boomfile.toml in a git-remote config repo. Use when bootstrapping
   or updating a machine's dotfiles, checking for configuration drift, operating the
   managed config repo (diff/commit/push/reset), or rolling back a boom change.

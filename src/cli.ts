@@ -33,7 +33,7 @@ export const routes = buildRouteMap({
   },
   docs: {
     brief:
-      "boom — a declarative machine reconciler. Converge your machine from a boomfile.toml, then open portals to your code.",
+      "boom — declarative dev-machine setup. Converge your machine from a boomfile.toml, then open portals to your code.",
   },
 });
 
