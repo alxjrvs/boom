@@ -57,7 +57,10 @@ const setCommand = buildCommand<{ sync?: boolean; verbose?: boolean }, [string],
     this.process.stdout.write(`boom: dotfiles repo cloned → ${target}\n`);
     // Sync by default; --no-sync is the record-only path (clone + record, don't reconcile).
     if (flags.sync !== false)
-      this.process.exitCode = await reconcile("sync", this, { verbose: flags.verbose });
+      this.process.exitCode = await reconcile("sync", this, {
+        verbose: flags.verbose,
+        command: "source",
+      });
   },
 });
 

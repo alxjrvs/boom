@@ -98,6 +98,7 @@ export const syncCommand = buildCommand<SyncFlags, [], BoomContext>({
       commitMessage: flags.message,
       update: flags.update,
       verbose: flags.verbose,
+      command: "source",
     });
   },
 });
@@ -118,6 +119,7 @@ export const verifyCommand = buildCommand<VerifyFlags, [], BoomContext>({
       json: flags.json,
       profiles: flags.profile,
       verbose: flags.verbose,
+      command: "verify",
     });
   },
 });
@@ -157,6 +159,7 @@ export const uninstallCommand = buildCommand<
       dryRun: flags.dryRun,
       json: flags.json,
       verbose: flags.verbose,
+      command: "uninstall",
     });
   },
 });

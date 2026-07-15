@@ -5,7 +5,7 @@
 import { join } from "node:path";
 import { detectOs } from "../../config/profile.ts";
 import type { Pkg } from "../../config/schema.ts";
-import { captureArgv, hasCommand, runArgv } from "../../lib/proc.ts";
+import { captureArgv, hasCommand, lastLine, runArgv, toolIo } from "../../lib/proc.ts";
 import type { ReconcileCtx } from "../types.ts";
 
 export async function reconcilePkg(entry: Pkg, ctx: ReconcileCtx): Promise<void> {
@@ -41,12 +41,15 @@ function reconcileBrew(file: string, ctx: ReconcileCtx): void {
         report.plan(`would run: brew bundle --file=${path}${ctx.update ? "" : " --no-upgrade"}`);
         return;
       }
-      if (
-        runArgv(["brew", "bundle", `--file=${path}`, ...noUpgrade], ctx.env, { quietStdout: ctx.json })
-          .code === 0
-      )
-        report.skip("brew bundle satisfied");
-      else report.fail("brew bundle failed");
+      {
+        const r = runArgv(
+          ["brew", "bundle", `--file=${path}`, ...noUpgrade],
+          ctx.env,
+          toolIo(ctx.json, ctx.verbose),
+        );
+        if (r.code === 0) report.skip("brew bundle satisfied");
+        else report.fail(`brew bundle failed${lastLine(r.stderr) ? `: ${lastLine(r.stderr)}` : ""}`);
+      }
       return;
     }
     case "verify": {
@@ -54,9 +57,11 @@ function reconcileBrew(file: string, ctx: ReconcileCtx): void {
       // merely-outdated (but still declared) formulae as drift that `boom source` then
       // won't reconcile, since sync itself no longer upgrades by default.
       if (
-        runArgv(["brew", "bundle", "check", `--file=${path}`, ...noUpgrade], ctx.env, {
-          quietStdout: ctx.json,
-        }).code === 0
+        runArgv(
+          ["brew", "bundle", "check", `--file=${path}`, ...noUpgrade],
+          ctx.env,
+          toolIo(ctx.json, ctx.verbose),
+        ).code === 0
       )
         report.skip("brew bundle satisfied");
       else report.warn("brew bundle missing deps — run: boom source");
@@ -78,9 +83,14 @@ function reconcileMise(ctx: ReconcileCtx): void {
       }
       // Run from the repo (cwd-independent sync), so mise resolves the repo's `mise.toml`
       // instead of whatever project tree `boom` was invoked from.
-      if (runArgv(["mise", "install"], ctx.env, { quietStdout: ctx.json, cwd: ctx.repo }).code === 0)
-        report.skip("mise tools installed");
-      else report.fail("mise install failed");
+      {
+        const r = runArgv(["mise", "install"], ctx.env, {
+          ...toolIo(ctx.json, ctx.verbose),
+          cwd: ctx.repo,
+        });
+        if (r.code === 0) report.skip("mise tools installed");
+        else report.fail(`mise install failed${lastLine(r.stderr) ? `: ${lastLine(r.stderr)}` : ""}`);
+      }
       return;
     }
     case "verify": {
@@ -162,9 +172,11 @@ async function reconcileLinuxPkgs(
         report.plan(`would run: ${install.join(" ")} ${packages.join(" ")}`);
         return;
       }
-      if (runArgv([...install, ...packages], ctx.env, { quietStdout: ctx.json }).code === 0)
-        report.skip(`${mgr}: ${packages.length} package(s) satisfied`);
-      else report.fail(`${mgr} install failed`);
+      {
+        const r = runArgv([...install, ...packages], ctx.env, toolIo(ctx.json, ctx.verbose));
+        if (r.code === 0) report.skip(`${mgr}: ${packages.length} package(s) satisfied`);
+        else report.fail(`${mgr} install failed${lastLine(r.stderr) ? `: ${lastLine(r.stderr)}` : ""}`);
+      }
       return;
     }
     case "verify": {

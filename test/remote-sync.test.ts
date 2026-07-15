@@ -225,7 +225,9 @@ test("sync pulls and reports what changed", async () => {
   commitAll(origin, "add y");
 
   const { ctx, out } = ctxFor(env, repo);
-  await reconcile("sync", ctx, {});
+  // --verbose: "pulled …" is a change line, now shown under its band only in verbose (quiet
+  // bands mode keeps the steady-state to section bands + attention).
+  await reconcile("sync", ctx, { verbose: true });
   expect(out()).toContain("pulled 1 commit(s)");
   expect(out()).toContain("boomfile.toml");
   expect(await readFile(join(repo, "boomfile.toml"), "utf8")).toContain('name = "y"');
@@ -278,7 +280,7 @@ test("sync pulls a remote change while preserving an uncommitted local edit (aut
   await writeFile(join(repo, "scratch.txt"), "uncommitted local edit\n");
 
   const { ctx, out } = ctxFor(env, repo);
-  const rc = await reconcile("sync", ctx, {});
+  const rc = await reconcile("sync", ctx, { verbose: true }); // change line shown under band in verbose
   expect(rc).toBe(0);
   expect(out()).toContain("pulled 1 commit(s)");
   expect(await readFile(join(repo, "boomfile.toml"), "utf8")).toContain('name = "y"');
@@ -296,7 +298,7 @@ test("sync --commit commits local edits first, then rebases them onto the pulled
   await writeFile(join(repo, "scratch.txt"), "local addition\n");
 
   const { ctx, out } = ctxFor(env, repo);
-  const rc = await reconcile("sync", ctx, { commit: true, commitMessage: "test commit" });
+  const rc = await reconcile("sync", ctx, { commit: true, commitMessage: "test commit", verbose: true });
   expect(rc).toBe(0);
   expect(out()).toContain("committed local changes (test commit)");
   expect(await readFile(join(repo, "boomfile.toml"), "utf8")).toContain('name = "y"');
@@ -330,7 +332,7 @@ test("sync --commit commits local edits even when already up to date with origin
   await writeFile(join(repo, "scratch.txt"), "local addition\n");
 
   const { ctx, out } = ctxFor(env, repo);
-  const rc = await reconcile("sync", ctx, { commit: true, commitMessage: "test commit" });
+  const rc = await reconcile("sync", ctx, { commit: true, commitMessage: "test commit", verbose: true });
   expect(rc).toBe(0);
   expect(out()).toContain("committed local changes (test commit)");
   expect(git(repo, "log", "-1", "--format=%s").stdout.trim()).toBe("test commit");

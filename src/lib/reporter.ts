@@ -1,7 +1,15 @@
 // Reporter: the engine's output surface + pass/fail tally. Mirrors the bash engine's
 // _ok/_warn/_fail and drives the verify exit code (0 ok / 2 warn / 1 fail). In JSON
 // mode it suppresses human output and only collects records (for `verify --json`).
-import { type ColorName, paint } from "./color.ts";
+//
+// Two human presentations share this one tally + record stream:
+//   • the classic surface (`==> Header`, indented ✓/→/✗ lines) — every non-reconcile command;
+//   • the "cosmic bands" surface (bands mode) — the reconcile loop (source/verify/uninstall),
+//     matching the site's design: a permanent `▎` bar per section in a cycling brand color, a
+//     trailing status glyph (a Kirby-krackle burst while working → ✓ done / ! attention), a grey
+//     setup band to open, and a `COMMAND...COMPLETE!` / `...FAILED!` verdict band to close. Quiet
+//     (the default) shows only bands + anything needing attention; --verbose shows every line.
+import { BAND_CYCLE, COSMIC, type ColorName, paint, paintHex } from "./color.ts";
 
 interface Stream {
   write(s: string): void;
@@ -25,16 +33,36 @@ export interface ReportEnvelope {
   readonly records: readonly ReportRecord[];
 }
 
+// A band being built up: which section, its cycled color, the tally at open (to decide the
+// final mark), a buffer of its lines (rendered at close in quiet), and whether its live krackle
+// line is already on screen (interactive quiet only — so close overwrites it with \r).
+interface Band {
+  readonly label: string;
+  readonly color: string;
+  readonly failAt: number;
+  readonly warnAt: number;
+  readonly buf: ReportRecord[];
+  krackleShown: boolean;
+}
+
 export class Reporter {
   warnings = 0;
   failures = 0;
   readonly records: ReportRecord[] = [];
 
+  // The command name the verdict band echoes (`SOURCE...COMPLETE!`). Set by the reconcile
+  // entry after construction; bands mode falls back to nothing (a bare `...COMPLETE!`) if unset.
+  command?: string;
+
   // Quiet mode (the default) holds a section header back until a *shown* line lands under it,
   // so a section that produced only suppressed `skip` noise prints no header at all — the whole
   // point of quiet output being that a steady-state run says almost nothing. Verbose writes
-  // headers eagerly and this stays undefined.
+  // headers eagerly and this stays undefined. (Classic surface only; bands mode uses `band`.)
   private pendingHeader?: string;
+
+  // Bands-mode state: the section currently accumulating, and the color-cycle cursor.
+  private band?: Band;
+  private cycle = 0;
 
   constructor(
     private readonly out: Stream,
@@ -45,14 +73,23 @@ export class Reporter {
     // default — suppresses the `skip` no-ops (already-linked, unchanged, satisfied) and the
     // headers of sections that emit only those, leaving what changed + what needs attention.
     private readonly verbose = false,
+    // Bands mode: the cosmic-bands presentation (reconcile only). Default false keeps every other
+    // command on the classic `==> Header` surface, byte-for-byte unchanged.
+    private readonly bands = false,
+    // Interactive: stdout is a TTY, so bands-mode quiet can draw a live krackle line and rewrite
+    // it in place (\r) on conclude. Non-interactive (piped/CI) prints only the resolved band.
+    private readonly interactive = false,
   ) {}
 
   private c(name: ColorName, s: string): string {
     return paint(this.color, name, s);
   }
+  private hx(hex: string, s: string): string {
+    return paintHex(this.color, hex, s);
+  }
 
-  // Flush a header the quiet path is holding back — called by every *shown* line so its section
-  // banner precedes it. A no-op in verbose (headers already wrote) and once already flushed.
+  // Flush a header the classic quiet path is holding back — called by every *shown* line so its
+  // section banner precedes it. A no-op in verbose (headers already wrote) and once flushed.
   private flushHeader(): void {
     if (this.pendingHeader !== undefined) {
       this.out.write(`\n${this.c("bold", `==> ${this.pendingHeader}`)}\n`);
@@ -60,11 +97,136 @@ export class Reporter {
     }
   }
 
+  // ---- bands-mode rendering ---------------------------------------------------------------
+
+  // The grey opening band ("PREPARING FOR THE WORLD THAT'S COMING…"). Bands mode only; a no-op
+  // elsewhere so the reconcile entry can call it unconditionally.
+  setup(msg: string): void {
+    if (this.json || !this.bands) return;
+    this.out.write(`\n${this.hx(COSMIC.dim, `▎ ${msg}`)}\n`);
+  }
+
+  // Render one buffered sub-line under a band (indent + colored glyph). Fail goes to stderr to
+  // match the classic surface; everything else to stdout.
+  private writeSub(rec: ReportRecord): void {
+    switch (rec.level) {
+      case "ok":
+        this.out.write(`  ${this.hx(COSMIC.ok, "✓")} ${rec.msg}\n`);
+        return;
+      case "skip":
+        this.out.write(`  ${this.hx(COSMIC.dim, `- ${rec.msg}`)}\n`);
+        return;
+      case "note":
+        this.out.write(`    ${this.hx(COSMIC.dim, rec.msg)}\n`);
+        return;
+      case "plan":
+        this.out.write(`  ${this.hx(COSMIC.cyan, `~ ${rec.msg}`)}\n`);
+        return;
+      case "warn":
+        this.out.write(`  ${this.hx(COSMIC.warn, "→")} ${rec.msg}\n`);
+        return;
+      case "fail":
+        this.err.write(`  ${this.hx(COSMIC.crit, "✗")} ${rec.msg}\n`);
+        return;
+    }
+  }
+
+  // Route a leveled line in bands mode: verbose prints live under the (already-printed) band;
+  // quiet buffers it for the band's close; quiet with no open band shows only attention lines.
+  private bandEmit(rec: ReportRecord): void {
+    if (this.verbose) {
+      this.writeSub(rec);
+      return;
+    }
+    if (this.band) {
+      this.band.buf.push(rec);
+      return;
+    }
+    if (rec.level === "warn" || rec.level === "fail" || rec.level === "plan") this.writeSub(rec);
+  }
+
+  // Resolve the open band: pick its mark from whether the tally moved while it was active, draw
+  // the band line (overwriting the live krackle in place when interactive), then flush the lines
+  // worth showing — attention (warn/fail) and dry-run plans always; the rest only in verbose.
+  private closeBand(): void {
+    const b = this.band;
+    if (!b) return;
+    this.band = undefined;
+    if (this.verbose) return; // its header + lines already streamed live; no trailing mark
+
+    const failed = this.failures > b.failAt;
+    const warned = this.warnings > b.warnAt;
+    const mark = failed
+      ? this.hx(COSMIC.crit, "!")
+      : warned
+        ? this.hx(COSMIC.warn, "!")
+        : this.hx(COSMIC.ok, "✓");
+    const line = `${this.hx(b.color, `▎ ${b.label}`)}  ${mark}`;
+    // Interactive quiet drew `▎ LABEL  ✸` already; \r + clear-to-EOL, then the resolved line.
+    if (b.krackleShown) this.out.write(`\r\x1b[K${line}\n`);
+    else this.out.write(`\n${line}\n`);
+
+    for (const rec of b.buf) {
+      if (this.verbose || rec.level === "warn" || rec.level === "fail" || rec.level === "plan") {
+        this.writeSub(rec);
+      }
+    }
+  }
+
+  // Draw the closing verdict band and return the exit code, replacing finish()'s summary line in
+  // bands mode. Reads the tally (never mutates it), so the 0/2/1 ladder matches the classic path.
+  private verdict(hasWarnTier: boolean): number {
+    const f = this.failures;
+    const w = this.warnings;
+    const name = (this.command ?? "").toUpperCase();
+    const failed = f > 0;
+    const warned = hasWarnTier && w > 0;
+    const color = failed ? COSMIC.crit : warned ? COSMIC.warn : COSMIC.ok;
+    const verb = failed ? "FAILED" : "COMPLETE";
+    const meta = failed
+      ? `${f} failure(s)${w > 0 ? `, ${w} warning(s)` : ""}`
+      : w > 0
+        ? `${w} warning(s)`
+        : "all clear";
+    this.out.write(`\n${this.hx(color, `▎ ${name}...${verb}!`)}  ${this.hx(COSMIC.dim, meta)}\n`);
+    return failed ? 1 : warned ? 2 : 0;
+  }
+
+  // ---- public surface ---------------------------------------------------------------------
+
   // `eager` marks a run-level banner (e.g. the dry-run notice) that must print even with no
   // lines under it — quiet holds *section* headers back, but not these.
   header(s: string, eager = false): void {
     this.records.push({ level: "header", msg: s });
     if (this.json) return;
+    if (this.bands) {
+      // An eager banner isn't a section — draw it grey like the setup band and don't track it.
+      if (eager) {
+        this.out.write(`\n${this.hx(COSMIC.dim, `▎ ${s}`)}\n`);
+        return;
+      }
+      this.closeBand(); // resolve the previous section before starting this one
+      const color = BAND_CYCLE[this.cycle++ % BAND_CYCLE.length] ?? COSMIC.cyan;
+      const band: Band = {
+        label: s,
+        color,
+        failAt: this.failures,
+        warnAt: this.warnings,
+        buf: [],
+        krackleShown: false,
+      };
+      this.band = band;
+      if (this.verbose) {
+        this.out.write(`\n${this.hx(color, `▎ ${s}`)}\n`);
+      } else if (this.interactive) {
+        // Live: the permanent bar + a krackle burst where the mark will land. No newline — close
+        // overwrites this exact line with \r. Nothing prints between (quiet buffers; subprocess
+        // output is silenced), so the cursor stays put.
+        this.out.write(`\n${this.hx(color, `▎ ${s}`)}  ${this.hx(COSMIC.solar, "✸")}`);
+        band.krackleShown = true;
+      }
+      return;
+    }
     if (this.verbose) {
       this.out.write(`\n${this.c("bold", `==> ${s}`)}\n`);
       return;
@@ -75,42 +237,73 @@ export class Reporter {
     if (eager) this.flushHeader();
   }
   ok(s: string): void {
-    this.records.push({ level: "ok", msg: s });
+    const rec: ReportRecord = { level: "ok", msg: s };
+    this.records.push(rec);
     if (this.json) return;
+    if (this.bands) {
+      this.bandEmit(rec);
+      return;
+    }
     this.flushHeader();
     this.out.write(`  ${this.c("green", "✓")} ${s}\n`);
   }
   // A no-op: already in the desired state, nothing done. Pure noise on a steady-state run, so
   // quiet suppresses it (records still capture it for `--json`); verbose shows the dim line.
   skip(s: string): void {
-    this.records.push({ level: "skip", msg: s });
-    if (this.json || !this.verbose) return;
+    const rec: ReportRecord = { level: "skip", msg: s };
+    this.records.push(rec);
+    if (this.json) return;
+    if (this.bands) {
+      this.bandEmit(rec);
+      return;
+    }
+    if (!this.verbose) return;
     this.flushHeader();
     this.out.write(`  ${this.c("dim", `- ${s}`)}\n`);
   }
   note(s: string): void {
-    this.records.push({ level: "note", msg: s });
+    const rec: ReportRecord = { level: "note", msg: s };
+    this.records.push(rec);
     if (this.json) return;
+    if (this.bands) {
+      this.bandEmit(rec);
+      return;
+    }
     this.flushHeader();
     this.out.write(`    ${s}\n`);
   }
   plan(s: string): void {
-    this.records.push({ level: "plan", msg: s });
+    const rec: ReportRecord = { level: "plan", msg: s };
+    this.records.push(rec);
     if (this.json) return;
+    if (this.bands) {
+      this.bandEmit(rec);
+      return;
+    }
     this.flushHeader();
     this.out.write(`  ${this.c("cyan", `~ ${s}`)}\n`);
   }
   warn(s: string): void {
     this.warnings++;
-    this.records.push({ level: "warn", msg: s });
+    const rec: ReportRecord = { level: "warn", msg: s };
+    this.records.push(rec);
     if (this.json) return;
+    if (this.bands) {
+      this.bandEmit(rec);
+      return;
+    }
     this.flushHeader();
     this.out.write(`  ${this.c("yellow", "→")} ${s}\n`);
   }
   fail(s: string): void {
     this.failures++;
-    this.records.push({ level: "fail", msg: s });
+    const rec: ReportRecord = { level: "fail", msg: s };
+    this.records.push(rec);
     if (this.json) return;
+    if (this.bands) {
+      this.bandEmit(rec);
+      return;
+    }
     this.flushHeader();
     this.err.write(`  ${this.c("red", "✗")} ${s}\n`);
   }
@@ -133,6 +326,12 @@ export class Reporter {
     // mode doesn't print a stray banner right before the summary. The summary itself is an
     // `ok`/`warn`/`fail` line and is always shown.
     this.pendingHeader = undefined;
+    // Bands mode: resolve the last section band, then draw the verdict band in place of the
+    // classic summary. `msgs.warn` presence marks a warning-tier command (verify), same as below.
+    if (this.bands) {
+      this.closeBand();
+      return this.verdict(msgs.warn !== undefined);
+    }
     this.out.write("\n");
     if (f > 0) {
       this.fail(msgs.fail ? msgs.fail(f, w) : `${f} failure(s)`);
