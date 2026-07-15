@@ -156,21 +156,27 @@ function reportDrift(
 
 // --- command entry -----------------------------------------------------------------------
 
-export async function boomLock(ctx: BoomContext, check = false): Promise<number> {
+export async function boomLock(ctx: BoomContext, check = false, json = false): Promise<number> {
   const report = bandsReporter(ctx.process, ctx.env, "lock", {
+    json,
     setup: check ? "AUDITING THE LOCKFILE…" : "PINNING RESOLVED VERSIONS…",
   });
+  // The one finish for both surfaces: --json writes the shared envelope (with the same
+  // warning-tier flag), human output the bands verdict — so the two agree on exit codes.
+  const finish = (msgs: Parameters<Reporter["finish"]>[0]): number =>
+    json ? report.finishJson(ctx.process.stdout, msgs.warn !== undefined) : report.finish(msgs);
+
   const repo = await resolveConfigDir(ctx.env, ctx.cwd);
   if (!repo) {
     report.fail(NO_CONFIG_REPO_MSG);
-    return report.finish({ ok: "lock done", fail: (f) => `lock: ${f} failure(s)` });
+    return finish({ ok: "lock done", fail: (f) => `lock: ${f} failure(s)` });
   }
   let config: Boomfile;
   try {
     config = await loadConfig(repo);
   } catch (e) {
     report.fail((e as Error).message);
-    return report.finish({ ok: "lock done", fail: (f) => `lock: ${f} failure(s)` });
+    return finish({ ok: "lock done", fail: (f) => `lock: ${f} failure(s)` });
   }
 
   const now = await resolveLock(repo, config, ctx, report);
@@ -181,7 +187,7 @@ export async function boomLock(ctx: BoomContext, check = false): Promise<number>
     const locked = await readLock(repo);
     if (!locked) {
       report.warn("no boom.lock yet — run `boom lock` to create one");
-      return report.finish({
+      return finish({
         ok: "lock: in sync",
         warn: (w) => `lock: ${w} drift(s)`,
         fail: (f, w) => `lock: ${f} failure(s), ${w} drift(s)`,
@@ -189,7 +195,7 @@ export async function boomLock(ctx: BoomContext, check = false): Promise<number>
     }
     reportDrift("brew", locked.brew, now.brew, report);
     reportDrift("mise", locked.mise, now.mise, report);
-    return report.finish({
+    return finish({
       ok: "lock: in sync with boom.lock",
       warn: (w) => `lock: ${w} version drift(s) — run \`boom lock\` to re-pin`,
       fail: (f, w) => `lock: ${f} failure(s), ${w} drift(s)`,
@@ -200,5 +206,5 @@ export async function boomLock(ctx: BoomContext, check = false): Promise<number>
   report.header("Locked");
   report.ok(`wrote boom.lock — ${total} package(s) pinned`);
   report.note("commit it with: boom source push");
-  return report.finish({ ok: `lock: ${total} package(s) pinned`, fail: (f) => `lock: ${f} failure(s)` });
+  return finish({ ok: `lock: ${total} package(s) pinned`, fail: (f) => `lock: ${f} failure(s)` });
 }

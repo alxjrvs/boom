@@ -247,6 +247,16 @@ export class Reporter {
     if (!b) return;
     this.band = undefined;
     if (this.verbose) return; // --verbose streams the header + lines live; no trailing mark
+
+    // A band whose only lines are held-back skips has no permanent text to sit under its
+    // headline — so it collapses entirely (no headline, no surrounding blank), matching the
+    // dense category surface and the "no empty headline" output rule. An interactive run
+    // already drew a live krackle line; erase it so nothing persists in its place.
+    const shown = b.buf.filter((rec) => rec.level !== "skip");
+    if (shown.length === 0) {
+      if (b.krackleShown) this.out.write("\r\x1b[K");
+      return;
+    }
     this.bandsDrawn = true;
 
     const failed = this.failures > b.failAt;
@@ -265,7 +275,7 @@ export class Reporter {
 
     // Dense by default: flush the section's detail below its marked band. Skips are the one
     // exception — steady-state no-op noise, held back for --verbose (which streams instead).
-    for (const rec of b.buf) if (rec.level !== "skip") this.writeSub(rec);
+    for (const rec of shown) this.writeSub(rec);
   }
 
   // Draw the closing verdict band and return the exit code, replacing finish()'s summary line in
