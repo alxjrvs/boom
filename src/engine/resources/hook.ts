@@ -8,7 +8,9 @@ import { pathExists } from "../../lib/fs.ts";
 import type { ReconcileCtx, Verb } from "../types.ts";
 
 export interface HookApi {
-  readonly with: Record<string, string>;
+  // `with` inputs arrive already TOML-typed (string | number | boolean | array | table), not
+  // stringified — so a hook reads `api.with.count as number` instead of parsing "5".
+  readonly with: Record<string, unknown>;
   readonly verb: Verb;
   readonly dryRun: boolean;
   readonly env: Record<string, string | undefined>;

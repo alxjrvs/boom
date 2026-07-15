@@ -1,15 +1,16 @@
 // The `[boom]` table: machine-global, self-wiring behaviors folded into the reconcile boom
 // already runs, so a consumer stops hand-rolling `run`/plist boilerplate for boom invoking
 // boom. Applied once per run, after the sections, verb-aware:
-//   sync    → install/refresh (regenerate the skill, (re)load timers, check/auto-upgrade)
+//   sync    → install/refresh (regenerate the skill, (re)load + reap timers, check/auto-upgrade)
 //   verify  → report drift (skill stale, timer not loaded)
-//   uninstall → tear down what boom installed (unload + remove timers; the skill is left)
+//   uninstall → tear down what boom installed (unload + remove every timer; the skill is left)
 // Each field is opt-in; an absent/empty `[boom]` table emits nothing.
 // `skillDoc`/`skillInstallPath`/`fetchLatestVersion` live in `commands/*`, which transitively
 // import the `cli.ts` route map — a static import here would form an engine→commands→cli
 // cycle and read those exports in their temporal dead zone (same hazard catalog.ts documents).
 // They're pulled in via a call-time dynamic import inside the async handlers below, past the
 // cycle, instead.
+import { readdir } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { detectOs } from "../config/profile.ts";
 import type { BoomSettings } from "../config/schema.ts";
@@ -27,10 +28,17 @@ import { VERSION } from "../lib/version.ts";
 import { boomStateDir } from "./state.ts";
 import type { ReconcileCtx } from "./types.ts";
 
-// Fixed labels for the boom-owned timers, so refresh/verify/uninstall find them
-// deterministically without a state file.
-const VERIFY_LABEL = "com.boomtube.verify";
-const CODE_FETCH_LABEL = "com.boomtube.code-fetch";
+// Every boom-owned timer plist is labelled `com.boomtube.<cmd-slug>` — the shared prefix lets
+// reaping recognize (and remove) a timer whose `schedule` entry was deleted without a state
+// file. A cmd of "verify" → com.boomtube.verify and "code fetch" → com.boomtube.code-fetch,
+// so the historical fixed labels reproduce exactly and an upgrade doesn't churn live timers.
+const TIMER_PREFIX = "com.boomtube.";
+function timerLabel(cmd: string): string {
+  return TIMER_PREFIX + cmd.trim().split(/\s+/).join("-");
+}
+function timerArgs(cmd: string, self: string): string[] {
+  return [self, ...cmd.trim().split(/\s+/)];
+}
 
 // Is `latest` a strictly greater semver than `current`? Both are dot-numeric release strings
 // (no pre-release suffixes ship), so a component-wise numeric compare suffices.
@@ -45,16 +53,9 @@ export function isNewer(latest: string, current: string): boolean {
   return false;
 }
 
-// Any field configured (a non-false, non-undefined value)? Gates the header so an absent or
-// all-off `[boom]` table stays silent.
+// Any field configured? Gates the header so an absent or all-off `[boom]` table stays silent.
 function anyConfigured(s: BoomSettings): boolean {
-  return Boolean(
-    s.skill_on_sync ||
-      s.upgrade_check_on_sync ||
-      s.upgrade_auto_on_sync ||
-      s.verify_schedule ||
-      s.code_fetch_schedule,
-  );
+  return Boolean(s.skill_on_sync || s.upgrade_on_sync || (s.schedule && s.schedule.length > 0));
 }
 
 // The running boom binary — the ProgramArguments a timer invokes, and the guard against
@@ -71,20 +72,7 @@ export async function applyBoomSettings(
   if (!settings || !anyConfigured(settings)) return;
   ctx.report.header("boom self-wiring");
   await applySkill(settings, ctx);
-  await applyTimer(ctx, {
-    on: Boolean(settings.verify_schedule),
-    label: VERIFY_LABEL,
-    interval: settings.verify_schedule,
-    args: (self) => [self, "verify"],
-    what: "scheduled verify",
-  });
-  await applyTimer(ctx, {
-    on: Boolean(settings.code_fetch_schedule),
-    label: CODE_FETCH_LABEL,
-    interval: settings.code_fetch_schedule,
-    args: (self) => [self, "code", "fetch"],
-    what: "code fetch",
-  });
+  await applySchedules(settings, ctx);
   await applyUpgrade(settings, ctx);
 }
 
@@ -131,36 +119,72 @@ async function applySkill(settings: BoomSettings, ctx: ReconcileCtx): Promise<vo
   report.ok(`refreshed skill → ${disp} (v${VERSION})`);
 }
 
+// #57/#58 — own launchd timers that run `boom <cmd>` on an interval. One entry per schedule;
+// sync installs/refreshes the declared set and reaps any boom timer no longer declared,
+// verify reports each, uninstall removes them all. macOS only (launchd) — elsewhere a note.
+async function applySchedules(settings: BoomSettings, ctx: ReconcileCtx): Promise<void> {
+  if (ctx.verb === "uninstall") {
+    // Tear down every boom-owned timer, declared or not (keep = ∅).
+    await reapTimers(ctx, new Set());
+    return;
+  }
+  const schedules = settings.schedule ?? [];
+  for (const s of schedules) {
+    await applyTimer(ctx, {
+      label: timerLabel(s.cmd),
+      interval: s.every,
+      args: (self) => timerArgs(s.cmd, self),
+      what: s.cmd,
+    });
+  }
+  // On sync, a schedule entry removed from the config should also unload its timer — reap any
+  // boom timer whose label isn't in the declared set. (Never on verify: it must not mutate.)
+  if (ctx.verb === "sync") {
+    await reapTimers(ctx, new Set(schedules.map((s) => timerLabel(s.cmd))));
+  }
+}
+
+// Remove boom-owned timers (com.boomtube.*) whose label isn't in `keep`. macOS-only effect
+// (unload); dry-run aware; a no-op where no LaunchAgents dir resolves.
+async function reapTimers(ctx: ReconcileCtx, keep: Set<string>): Promise<void> {
+  const { report } = ctx;
+  const agents = launchAgentsDir(ctx.env);
+  if (!agents || !(await pathExists(agents))) return;
+  let names: string[];
+  try {
+    names = await readdir(agents);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    if (!name.startsWith(TIMER_PREFIX) || !name.endsWith(".plist")) continue;
+    const label = name.slice(0, -".plist".length);
+    if (keep.has(label)) continue;
+    const plistPath = join(agents, name);
+    if (ctx.dryRun) {
+      report.note(`would unload + remove ${label} timer`);
+      continue;
+    }
+    if (detectOs(ctx.env) === "darwin") unloadAgent(plistPath, ctx.env);
+    await rm(plistPath, { force: true });
+    report.ok(`removed ${label} timer`);
+  }
+}
+
 interface TimerSpec {
-  readonly on: boolean;
   readonly label: string;
-  readonly interval?: string;
+  readonly interval: string;
   readonly args: (self: string) => string[];
   readonly what: string;
 }
 
-// #57/#58 — own a launchd timer that runs boom (or `boom code fetch`) on an interval. macOS
-// only (launchd); a no-op with a note elsewhere. The generated plist is deterministic, so an
-// unchanged interval re-renders byte-identical and sync only reloads when it actually changed.
+// Install/refresh one timer. The generated plist is deterministic, so an unchanged interval
+// re-renders byte-identical and sync only reloads when it actually changed.
 async function applyTimer(ctx: ReconcileCtx, spec: TimerSpec): Promise<void> {
   const { report } = ctx;
   const agents = launchAgentsDir(ctx.env);
   if (!agents) return;
   const plistPath = join(agents, `${spec.label}.plist`);
-
-  // uninstall tears down even a now-disabled timer that boom previously installed, so it never
-  // orphans an agent; sync/verify of an off timer is a no-op.
-  if (ctx.verb === "uninstall") {
-    if (!(await pathExists(plistPath))) return;
-    if (ctx.dryRun) report.note(`would unload + remove ${spec.what} timer`);
-    else {
-      if (detectOs(ctx.env) === "darwin") unloadAgent(plistPath, ctx.env);
-      await rm(plistPath, { force: true });
-      report.ok(`removed ${spec.what} timer`);
-    }
-    return;
-  }
-  if (!spec.on || !spec.interval) return;
 
   if (detectOs(ctx.env) !== "darwin") {
     report.skip(`${spec.what} — scheduled timers are macOS-only`);
@@ -212,7 +236,7 @@ async function applyTimer(ctx: ReconcileCtx, spec: TimerSpec): Promise<void> {
 // #59 — fold an upgrade check (and optional auto-upgrade) into sync. Both are best-effort and
 // offline-safe: a network hiccup surfaces nothing and never fails the sync. Sync-only.
 async function applyUpgrade(settings: BoomSettings, ctx: ReconcileCtx): Promise<void> {
-  if (!settings.upgrade_check_on_sync && !settings.upgrade_auto_on_sync) return;
+  if (!settings.upgrade_on_sync) return;
   const { report } = ctx;
   if (ctx.verb !== "sync") return;
   if (ctx.dryRun) {
@@ -229,7 +253,7 @@ async function applyUpgrade(settings: BoomSettings, ctx: ReconcileCtx): Promise<
     report.skip(`boom is current (v${VERSION})`);
     return;
   }
-  if (settings.upgrade_auto_on_sync) {
+  if (settings.upgrade_on_sync === "auto") {
     const self = boomSelf();
     if (!self) {
       report.note(`newer boom v${latest} available — run \`boom upgrade\` (dev run can't self-upgrade)`);

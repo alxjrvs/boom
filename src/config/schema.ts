@@ -1,6 +1,6 @@
 // The boomfile.toml schema (nested-by-section). This typed contract is the source of
 // truth shared by the loader and the reconcile engine. Within a section, resources run
-// by phase:  link → copy → glob → packages (brewfile/mise) → osx_default → run → hook.
+// by phase:  link → copy → dir → pkg → osx_default → launchd → run → check → hook.
 import * as v from "valibot";
 
 // A Unix permission bitmask as an octal string ("644", "0700"). Validated here at the
@@ -12,21 +12,39 @@ const ModeSchema = v.pipe(
 );
 
 // strictObject (not object): unknown keys are a hard error, not silently dropped — so a
-// mistyped `brewfle`/`osx_defalt` in a boomfile surfaces as a schema failure at load,
-// which is the whole point of a "typed, validated TOML" config.
-export const LinkSchema = v.strictObject({
+// mistyped `pkg`/`osx_defalt` in a boomfile surfaces as a schema failure at load, which is
+// the whole point of a "typed, validated TOML" config.
+//
+// One `file` shape covers both `link` and `copy` (they differ only in symlink-vs-copy).
+// `src` may be a *glob* pattern — then `dst` is treated as a directory and every match is
+// placed under it, preserving the path structure below the glob's static prefix. `expand`
+// (honored by `copy` only — a symlink has no content to render) substitutes `${env:VAR}` /
+// `${host}` / `${os}` in the file before writing: the escape hatch for the one dotfile that
+// must differ per machine, without dropping to a hook.
+export const FileSchema = v.strictObject({
   src: v.string(),
   dst: v.string(),
   mode: v.optional(ModeSchema),
+  expand: v.optional(v.boolean()),
 });
 
-export const GlobSchema = v.strictObject({
-  pattern: v.string(),
-  into: v.string(),
+// A package manager to satisfy: one array entry per manager, replacing the old scalar
+// `brewfile = "…"` + boolean `mise = true` (the two resources that broke the array-of-tables
+// shape every other resource has). `file` is the manager's manifest: a Brewfile path for
+// `brew` (default "Brewfile"); `mise` reads the repo's own mise config and ignores it. A new
+// manager (apt, dnf, …) is one more picklist member + one dispatch arm in packages.ts — the
+// registry north star, instead of a fresh top-level section key per manager.
+export const PkgSchema = v.strictObject({
+  manager: v.picklist(["brew", "mise"]),
+  file: v.optional(v.string()),
 });
+
+// The verbs a `run` step can bind to. `on` accepts a single verb or a list, so "run on sync
+// *and* uninstall" is one entry, not a duplicated pair.
+const VerbSchema = v.picklist(["sync", "verify", "uninstall"]);
 
 export const RunSchema = v.strictObject({
-  on: v.picklist(["sync", "verify", "uninstall"]),
+  on: v.union([VerbSchema, v.array(VerbSchema)]),
   cmd: v.string(),
   // Optional wall-clock cap (seconds). A hung `run` step would otherwise block the whole
   // reconcile indefinitely; with this set, boom kills the step and reports a timeout
@@ -34,38 +52,48 @@ export const RunSchema = v.strictObject({
   timeout: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
 });
 
+// A hook's `with` inputs carry arbitrary TOML values (numbers, bools, arrays, tables) — not
+// just strings — so a hook receives them already typed instead of re-parsing "true"/"5".
+// This is the public extension contract; widening it now (pre-1.0) avoids a breaking change
+// once hooks proliferate.
 export const HookSchema = v.strictObject({
   name: v.string(),
-  with: v.optional(v.record(v.string(), v.string())),
+  with: v.optional(v.record(v.string(), v.unknown())),
 });
 
 // A macOS default: `defaults write <domain> <key> -<type> <value>` (OS-gated to darwin).
+// `type` is optional: TOML already types the value (`true`→bool, `3`→int, `0.5`→float,
+// `"x"`→string), so it's inferred from the value and only needs stating to override an edge
+// case (force a float for an integer-valued float, or a string for a numeric string).
 export const OsxDefaultSchema = v.strictObject({
   domain: v.string(),
   key: v.string(),
-  type: v.picklist(["bool", "int", "float", "string"]),
+  type: v.optional(v.picklist(["bool", "int", "float", "string"])),
   value: v.union([v.string(), v.number(), v.boolean()]),
 });
 
 // A standalone directory to ensure exists (with an optional mode) — the declarative form of
-// a `run` + `mkdir -p`/`chmod`. `manage = true` opts into removing it on uninstall *only if
-// empty* (dirs may hold user data, so the default is to leave it).
+// a `run` + `mkdir -p`/`chmod`. `remove_on_uninstall = true` opts into removing it on
+// uninstall *only if empty* (dirs may hold user data, so the default is to leave it).
 export const DirSchema = v.strictObject({
   path: v.string(),
   mode: v.optional(ModeSchema),
-  manage: v.optional(v.boolean()),
+  remove_on_uninstall: v.optional(v.boolean()),
 });
 
-// A verify-time content assertion on a file: every `present` regex must match and every
-// `absent` regex must not, else the check fails (contributing to `boom verify`'s exit code
-// and JSON report). `missing_file` picks how a nonexistent file is treated. The declarative
-// form of the escaping-heavy `grep`-in-a-`run` guardrails.
+// A content assertion on a file: every `present` regex must match and every `absent` regex
+// must not. On `verify` a failure contributes to the exit code + JSON report; on `sync`, if
+// `repair` is set and the assertion currently fails, that shell command runs to make it so —
+// so `check` converges drift like every other resource instead of only reporting it.
+// `missing_file` picks how a nonexistent file is treated (default `fail` — a guardrail that
+// silently stops guarding when its file vanishes is worse than useless).
 export const CheckSchema = v.strictObject({
-  file: v.string(),
+  path: v.string(),
   present: v.optional(v.array(v.string())),
   absent: v.optional(v.array(v.string())),
   message: v.optional(v.string()),
   missing_file: v.optional(v.picklist(["skip", "fail", "pass"])),
+  repair: v.optional(v.string()),
 });
 
 // A macOS LaunchAgent: link a plist into ~/Library/LaunchAgents and own its launchctl
@@ -87,12 +115,10 @@ export const WhenSchema = v.strictObject({
 export const SectionSchema = v.strictObject({
   name: v.string(),
   when: v.optional(WhenSchema),
-  link: v.optional(v.array(LinkSchema)),
-  copy: v.optional(v.array(LinkSchema)),
-  glob: v.optional(v.array(GlobSchema)),
+  link: v.optional(v.array(FileSchema)),
+  copy: v.optional(v.array(FileSchema)),
   dir: v.optional(v.array(DirSchema)),
-  brewfile: v.optional(v.string()),
-  mise: v.optional(v.boolean()),
+  pkg: v.optional(v.array(PkgSchema)),
   osx_default: v.optional(v.array(OsxDefaultSchema)),
   launchd: v.optional(v.array(LaunchdSchema)),
   run: v.optional(v.array(RunSchema)),
@@ -107,6 +133,15 @@ const IntervalSchema = v.pipe(
   v.regex(/^\d+[smh]?$/, 'interval must be like "15m", "1h", "30s", or a bare seconds count'),
 );
 
+// A scheduled boom invocation: run `boom <cmd>` on the `every` interval via a launchd timer
+// (macOS-only). `cmd` is a boom subcommand line ("verify", "code fetch"); one array entry
+// replaces the old bespoke `verify_schedule` / `code_fetch_schedule` keys and lets any boom
+// command be scheduled without growing a new schema key each time.
+export const ScheduleSchema = v.strictObject({
+  cmd: v.string(),
+  every: IntervalSchema,
+});
+
 // The top-level `[boom]` table: machine-global, self-wiring behaviors folded into the
 // reconcile boom already runs — so a consumer stops hand-rolling `run`/plist boilerplate for
 // boom-invoking-boom. Every field is opt-in; an absent `[boom]` table changes nothing.
@@ -114,16 +149,11 @@ export const BoomSettingsSchema = v.strictObject({
   // Regenerate ~/.claude/skills/boom/SKILL.md from the running binary on every sync, so the
   // self-describing skill can never lag a `boom upgrade`.
   skill_on_sync: v.optional(v.boolean()),
-  // After a sync, print a one-line notice when a newer boom release is available (cheap,
-  // non-fatal, offline-safe).
-  upgrade_check_on_sync: v.optional(v.boolean()),
-  // After a sync, actually self-upgrade to the latest release (opt-in; hands-off machines).
-  upgrade_auto_on_sync: v.optional(v.boolean()),
-  // Install/refresh a launchd timer that runs `boom verify` on this interval (macOS-only).
-  verify_schedule: v.optional(IntervalSchema),
-  // Install/refresh a launchd timer that `git fetch`es every registered `boom code`
-  // workspace on this interval, keeping origin warm for agent worktree cuts (macOS-only).
-  code_fetch_schedule: v.optional(IntervalSchema),
+  // After a sync: `check` prints a one-line notice when a newer boom release is available
+  // (cheap, non-fatal, offline-safe); `auto` also self-upgrades (opt-in; hands-off machines).
+  upgrade_on_sync: v.optional(v.picklist(["check", "auto"])),
+  // Install/refresh launchd timers that run `boom <cmd>` on an interval (macOS-only).
+  schedule: v.optional(v.array(ScheduleSchema)),
 });
 
 export const BoomfileSchema = v.strictObject({
@@ -132,14 +162,15 @@ export const BoomfileSchema = v.strictObject({
 });
 
 export type When = v.InferOutput<typeof WhenSchema>;
-export type Link = v.InferOutput<typeof LinkSchema>;
-export type Glob = v.InferOutput<typeof GlobSchema>;
+export type File = v.InferOutput<typeof FileSchema>;
+export type Pkg = v.InferOutput<typeof PkgSchema>;
 export type Dir = v.InferOutput<typeof DirSchema>;
 export type Check = v.InferOutput<typeof CheckSchema>;
 export type Launchd = v.InferOutput<typeof LaunchdSchema>;
 export type Run = v.InferOutput<typeof RunSchema>;
 export type Hook = v.InferOutput<typeof HookSchema>;
 export type OsxDefault = v.InferOutput<typeof OsxDefaultSchema>;
+export type Schedule = v.InferOutput<typeof ScheduleSchema>;
 export type Section = v.InferOutput<typeof SectionSchema>;
 export type BoomSettings = v.InferOutput<typeof BoomSettingsSchema>;
 export type Boomfile = v.InferOutput<typeof BoomfileSchema>;

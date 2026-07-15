@@ -402,7 +402,7 @@
       <a href="https://github.com/alxjrvs/boom">GitHub</a>
     </nav>
     <div class="bar-sp"></div>
-    <span class="bar-ver" aria-label="Version 0.13.0">v0.13.0</span>
+    <span class="bar-ver" aria-label="Version 0.14.0">v0.14.0</span>
     <button class="toggle" id="theme" type="button" aria-pressed="false">Light</button>
   </div>
 </header>
@@ -462,7 +462,7 @@
         <pre><span class="sec">[[section]]</span>
 <span class="k">name</span> = <span class="s">"Shell"</span>
 <span class="k">link</span> = [{ src=<span class="s">".zshrc"</span> }]
-<span class="k">brewfile</span> = <span class="s">"Brewfile"</span></pre>
+<span class="k">pkg</span> = [{ manager=<span class="s">"brew"</span> }]</pre>
         <span class="sub">your dotfiles repo</span>
       </div>
       <div class="arrow" aria-hidden="true">→</div>
@@ -543,8 +543,8 @@
         <div class="pipe">
           <div class="pstep"><span class="i">01</span>link</div>
           <div class="pstep"><span class="i">02</span>copy</div>
-          <div class="pstep"><span class="i">03</span>glob</div>
-          <div class="pstep"><span class="i">04</span>packages <span class="note">brew · mise</span></div>
+          <div class="pstep"><span class="i">03</span>dir</div>
+          <div class="pstep"><span class="i">04</span>pkg <span class="note">brew · mise</span></div>
           <div class="pstep"><span class="i">05</span>osx_default</div>
           <div class="pstep"><span class="i">06</span>run</div>
           <div class="pstep"><span class="i">07</span>hook</div>
@@ -572,8 +572,7 @@
 
 <span class="k-sec">[[section]]</span>
 <span class="k-key">name</span> <span class="k-pun">=</span> <span class="k-str">"Packages"</span>
-<span class="k-key">brewfile</span> <span class="k-pun">=</span> <span class="k-str">"Brewfile"</span>
-<span class="k-key">mise</span> <span class="k-pun">=</span> <span class="k-num">true</span>
+<span class="k-key">pkg</span> <span class="k-pun">=</span> [{ <span class="k-key">manager</span> = <span class="k-str">"brew"</span> }, { <span class="k-key">manager</span> = <span class="k-str">"mise"</span> }]
 
 <span class="k-sec">[[section]]</span>
 <span class="k-key">name</span> <span class="k-pun">=</span> <span class="k-str">"macOS"</span>
@@ -582,11 +581,10 @@
       <div class="panel legend lead-c">
         <h3>What a section can hold</h3>
         <ul>
-          <li><b>link · copy</b> — symlink or copy files into place</li>
-          <li><b>glob</b> — link everything matching a pattern</li>
-          <li><b>brewfile</b> — install a Brewfile</li>
-          <li><b>mise</b> — pin tool versions</li>
+          <li><b>link · copy</b> — symlink or copy files (a glob <code>src</code> fans out; <code>copy</code> can <code>expand</code> per machine)</li>
+          <li><b>pkg</b> — a Brewfile or mise tool versions</li>
           <li><b>osx_default</b> — macOS defaults, on darwin</li>
+          <li><b>dir · check</b> — ensure a directory exists; assert (and repair) file content</li>
           <li><b>run</b> — a shell step tied to a verb</li>
           <li><b>hook</b> — your own typed module</li>
         </ul>
@@ -651,7 +649,7 @@ link = [{ src = <span class="s">".zshrc"</span>, dst = <span class="s">"~/.zshrc
 
 <span class="k">[[section]]</span>
 name = <span class="s">"Packages"</span>
-brewfile = <span class="s">"Brewfile"</span></pre>
+pkg = [{ manager = <span class="s">"brew"</span> }]</pre>
           </div>
         </div>
         <div class="step">
@@ -712,7 +710,7 @@ brewfile = <span class="s">"Brewfile"</span></pre>
         <a href="spec.html">Docs</a>
         <span class="wm-ink" aria-label="BoomTube"><span class="a" aria-hidden="true">B</span><span class="b" aria-hidden="true">o</span><span class="c" aria-hidden="true">o</span><span class="d" aria-hidden="true">m</span></span>
       </div>
-      <div class="meta">v0.13.0 · TypeScript on Bun · @stricli/core · valibot · smol-toml · early</div>
+      <div class="meta">v0.14.0 · TypeScript on Bun · @stricli/core · valibot · smol-toml · early</div>
     </div>
   </div>
 </footer>

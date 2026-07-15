@@ -243,8 +243,8 @@ async function fakeBrew(
   };
 }
 
-test("brewfile: sync passes --no-upgrade; sync --update omits it", async () => {
-  const sb = await sandbox(`[[section]]\nname = "Pkg"\nbrewfile = "Brewfile"\n`);
+test("pkg brew: sync passes --no-upgrade; sync --update omits it", async () => {
+  const sb = await sandbox(`[[section]]\nname = "Pkg"\npkg = [{ manager = "brew", file = "Brewfile" }]\n`);
   await writeFile(join(sb.repo, "Brewfile"), "");
   const calls = await fakeBrew(sb.repo, sb.ctx.env as Record<string, string | undefined>);
 
@@ -283,8 +283,8 @@ async function fakeMise(
       .filter((l) => l.length > 0);
 }
 
-test("mise: sync runs `mise install`; verify keys drift off `ls --missing` stdout, not exit code", async () => {
-  const sb = await sandbox(`[[section]]\nname = "Tools"\nmise = true\n`);
+test("pkg mise: sync runs `mise install`; verify keys drift off `ls --missing` stdout, not exit code", async () => {
+  const sb = await sandbox(`[[section]]\nname = "Tools"\npkg = [{ manager = "mise" }]\n`);
   const env = sb.ctx.env as Record<string, string | undefined>;
   const calls = await fakeMise(sb.repo, env);
 

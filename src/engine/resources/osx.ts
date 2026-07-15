@@ -7,8 +7,19 @@ import { expandHome } from "../../lib/fs.ts";
 import { captureArgv, cleanEnv } from "../../lib/proc.ts";
 import type { ReconcileCtx } from "../types.ts";
 
-type OsxType = OsxDefault["type"];
+// `type` is optional in the schema; NonNullable is the resolved type after inference.
+type OsxType = NonNullable<OsxDefault["type"]>;
 type OsxValue = OsxDefault["value"];
+
+// Infer the `defaults` type from the TOML value's own type when `type` is omitted: TOML
+// already distinguishes bool/int/float/string, so restating it is redundant. An explicit
+// `type` still wins — the escape hatch for the one ambiguity inference can't resolve (an
+// integer-valued float, or a numeric string that must stay a string).
+function inferType(value: OsxValue): OsxType {
+  if (typeof value === "boolean") return "bool";
+  if (typeof value === "number") return Number.isInteger(value) ? "int" : "float";
+  return "string";
+}
 
 // The canonical string a declared default *should* read back as. `defaults read`
 // prints booleans as 1/0, ints/floats as their numeric text, strings verbatim — so
@@ -40,7 +51,8 @@ export function osxMatches(type: OsxType, current: string, value: OsxValue): boo
 export function reconcileOsxDefault(entry: OsxDefault, ctx: ReconcileCtx): void {
   if (detectOs(ctx.env) !== "darwin") return;
   const { report } = ctx;
-  const { domain, key, type } = entry;
+  const { domain, key } = entry;
+  const type = entry.type ?? inferType(entry.value);
   const disp = `${domain} ${key}`;
   const env = cleanEnv(ctx.env);
   // String values are written verbatim by `defaults write` (no shell to expand

@@ -1,18 +1,16 @@
-// The `run` resource: an inline shell step bound to a verb. Ports engine/run's `on`
-// primitive — `sync` fires on the sync verb (bare or `--fix`); `verify` on verify;
-// `uninstall` on uninstall (the teardown direction, symmetric with hooks).
+// The `run` resource: an inline shell step bound to one or more verbs. Ports engine/run's
+// `on` primitive — `sync` fires on the sync verb (bare or `--fix`); `verify` on verify;
+// `uninstall` on uninstall (the teardown direction, symmetric with hooks). `on` accepts a
+// list, so a step that fires on both sync and uninstall is one entry, not a duplicated pair.
 import type { Run } from "../../config/schema.ts";
 import { runShell } from "../../lib/proc.ts";
 import type { ReconcileCtx } from "../types.ts";
 
 export async function reconcileRun(entry: Run, ctx: ReconcileCtx): Promise<void> {
-  const fires =
-    (entry.on === "sync" && ctx.verb === "sync") ||
-    (entry.on === "verify" && ctx.verb === "verify") ||
-    (entry.on === "uninstall" && ctx.verb === "uninstall");
-  if (!fires) return;
+  const on = Array.isArray(entry.on) ? entry.on : [entry.on];
+  if (!on.includes(ctx.verb)) return;
 
-  if ((entry.on === "sync" || entry.on === "uninstall") && ctx.dryRun) {
+  if ((ctx.verb === "sync" || ctx.verb === "uninstall") && ctx.dryRun) {
     ctx.report.plan(`would run: ${entry.cmd}`);
     return;
   }

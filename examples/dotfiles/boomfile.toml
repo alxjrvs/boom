@@ -2,13 +2,16 @@
 # Copy the pieces you need into your own dotfiles repo; `boom doctor --config` checks it.
 
 # A top-level [boom] table folds boom's own self-wiring into the reconcile it already runs:
-# keep the Claude skill fresh, nudge on a new release, and manage scheduled boom verify /
-# code fetch launchd timers (macOS) — instead of hand-rolling those as run/plist steps.
+# keep the Claude skill fresh, nudge on a new release, and manage scheduled boom timers
+# (macOS) — instead of hand-rolling those as run/plist steps.
 [boom]
 skill_on_sync = true             # regenerate ~/.claude/skills/boom/SKILL.md each sync
-upgrade_check_on_sync = true     # warn when a newer boom release ships (offline-safe)
-verify_schedule = "15m"          # launchd timer: boom verify every 15m (macOS-only)
-code_fetch_schedule = "15m"      # launchd timer: git-fetch every code repo (keep origin warm)
+upgrade_on_sync = "check"        # warn when a newer boom release ships ("auto" self-upgrades)
+# schedule: a launchd timer per entry (macOS-only) running `boom <cmd>` on `every`.
+schedule = [
+  { cmd = "verify", every = "15m" },      # catch drift every 15m
+  { cmd = "code fetch", every = "15m" },   # keep every `boom code` repo's origin warm
+]
 
 [[section]]
 name = "Shell + git"
@@ -26,16 +29,8 @@ src = ".zshenv"
 dst = "~/.zshenv"
 
 [[section.link]]
-src = ".hushlogin"
-dst = "~/.hushlogin"
-
-[[section.link]]
 src = ".gitconfig"
 dst = "~/.gitconfig"
-
-[[section.link]]
-src = ".gitmessage"
-dst = "~/.gitmessage"
 
 [[section.link]]
 src = ".gitignore"
@@ -44,14 +39,6 @@ dst = "~/.gitignore"
 [[section.link]]
 src = ".editorconfig"
 dst = "~/.editorconfig"
-
-[[section.link]]
-src = ".ripgreprc"
-dst = "~/.ripgreprc"
-
-[[section.link]]
-src = ".fdignore"
-dst = "~/.fdignore"
 
 [[section.link]]
 src = "git-template/hooks/pre-commit"
@@ -70,6 +57,17 @@ src = "ssh/1password-agent.toml"
 dst = "~/.config/1Password/ssh/agent.toml"
 
 [[section]]
+name = "Per-machine git identity"
+
+# `copy` with `expand` renders the file before writing: ${env:VAR}/${host}/${os} are
+# substituted, so one repo file yields per-machine content without a hook. (link can't
+# expand — a symlink has no content of its own.)
+[[section.copy]]
+src = "gitconfig-local.tmpl"
+dst = "~/.config/git/local"
+expand = true
+
+[[section]]
 name = "Tools"
 
 [[section.link]]
@@ -77,44 +75,16 @@ src = "mise.toml"
 dst = "~/.config/mise/config.toml"
 
 [[section.link]]
-src = "mise-settings.toml"
-dst = "~/.config/mise/conf.d/settings.toml"
-
-[[section.link]]
-src = "sheldon/plugins.toml"
-dst = "~/.config/sheldon/plugins.toml"
-
-[[section.link]]
 src = "starship.toml"
 dst = "~/.config/starship.toml"
-
-[[section.link]]
-src = "cmux/cmux.json"
-dst = "~/.config/cmux/cmux.json"
 
 [[section.link]]
 src = "ghostty/config"
 dst = "~/.config/ghostty/config"
 
 [[section.link]]
-src = "bat/config"
-dst = "~/.config/bat/config"
-
-[[section.link]]
-src = "atuin/config.toml"
-dst = "~/.config/atuin/config.toml"
-
-[[section.link]]
-src = "gh/config.yml"
-dst = "~/.config/gh/config.yml"
-
-[[section.link]]
 src = "nvim/init.lua"
 dst = "~/.config/nvim/init.lua"
-
-[[section.link]]
-src = "karabiner/karabiner.json"
-dst = "~/.config/karabiner/karabiner.json"
 
 [[section]]
 name = "Claude"
@@ -128,20 +98,27 @@ src = "dot-claude/settings.json"
 dst = "~/.claude/settings.json"
 
 [[section]]
-name = "zsh fragments"
-brewfile = "Brewfile"
-mise = true
+name = "Packages + zsh fragments"
 
-[[section.glob]]
-pattern = "zsh/[0-9]*.zsh"
-into = "~/.config/zsh/"
+# `pkg`: one array entry per manager. `brew` runs `brew bundle` over `file` (default
+# "Brewfile"); `mise` runs `mise install` against the repo's mise config.
+pkg = [
+  { manager = "brew", file = "Brewfile" },
+  { manager = "mise" },
+]
+
+# A glob `src` places every match under `dst` (a directory), preserving structure below the
+# pattern's static prefix — the old `glob`, now just a `link` whose src has a wildcard.
+[[section.link]]
+src = "zsh/[0-9]*.zsh"
+dst = "~/.config/zsh/"
 
 [[section]]
 name = "SSH perms"
 
 # `dir` ensures a standalone directory exists with a mode — the declarative form of the
-# mkdir -p/chmod run steps this used to be. `manage = true` would remove it on uninstall
-# (only if empty); omitted here since ~/.ssh holds user data.
+# mkdir -p/chmod run steps this used to be. `remove_on_uninstall = true` would remove it on
+# uninstall (only if empty); omitted here since ~/.ssh holds user data.
 [[section.dir]]
 path = "~/.ssh"
 mode = "700"
@@ -153,11 +130,11 @@ mode = "700"
 [[section]]
 name = "Guardrails"
 
-# `check` runs on verify: every `present` regex must match the file, every `absent` must
-# not — folded into `boom verify`'s exit code and JSON report. The legible form of a
-# grep-in-a-run guardrail.
+# `check` asserts file content on verify: every `present` regex must match, every `absent`
+# must not — folded into `boom verify`'s exit code and JSON report. With `repair`, sync also
+# *converges* the assertion (running the command only when it currently fails).
 [[section.check]]
-file = "~/.gitconfig"
+path = "~/.gitconfig"
 present = ["\\[user\\]"]
 message = "git identity not configured"
 
@@ -173,6 +150,7 @@ src = "launchd/com.example.agent.plist"
 [[section]]
 name = "lefthook"
 
+# `run.on` accepts a list, so a step firing on more than one verb is one entry.
 [[section.run]]
 on = "sync"
 cmd = "lefthook install"

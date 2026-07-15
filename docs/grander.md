@@ -35,7 +35,7 @@ manifest. (`src/engine/journal.ts`, `state.ts`, `rollback.ts`.)
 ### 3. Hook contract → the resource-type API → **M2**
 The hook is the public extension point: `hooks/<name>.ts` modules exporting
 `sync`/`verify`/`uninstall` that receive a typed `HookApi`. Built-in resources
-(link/copy/glob/run/packages) implement the same verb contract in a registry
+(link/copy/dir/pkg/run/check) implement the same verb contract in a registry
 (`src/engine/registry.ts`, `resources/`). No JSON-config manifest — the *config*
 is TOML data, but the *extension* contract is typed TypeScript.
 
