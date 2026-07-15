@@ -9,8 +9,14 @@ import { backupTo } from "../lib/fs.ts";
 import { openDb, withDb } from "./db.ts";
 import { backupsDir, type Env } from "./state.ts";
 
-// How to reverse one mutation: remove what we created, or restore a backed-up file.
-export type UndoToken = { kind: "remove" } | { kind: "restore"; from: string };
+// How to reverse one mutation: remove what we created, restore a backed-up file, or — for the
+// one non-file effect — re-apply a macOS default's prior value (`prior: null` means the key
+// was unset, so rollback deletes it). Timer plists roll back as ordinary file writes (the
+// next reconcile re-settles their launchctl state), so they need no dedicated kind.
+export type UndoToken =
+  | { kind: "remove" }
+  | { kind: "restore"; from: string }
+  | { kind: "osx"; domain: string; key: string; type: string; prior: string | null };
 
 // Displace whatever currently sits at `dst` so a create can take its place, and return how
 // to reverse it. With a backup root, move the existing file into the run's backup tree

@@ -17,7 +17,7 @@ A `boom` invocation does one of two things:
 1. **Reconcile verbs** over a config repo's `boomfile.toml` — the `sync` verb runs on
    the bare `boom source` command (and its explicit `boom source sync` spelling); the
    rest are their own top-level commands:
-   - `boom source` / `boom source sync` — reconcile the machine to the boomfile, running the `sync` verb (`--fix` repairs drift by overwriting conflicts; `--update` also updates outdated brewfile formulae)
+   - `boom source` / `boom source sync` — reconcile the machine to the boomfile, running the `sync` verb (`--fix` repairs drift by overwriting conflicts; `--update` also updates outdated brew formulae)
    - `boom verify` — check drift, exit 0 ok / 2 warn / 1 fail (`--json` for a report)
    - `boom uninstall`
    These share **one verb-parameterized loop** (`src/engine/reconcile.ts`) over a
@@ -100,22 +100,36 @@ ahead-of-upstream) — `boom source push` or `boom source reset` first, then re-
 
 `boomfile.toml` is a TOML document validated against a schema (`src/config/schema.ts`,
 valibot). It is grouped into `[[section]]`s; within a section, resources run in a
-fixed phase order: `link → copy → glob → dir → packages (brewfile/mise) → osx_default →
-launchd → run → check → hook`. Resources:
+fixed phase order: `link → copy → dir → pkg → osx_default → launchd → run → check → hook`.
+Resources:
 
-- `link` / `copy` `{ src, dst, mode? }`, `glob { pattern, into }`
-- `dir = [{ path, mode?, manage? }]` — ensure a standalone directory exists (declarative
-  `mkdir -p`/`chmod`); `manage = true` removes it on uninstall *only if empty*
-- `brewfile = "FILE"`, `mise = true`, `osx_default = [{ domain, key, type, value }]`
+- `link` / `copy` `= [{ src, dst, mode?, expand? }]` — place a repo file at `dst` (symlink vs
+  byte-copy). `src` may be a **glob** (then `dst` is a directory and each match is placed
+  under it, structure preserved below the pattern's static prefix). `expand` (copy only)
+  substitutes `${env:VAR}`/`${host}`/`${os}` in the content — per-machine files without a hook
+- `dir = [{ path, mode?, remove_on_uninstall? }]` — ensure a standalone directory exists
+  (declarative `mkdir -p`/`chmod`); `remove_on_uninstall = true` removes it on uninstall *only
+  if empty*
+- `pkg = [{ manager = "brew"|"mise"|"apt"|"dnf", file? }]` — satisfy a package manager:
+  `brew` runs `brew bundle` over `file` (default `Brewfile`); `mise` runs `mise install`;
+  `apt`/`dnf` install a newline-separated `file` package list (Linux, via `sudo`). One array
+  entry per manager; a new manager is one dispatch arm, not a new section key
+- `osx_default = [{ domain, key, value, type? }]` — a `defaults write`; `type` is inferred
+  from the TOML value (`bool`/`int`/`float`/`string`) and only stated to override an edge
+  case. The prior value is journaled, so `boom rollback` restores it (or deletes a key boom
+  introduced)
 - `launchd = [{ src, dst? }]` — link a macOS LaunchAgent plist into
   `~/Library/LaunchAgents` and own its launchctl lifecycle (`load -w` on sync, `unload` on
   uninstall); darwin-only, `dst` defaults to `~/Library/LaunchAgents/<basename(src)>`
-- `run = [{ on = "sync"|"verify"|"uninstall", cmd, timeout? }]` — the inline imperative
-  escape; `timeout` (seconds) caps a step's wall-clock so a hung command can't block reconcile
-- `check = [{ file, present?, absent?, message?, missing_file? }]` — verify-time content
-  assertions: every `present` regex must match the file and every `absent` must not, folded
-  into `boom verify`'s exit code + JSON report (the declarative form of a `grep`-in-a-`run`)
-- `hook = [{ name, with? }]` — load `hooks/<name>.ts`, the TS resource-type extension
+- `run = [{ on, cmd, timeout? }]` — the inline imperative escape; `on` is a verb or a list of
+  `"sync"|"verify"|"uninstall"`; `timeout` (seconds) caps a step's wall-clock so a hung
+  command can't block reconcile
+- `check = [{ path, present?, absent?, message?, missing_file?, repair? }]` — content
+  assertions: every `present` regex must match and every `absent` must not. On `verify` this
+  folds into the exit code + JSON report; on `sync`, `repair` (a shell command, run only when
+  the assertion currently fails) converges it. `missing_file` defaults to `fail`
+- `hook = [{ name, with? }]` — load `hooks/<name>.ts`, the TS resource-type extension; `with`
+  carries arbitrary (TOML-typed) values, not just strings
 
 A section may carry `when = { os, host, profile }` to gate by machine; overlay
 files `boomfile.<os|host|profile>.toml` are merged onto the base. `--profile`
@@ -126,17 +140,19 @@ files `boomfile.<os|host|profile>.toml` are merged onto the base. `--profile`
 
 A single top-level `[boom]` table folds boom-invoking-boom behaviors into the reconcile
 boom already runs, so a consumer stops hand-rolling `run`/plist boilerplate for them. Every
-field is opt-in; an absent (or all-off) table changes nothing. Applied once per run after
-the sections (`src/engine/settings.ts`), verb-aware (sync installs/refreshes, verify reports
-drift, uninstall tears the timers down):
+field is opt-in; an absent (or all-off) table changes nothing. The behaviors are work items
+run through the *same* guarded loop as section resources (`runWorkItems`,
+`src/engine/settings.ts`) — so skill + timer writes are journaled and `boom rollback`-able —
+verb-aware (sync installs/refreshes, verify reports drift, uninstall tears the timers down):
 
 - `skill_on_sync = true` — regenerate `~/.claude/skills/boom/SKILL.md` from the running
   binary each sync, so the self-describing skill can't lag a `boom upgrade`.
-- `upgrade_check_on_sync = true` / `upgrade_auto_on_sync = true` — after a sync, warn when a
-  newer release ships (offline-safe, never fails the sync), or actually self-upgrade.
-- `verify_schedule = "15m"` / `code_fetch_schedule = "15m"` — install/refresh a launchd timer
-  (macOS-only) that runs `boom verify` / `boom code fetch` on the interval, so drift is caught
-  and `origin/HEAD` stays warm for agent worktree cuts without a hand-authored plist.
+- `upgrade_on_sync = "check" | "auto"` — after a sync, warn when a newer release ships
+  (offline-safe, never fails the sync), or actually self-upgrade.
+- `schedule = [{ cmd, every }]` — install/refresh a launchd timer (macOS-only) that runs
+  `boom <cmd>` on the interval, e.g. `{ cmd = "verify", every = "15m" }` to catch drift or
+  `{ cmd = "code fetch", every = "15m" }` to keep `origin/HEAD` warm for agent worktree cuts —
+  without a hand-authored plist. Removing an entry unloads its timer on the next sync.
 
 ### Hooks = the resource-type extension contract
 
@@ -160,8 +176,9 @@ each destructive filesystem op journals its undo *before* the write, so a crash 
 still reversible. `source --resume` continues the interrupted run in place (its id + backup
 tree) rather than opening a new one. Mutating runs also
 **back up** any displaced file under `…/backups/<run-id>/`. `boom rollback` replays a run's
-`done` rows in reverse (remove created links, restore backups) — like a Mother Box, it
-remembers everything and can put it back; `--dry-run` previews the replay. The manifest
+`done` rows in reverse (remove created links, restore backups, re-apply a macOS default's
+prior value) — like a Mother Box, it remembers everything and can put it back; `--dry-run`
+previews the replay. The manifest
 drives orphan reaping (verify warns; sync reaps), and a legacy TSV manifest is
 imported once on upgrade. Breadcrumbs (`config`, `code`) record the config repo (path +
 remote) and code dir.
@@ -201,7 +218,7 @@ src/
     status.ts              boom source status (read-only drift vs origin, shared repoDrift helper)
     push.ts reset.ts       boom source push / boom source reset
     registry.ts            data-driven resource table (phase order) + finalize hooks
-    resources/             link · copy · glob · packages · osx · run · hook
+    resources/             link · copy · dir · pkg · osx · launchd · run · check · hook
     db.ts journal.ts state.ts   bun:sqlite store: transaction journal + manifest
     rollback.ts code.ts discovery.ts
   config/  schema.ts load.ts remote.ts profile.ts

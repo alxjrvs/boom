@@ -7,8 +7,19 @@ import { expandHome } from "../../lib/fs.ts";
 import { captureArgv, cleanEnv } from "../../lib/proc.ts";
 import type { ReconcileCtx } from "../types.ts";
 
-type OsxType = OsxDefault["type"];
+// `type` is optional in the schema; NonNullable is the resolved type after inference.
+type OsxType = NonNullable<OsxDefault["type"]>;
 type OsxValue = OsxDefault["value"];
+
+// Infer the `defaults` type from the TOML value's own type when `type` is omitted: TOML
+// already distinguishes bool/int/float/string, so restating it is redundant. An explicit
+// `type` still wins — the escape hatch for the one ambiguity inference can't resolve (an
+// integer-valued float, or a numeric string that must stay a string).
+function inferType(value: OsxValue): OsxType {
+  if (typeof value === "boolean") return "bool";
+  if (typeof value === "number") return Number.isInteger(value) ? "int" : "float";
+  return "string";
+}
 
 // The canonical string a declared default *should* read back as. `defaults read`
 // prints booleans as 1/0, ints/floats as their numeric text, strings verbatim — so
@@ -37,10 +48,11 @@ export function osxMatches(type: OsxType, current: string, value: OsxValue): boo
   return current.trim() === want;
 }
 
-export function reconcileOsxDefault(entry: OsxDefault, ctx: ReconcileCtx): void {
+export async function reconcileOsxDefault(entry: OsxDefault, ctx: ReconcileCtx): Promise<void> {
   if (detectOs(ctx.env) !== "darwin") return;
   const { report } = ctx;
-  const { domain, key, type } = entry;
+  const { domain, key } = entry;
+  const type = entry.type ?? inferType(entry.value);
   const disp = `${domain} ${key}`;
   const env = cleanEnv(ctx.env);
   // String values are written verbatim by `defaults write` (no shell to expand
@@ -70,6 +82,12 @@ export function reconcileOsxDefault(entry: OsxDefault, ctx: ReconcileCtx): void 
         report.skip(`${disp} = ${want} (unchanged)`);
         return;
       }
+      // Journal the prior value (or `null` if the key was unset) before writing, so `boom
+      // rollback` can `defaults write` it back — or `defaults delete` a key boom introduced.
+      // Recorded before the write, like the file resources: a crash mid-write is still
+      // reversible (restoring the unchanged prior is a harmless no-op).
+      await ctx.journal?.intent("osx", disp);
+      await ctx.journal?.done("osx", disp, { kind: "osx", domain, key, type, prior: ok ? cur : null });
       const p = Bun.spawnSync(["defaults", "write", domain, key, `-${type}`, String(value)], {
         env,
         stdout: "ignore",
@@ -104,6 +122,12 @@ export function finalizeOsx(ctx: ReconcileCtx): void {
   ctx.report.header("macOS finalize");
   // Best-effort: killall exits nonzero when a named process isn't running, which is normal
   // and not worth surfacing — the restart is a courtesy so changes show without a re-login.
-  Bun.spawnSync(["killall", "Dock", "Finder", "SystemUIServer"], { stdout: "ignore", stderr: "ignore" });
+  // cleanEnv (so it honors the run's PATH) matches the `defaults` calls above, and lets a
+  // sandboxed test intercept the restart instead of nuking the runner's real Dock/Finder.
+  Bun.spawnSync(["killall", "Dock", "Finder", "SystemUIServer"], {
+    env: cleanEnv(ctx.env),
+    stdout: "ignore",
+    stderr: "ignore",
+  });
   ctx.report.ok("restarted Dock/Finder/SystemUIServer (defaults changed)");
 }

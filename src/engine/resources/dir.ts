@@ -1,7 +1,8 @@
 // The `dir` resource: ensure a standalone directory exists (with an optional mode) — the
 // declarative form of a `run` + `mkdir -p`/`chmod`, for a directory with no file to place in
 // it (a link/copy creates parents implicitly, but can't declare an empty dir). Uninstall
-// leaves it by default (dirs may hold user data); `manage = true` removes it *if empty*.
+// leaves it by default (dirs may hold user data); `remove_on_uninstall = true` removes it
+// *if empty*.
 import { readdir, rmdir } from "node:fs/promises";
 import type { Dir } from "../../config/schema.ts";
 import { chmod, displayPath, expandTilde, mkdir, pathExists, stat } from "../../lib/fs.ts";
@@ -79,7 +80,7 @@ export async function reconcileDir(entry: Dir, ctx: ReconcileCtx): Promise<void>
       return;
     }
     case "uninstall": {
-      if (!entry.manage) return; // unmanaged dirs are left in place (may hold user data)
+      if (!entry.remove_on_uninstall) return; // left in place by default (may hold user data)
       if (!(await pathExists(path))) return;
       const remaining = await readdirLen(path);
       if (remaining === undefined) return; // not a dir / unreadable — don't touch it

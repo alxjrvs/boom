@@ -21,8 +21,8 @@ import { validateConfigFiles } from "./validate.ts";
 // remote config is linked — the Config repo section below fails on that specifically.)
 const TOOLS: ReadonlyArray<{ cmd: string; why: string }> = [
   { cmd: "git", why: "config repo sync, code crawl + agent git" },
-  { cmd: "brew", why: "brewfile resource" },
-  { cmd: "mise", why: "mise resource" },
+  { cmd: "brew", why: "pkg resource (brew)" },
+  { cmd: "mise", why: "pkg resource (mise)" },
   { cmd: "op", why: "1Password secrets (hooks/mcp)" },
   { cmd: "claude", why: "code + mcp commands" },
 ];

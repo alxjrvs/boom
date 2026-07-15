@@ -33,8 +33,8 @@ test("loadConfig rejects a schema-invalid boomfile.toml", async () => {
 
 test("loadConfig rejects an unknown key (strict schema catches typos)", async () => {
   const dir = await sandbox();
-  // `brewfle` is a typo for `brewfile`; a non-strict object would silently drop it.
-  await writeFile(join(dir, "boomfile.toml"), `[[section]]\nname = "x"\nbrewfle = "Brewfile"\n`);
+  // `pgk` is a typo for `pkg`; a non-strict object would silently drop it.
+  await writeFile(join(dir, "boomfile.toml"), `[[section]]\nname = "x"\npgk = []\n`);
   await expect(loadConfig(dir)).rejects.toBeInstanceOf(BoomConfigError);
 });
 

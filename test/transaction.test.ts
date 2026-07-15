@@ -142,14 +142,14 @@ test("rollback restores a file displaced by an overwrite", async () => {
   expect(await readFile(join(sb.home, ".z"), "utf8")).toBe("ORIGINAL");
 });
 
-test("glob self-heals a stale non-directory left at `into` (e.g. a link→glob migration)", async () => {
+test("glob link self-heals a stale non-directory at the dst dir (a whole-dir → glob migration)", async () => {
   const sb = await sandbox(
-    `[[section]]\nname = "S"\nglob = [{ pattern = "skills/*", into = "~/.claude/skills" }]\n`,
+    `[[section]]\nname = "S"\nlink = [{ src = "skills/*", dst = "~/.claude/skills" }]\n`,
   );
   await mkdir(join(sb.repo, "skills"), { recursive: true });
   await sb.write("skills/a.md", "a");
   await mkdir(join(sb.home, ".claude"), { recursive: true });
-  // A broken symlink at the shared `into` dir — mkdir(recursive) throws EEXIST on this
+  // A broken symlink at the shared dst dir — mkdir(recursive) throws EEXIST on this
   // (it only no-ops for a real directory), which is exactly the crash being fixed here.
   await symlink(join(sb.repo, "gone"), join(sb.home, ".claude/skills"));
   // Clearing a foreign squatter is an overwrite, so the self-heal is the --fix path;
@@ -159,9 +159,9 @@ test("glob self-heals a stale non-directory left at `into` (e.g. a link→glob m
   expect(await linkTarget(join(sb.home, ".claude/skills/a.md"))).toBe(join(sb.repo, "skills/a.md"));
 });
 
-test("rollback restores a stale `into` symlink a glob sync cleared", async () => {
+test("rollback restores a stale dst symlink a glob link sync cleared", async () => {
   const sb = await sandbox(
-    `[[section]]\nname = "S"\nglob = [{ pattern = "skills/*", into = "~/.claude/skills" }]\n`,
+    `[[section]]\nname = "S"\nlink = [{ src = "skills/*", dst = "~/.claude/skills" }]\n`,
   );
   await mkdir(join(sb.repo, "skills"), { recursive: true });
   await sb.write("skills/a.md", "a");

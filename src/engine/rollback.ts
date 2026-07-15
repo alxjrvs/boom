@@ -1,12 +1,37 @@
 // Roll back a previous sync by replaying its journal's `done` records in reverse:
 // remove what boom created, restore what an overwrite displaced.
 import { rm } from "node:fs/promises";
+import { detectOs } from "../config/profile.ts";
 import type { BoomContext } from "../context.ts";
 import { colorEnabled } from "../lib/color.ts";
 import { displayPath, restoreFrom } from "../lib/fs.ts";
+import { cleanEnv } from "../lib/proc.ts";
 import { Reporter } from "../lib/reporter.ts";
-import { listRuns, readRun } from "./journal.ts";
+import { listRuns, readRun, type UndoToken } from "./journal.ts";
 import { removeManifestEntries } from "./state.ts";
+
+// One-line preview of what reversing a record would do (for --dry-run).
+function undoPreview(undo: UndoToken, disp: string): string {
+  if (undo.kind === "remove") return `would remove ${disp}`;
+  if (undo.kind === "osx") return `would ${undo.prior === null ? "delete" : "restore"} default ${disp}`;
+  return `would restore ${disp}`;
+}
+
+// Re-apply a macOS default's prior value (or delete a key boom introduced). Non-darwin is a
+// reported no-op — the journal could have been carried to another host.
+function restoreOsx(undo: Extract<UndoToken, { kind: "osx" }>, ctx: BoomContext, report: Reporter): void {
+  if (detectOs(ctx.env) !== "darwin") {
+    report.warn(`skipped osx restore ${undo.domain} ${undo.key} (not darwin)`);
+    return;
+  }
+  const env = cleanEnv(ctx.env);
+  const argv =
+    undo.prior === null
+      ? ["defaults", "delete", undo.domain, undo.key]
+      : ["defaults", "write", undo.domain, undo.key, `-${undo.type}`, undo.prior];
+  Bun.spawnSync(argv, { env, stdout: "ignore", stderr: "ignore" });
+  report.ok(`${undo.prior === null ? "deleted" : "restored"} default ${undo.domain} ${undo.key}`);
+}
 
 // `boom rollback --list` — enumerate the retained runs so the ids `--run-id` accepts are
 // discoverable, instead of forcing a hand `ls` of the state dir. Exit 0 always; it reads.
@@ -43,13 +68,15 @@ export async function rollback(ctx: BoomContext, runId?: string, dryRun = false)
     // A destructive replay — preview it under --dry-run so an operator can see exactly what
     // would be removed vs restored before committing to it.
     if (dryRun) {
-      report.plan(rec.undo.kind === "remove" ? `would remove ${disp}` : `would restore ${disp}`);
+      report.plan(undoPreview(rec.undo, disp));
       continue;
     }
     try {
       if (rec.undo.kind === "remove") {
         await rm(rec.dst, { recursive: true, force: true });
         report.ok(`removed ${disp}`);
+      } else if (rec.undo.kind === "osx") {
+        restoreOsx(rec.undo, ctx, report);
       } else {
         await restoreFrom(rec.undo.from, rec.dst);
         report.ok(`restored ${disp}`);
