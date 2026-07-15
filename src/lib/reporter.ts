@@ -324,10 +324,12 @@ export class Reporter {
     if (this.json) return;
     if (this.categoryMode && !this.verbose) {
       // Category mode buffers everything and draws grouped bands at finish, so a section header
-      // is not a persistent line here. An eager banner (the dry-run notice) still prints; on an
-      // interactive TTY a transient live line names the running section, erased before the summary.
+      // is not a persistent line here. An eager banner (the dry-run notice) still prints — as grey
+      // sub-text of the setup band above it (indented, no bar), matching the verdict's meta line —
+      // and on an interactive TTY a transient live line names the running section, erased before
+      // the summary.
       if (eager) {
-        this.out.write(`\n${this.hx(COSMIC.dim, `▎ ${s}`)}\n`);
+        this.out.write(`   ${this.hx(COSMIC.dim, s)}\n`);
         this.bandsDrawn = true;
       } else if (this.interactive) {
         this.out.write(`\r\x1b[K${this.hx(COSMIC.dim, `▎ ${s}...`)}${this.hx(COSMIC.solar, "✸")}`);
