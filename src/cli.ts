@@ -6,6 +6,7 @@ import { buildApplication, buildRouteMap } from "@stricli/core";
 import { codeRouteMap } from "./commands/code.ts";
 import { completionsCommand } from "./commands/completions.ts";
 import { doctorCommand } from "./commands/doctor.ts";
+import { lockCommand } from "./commands/lock.ts";
 import { manCommand } from "./commands/man.ts";
 import { mcpRouteMap } from "./commands/mcp.ts";
 import { uninstallCommand, verifyCommand } from "./commands/reconcile.ts";
@@ -25,6 +26,7 @@ export const routes = buildRouteMap({
     rollback: rollbackCommand,
     upgrade: upgradeCommand,
     doctor: doctorCommand,
+    lock: lockCommand,
     code: codeRouteMap,
     mcp: mcpRouteMap,
     completions: completionsCommand,

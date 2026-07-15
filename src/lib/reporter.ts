@@ -38,6 +38,7 @@ export interface ReportRecord {
 export const RECONCILE_CATEGORY_ORDER = [
   "CONFIG",
   "DOTFILES",
+  "SECRETS",
   "DIRECTORIES",
   "PACKAGES",
   "MACOS",

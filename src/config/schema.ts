@@ -1,6 +1,6 @@
 // The boomfile.toml schema (nested-by-section). This typed contract is the source of
 // truth shared by the loader and the reconcile engine. Within a section, resources run
-// by phase:  link → copy → dir → pkg → osx_default → launchd → run → check → hook.
+// by phase:  link → copy → secret → dir → pkg → osx_default → launchd → run → check → hook.
 import * as v from "valibot";
 
 // A Unix permission bitmask as an octal string ("644", "0700"). Validated here at the
@@ -96,6 +96,26 @@ export const CheckSchema = v.strictObject({
   repair: v.optional(v.string()),
 });
 
+// A rendered secret: resolve a 1Password reference (or a whole template of them) to a file
+// at sync time, so a machine's secret-bearing config is declared like everything else instead
+// of living out of band. `ref` is a single `op://vault/item/field` reference (rendered with
+// `op read`); `template` is a repo-relative file whose embedded `op://…` references are filled
+// in (`op inject`) — exactly one is required. The plaintext is never journaled or backed up
+// (that would defeat the point), so a secret's undo is a plain remove, and `mode` defaults to
+// 0600 (a secret nobody else can read). The op-native counterpart to `copy` + `expand`.
+export const SecretSchema = v.pipe(
+  v.strictObject({
+    dst: v.string(),
+    ref: v.optional(v.string()),
+    template: v.optional(v.string()),
+    mode: v.optional(ModeSchema),
+  }),
+  v.check(
+    (s) => (s.ref === undefined) !== (s.template === undefined),
+    "a secret needs exactly one of `ref` (an op:// reference) or `template` (a file of op:// references)",
+  ),
+);
+
 // A macOS LaunchAgent: link a plist into ~/Library/LaunchAgents and own its launchctl
 // lifecycle (load -w on sync, unload on uninstall). OS-gated to darwin. `dst` defaults to
 // ~/Library/LaunchAgents/<basename(src)>.
@@ -121,6 +141,7 @@ export const SectionSchema = v.strictObject({
   pkg: v.optional(v.array(PkgSchema)),
   osx_default: v.optional(v.array(OsxDefaultSchema)),
   launchd: v.optional(v.array(LaunchdSchema)),
+  secret: v.optional(v.array(SecretSchema)),
   run: v.optional(v.array(RunSchema)),
   check: v.optional(v.array(CheckSchema)),
   hook: v.optional(v.array(HookSchema)),
@@ -154,10 +175,31 @@ export const BoomSettingsSchema = v.strictObject({
   upgrade_on_sync: v.optional(v.picklist(["check", "auto"])),
   // Install/refresh launchd timers that run `boom <cmd>` on an interval (macOS-only).
   schedule: v.optional(v.array(ScheduleSchema)),
+  // After a sync, commit a one-file summary of this machine's state (boom version, drift
+  // verdict, timestamp) to `.boom/machines/<host>.json` in the config repo — so `boom fleet`
+  // can answer "which of my machines are drifted / on what version" from the repo you already
+  // push. Opt-in: it makes sync write + commit to the repo, which a hands-off machine may not want.
+  fleet: v.optional(v.boolean()),
+  // When a scheduled `verify` finds drift, raise a desktop notification (macOS osascript /
+  // Linux notify-send) instead of letting the 0/2/1 exit code die in a timer log. Opt-in;
+  // a no-op on a machine with no notifier.
+  notify: v.optional(v.boolean()),
 });
+
+// A reusable config module: another boom config repo (`owner/repo[@ref]`, a git URL, or a
+// path relative to this repo) whose sections are merged in after the base boomfile — so a
+// team can compose a machine from vetted, shared pieces instead of authoring every section
+// by hand. Resolved + merged during reconcile (not at every config load), and fetched into a
+// modules cache; a module's own sections still gate by their `when`. See config/modules.ts.
+const UseSchema = v.pipe(
+  v.string(),
+  v.regex(/\S/, "a module reference must be a non-empty owner/repo, git URL, or path"),
+);
 
 export const BoomfileSchema = v.strictObject({
   boom: v.optional(BoomSettingsSchema),
+  // Modules to compose in before this repo's own sections (resolved during reconcile).
+  use: v.optional(v.array(UseSchema)),
   section: v.array(SectionSchema),
 });
 
@@ -166,6 +208,7 @@ export type File = v.InferOutput<typeof FileSchema>;
 export type Pkg = v.InferOutput<typeof PkgSchema>;
 export type Dir = v.InferOutput<typeof DirSchema>;
 export type Check = v.InferOutput<typeof CheckSchema>;
+export type Secret = v.InferOutput<typeof SecretSchema>;
 export type Launchd = v.InferOutput<typeof LaunchdSchema>;
 export type Run = v.InferOutput<typeof RunSchema>;
 export type Hook = v.InferOutput<typeof HookSchema>;
