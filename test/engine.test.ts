@@ -102,7 +102,7 @@ test("link: overwrite mode (boom source --fix) overwrites a foreign file at dst"
   expect(sb.out()).toContain("overwritten");
 });
 
-test("cosmic bands (dense default): marked section bands + their detail; --verbose adds the skips", async () => {
+test("cosmic bands (dense default): distinct-category bands + their detail; --verbose adds the skips", async () => {
   const sb = await sandbox(
     `[[section]]\nname = "Quiet"\nlink = [{ src = ".keep", dst = "~/.keep" }, { src = ".foreign", dst = "~/.foreign" }]\n`,
   );
@@ -110,30 +110,34 @@ test("cosmic bands (dense default): marked section bands + their detail; --verbo
   await writeFile(join(sb.repo, ".foreign"), "f\n");
   await writeFile(join(sb.home, ".foreign"), "not ours\n"); // stays foreign → a skip
 
-  // Default (dense): the grey setup band, the section's marked band with its change detail below,
-  // and the verdict band. Skips are the one thing held back for --verbose.
+  // Default (dense): the grey setup band, a marked band per distinct category (not per section),
+  // its change detail below, and the two-line verdict block. Skips are held back for --verbose.
   expect(await reconcile("sync", sb.ctx, {})).toBe(0);
   const firstRun = sb.out();
   expect(firstRun).toContain("PREPARING FOR THE WORLD THAT'S COMING"); // grey setup band
-  expect(firstRun).toContain("▎ Quiet...✓"); // the marked section band
-  expect(firstRun).toContain("~/.keep linked"); // the change detail shows under its band
+  expect(firstRun).toContain("▎ DOTFILES...✓"); // grouped by category, not by the "Quiet" section
+  expect(firstRun).not.toContain("▎ Quiet"); // section names don't head bands in the dense default
+  expect(firstRun).toContain("~/.keep linked"); // the change detail shows under its category
   expect(firstRun).not.toContain("is not our symlink"); // the skip is held back (→ --verbose)
   expect(firstRun).toContain("SYNC...COMPLETE!"); // the verdict band (command defaults to the verb)
+  expect(firstRun).toContain("1 category touched · all clear"); // the verdict's meta sub-line
 
-  // Verbose re-run: everything is in place now (both skips) — verbose streams them.
+  // Verbose re-run: everything is in place now (both skips) — verbose streams them, per section.
   const beforeVerbose = sb.out().length;
   expect(await reconcile("sync", sb.ctx, { verbose: true })).toBe(0);
   const verbose = sb.out().slice(beforeVerbose);
-  expect(verbose).toContain("▎ Quiet");
+  expect(verbose).toContain("▎ Quiet"); // verbose keeps the per-section firehose
   expect(verbose).toContain("already linked"); // ~/.keep, now a skip
   expect(verbose).toContain("is not our symlink"); // ~/.foreign skip, shown under verbose
 
-  // A steady-state dense re-sync: every item a no-op (skip), so the band marks ✓ with no detail.
+  // A steady-state dense re-sync: every item a no-op (skip), so no category draws a band and the
+  // run collapses to the setup + verdict, reporting nothing to change.
   const beforeSteady = sb.out().length;
   expect(await reconcile("sync", sb.ctx, {})).toBe(0);
   const steady = sb.out().slice(beforeSteady);
-  expect(steady).toContain("▎ Quiet...✓");
+  expect(steady).not.toContain("▎ DOTFILES"); // all skips → the category is omitted
   expect(steady).not.toContain("already linked"); // skips stay held back in the dense default
+  expect(steady).toContain("nothing to change"); // the verdict says so
   expect(steady).toContain("SYNC...COMPLETE!");
 });
 

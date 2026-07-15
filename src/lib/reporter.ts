@@ -24,11 +24,35 @@ export type ReportLevel = "ok" | "skip" | "warn" | "fail" | "note" | "plan" | "h
 export interface ReportRecord {
   readonly level: ReportLevel;
   readonly msg: string;
+  // The reconcile category this line belongs to (DOTFILES/PACKAGES/…), stamped from
+  // Reporter.category as resources emit. Drives the dense default's category-grouped bands (and
+  // lets a `--json` consumer group the same way). Absent on the classic surface — nothing sets it.
+  readonly category?: string;
 }
 
+// The fixed, distinct buckets the dense reconcile default groups every action under — in place
+// of one band per boomfile section (which, on a real machine, is a wall of `▎ Thing ...✓`). A
+// category with no *shown* line (only held-back skips) draws nothing, so a steady-state run
+// collapses to the setup + verdict bands. Rendered in this order; the strings match what
+// registry.ts / reconcile.ts stamp onto `Reporter.category`.
+export const RECONCILE_CATEGORY_ORDER = [
+  "CONFIG",
+  "DOTFILES",
+  "DIRECTORIES",
+  "PACKAGES",
+  "MACOS",
+  "SERVICES",
+  "COMMANDS",
+  "CHECKS",
+  "HOOKS",
+  "SELF-WIRING",
+  "ORPHANS",
+] as const;
+
 // Version of the `--json` report envelope. Bump when its shape changes so a script consuming
-// `verify --json` / `doctor --json` / etc. can detect (and refuse) an unknown shape.
-export const REPORT_SCHEMA_VERSION = 1;
+// `verify --json` / `doctor --json` / etc. can detect (and refuse) an unknown shape. v2 added
+// the per-record `category` field.
+export const REPORT_SCHEMA_VERSION = 2;
 
 export interface ReportEnvelope {
   readonly schemaVersion: number;
@@ -59,6 +83,11 @@ export class Reporter {
   // entry after construction; bands mode falls back to nothing (a bare `...COMPLETE!`) if unset.
   command?: string;
 
+  // The category the next emitted line belongs to (category mode only). The reconcile loop and
+  // registry set this as they move through the run's phases; every record stamps its current
+  // value, and finish() groups by it. Undefined on the classic surface.
+  category?: string;
+
   // Quiet mode (the default) holds a section header back until a *shown* line lands under it,
   // so a section that produced only suppressed `skip` noise prints no header at all — the whole
   // point of quiet output being that a steady-state run says almost nothing. Verbose writes
@@ -68,6 +97,9 @@ export class Reporter {
   // Bands-mode state: the section currently accumulating, and the color-cycle cursor.
   private band?: Band;
   private cycle = 0;
+  // Category mode: a transient live line (`▎ Section...✸`) is on screen (interactive only) and
+  // must be erased before the grouped summary renders at finish.
+  private liveShown = false;
   // Whether any section band or detail line has been drawn since the setup band. Gates the blank
   // line before the verdict: with no intermediate content (e.g. `upgrade` already-latest), the
   // verdict hugs the setup band instead of floating a blank line between them.
@@ -88,6 +120,10 @@ export class Reporter {
     // Interactive: stdout is a TTY, so bands-mode quiet can draw a live krackle line and rewrite
     // it in place (\r) on conclude. Non-interactive (piped/CI) prints only the resolved band.
     private readonly interactive = false,
+    // Category mode (reconcile's dense default): buffer every line and, at finish, group them
+    // into distinct-category bands (DOTFILES/PACKAGES/…) instead of one band per boomfile
+    // section. Only diverges when quiet — under --verbose the per-section firehose is unchanged.
+    private readonly categoryMode = false,
   ) {}
 
   private c(name: ColorName, s: string): string {
@@ -210,13 +246,95 @@ export class Reporter {
     return failed ? 1 : warned ? 2 : 0;
   }
 
+  // ---- category-mode rendering ------------------------------------------------------------
+
+  // Group the run's *shown* records (skips held back) by category and draw one marked band per
+  // non-empty category — in the canonical order — with that category's action lines below it.
+  // This is the distinct-categories surface: every dotfile action across every section folds
+  // under one DOTFILES band, so a clean run (all skips) draws nothing. Returns the number of
+  // categories drawn — what the verdict's "N categories touched" reports.
+  private renderCategorySummary(): number {
+    const byCat = new Map<string, ReportRecord[]>();
+    for (const rec of this.records) {
+      if (rec.level === "header" || rec.level === "skip") continue;
+      const cat = rec.category ?? "BOOM";
+      const list = byCat.get(cat);
+      if (list) list.push(rec);
+      else byCat.set(cat, [rec]);
+    }
+    // Canonical categories first; then any unrecognized one (defensive — a mis-stamped line
+    // must never be silently dropped) in first-seen order.
+    const known = RECONCILE_CATEGORY_ORDER as readonly string[];
+    const order = [...known, ...[...byCat.keys()].filter((k) => !known.includes(k))];
+    let touched = 0;
+    for (const cat of order) {
+      const recs = byCat.get(cat);
+      if (!recs || recs.length === 0) continue;
+      touched++;
+      this.bandsDrawn = true;
+      const failed = recs.some((r) => r.level === "fail");
+      const warned = recs.some((r) => r.level === "warn");
+      const mark = failed
+        ? this.hx(COSMIC.crit, "!")
+        : warned
+          ? this.hx(COSMIC.warn, "!")
+          : this.hx(COSMIC.ok, "✓");
+      const color = BAND_CYCLE[this.cycle++ % BAND_CYCLE.length] ?? COSMIC.cyan;
+      this.out.write(`\n${this.hx(color, `▎ ${cat}...`)}${mark}\n`);
+      for (const rec of recs) this.writeSub(rec);
+    }
+    return touched;
+  }
+
+  // The category-mode verdict: the COMMAND...COMPLETE! / …FAILED! band, then its outcome as a
+  // dim sub-line *beneath* it (the count of categories touched / drift, plus elapsed time) —
+  // rather than trailing the band. Reads the tally only, so the 0/2/1 ladder matches every path.
+  private categoryVerdict(hasWarnTier: boolean, touched: number, timecode?: string): number {
+    const f = this.failures;
+    const w = this.warnings;
+    const name = (this.command ?? "").toUpperCase();
+    const failed = f > 0;
+    const warned = hasWarnTier && w > 0;
+    const color = failed ? COSMIC.crit : warned ? COSMIC.warn : COSMIC.ok;
+    const verb = failed ? "FAILED" : "COMPLETE";
+    let meta: string;
+    if (failed) meta = `${f} failure(s)${w > 0 ? `, ${w} warning(s)` : ""}`;
+    else if (warned) meta = `${w} warning(s)`;
+    else if (hasWarnTier) meta = "all checks passed";
+    else
+      meta =
+        touched === 0
+          ? "nothing to change"
+          : `${touched} categor${touched === 1 ? "y" : "ies"} touched · all clear`;
+    if (timecode) meta += ` · ${timecode}`;
+    // The verdict floats one blank line below the section blocks (when any drew); with nothing
+    // between it hugs the setup band. The meta is its own indented line under the band.
+    const lead = this.bandsDrawn ? "\n" : "";
+    this.out.write(`${lead}${this.hx(color, `▎ ${name}...${verb}!`)}\n`);
+    this.out.write(`   ${this.hx(COSMIC.dim, meta)}\n`);
+    return failed ? 1 : warned ? 2 : 0;
+  }
+
   // ---- public surface ---------------------------------------------------------------------
 
   // `eager` marks a run-level banner (e.g. the dry-run notice) that must print even with no
   // lines under it — quiet holds *section* headers back, but not these.
   header(s: string, eager = false): void {
-    this.records.push({ level: "header", msg: s });
+    this.records.push({ level: "header", msg: s, category: this.category });
     if (this.json) return;
+    if (this.categoryMode && !this.verbose) {
+      // Category mode buffers everything and draws grouped bands at finish, so a section header
+      // is not a persistent line here. An eager banner (the dry-run notice) still prints; on an
+      // interactive TTY a transient live line names the running section, erased before the summary.
+      if (eager) {
+        this.out.write(`\n${this.hx(COSMIC.dim, `▎ ${s}`)}\n`);
+        this.bandsDrawn = true;
+      } else if (this.interactive) {
+        this.out.write(`\r\x1b[K${this.hx(COSMIC.dim, `▎ ${s}...`)}${this.hx(COSMIC.solar, "✸")}`);
+        this.liveShown = true;
+      }
+      return;
+    }
     if (this.bands) {
       // An eager banner isn't a section — draw it grey like the setup band and don't track it.
       if (eager) {
@@ -256,9 +374,10 @@ export class Reporter {
     if (eager) this.flushHeader();
   }
   ok(s: string): void {
-    const rec: ReportRecord = { level: "ok", msg: s };
+    const rec: ReportRecord = { level: "ok", msg: s, category: this.category };
     this.records.push(rec);
     if (this.json) return;
+    if (this.categoryMode && !this.verbose) return; // buffered → grouped by category at finish
     if (this.bands) {
       this.bandEmit(rec);
       return;
@@ -269,9 +388,10 @@ export class Reporter {
   // A no-op: already in the desired state, nothing done. Pure noise on a steady-state run, so
   // quiet suppresses it (records still capture it for `--json`); verbose shows the dim line.
   skip(s: string): void {
-    const rec: ReportRecord = { level: "skip", msg: s };
+    const rec: ReportRecord = { level: "skip", msg: s, category: this.category };
     this.records.push(rec);
     if (this.json) return;
+    if (this.categoryMode && !this.verbose) return; // a skip never draws in the category summary
     if (this.bands) {
       this.bandEmit(rec);
       return;
@@ -281,9 +401,10 @@ export class Reporter {
     this.out.write(`  ${this.c("dim", `- ${s}`)}\n`);
   }
   note(s: string): void {
-    const rec: ReportRecord = { level: "note", msg: s };
+    const rec: ReportRecord = { level: "note", msg: s, category: this.category };
     this.records.push(rec);
     if (this.json) return;
+    if (this.categoryMode && !this.verbose) return;
     if (this.bands) {
       this.bandEmit(rec);
       return;
@@ -292,9 +413,10 @@ export class Reporter {
     this.out.write(`    ${s}\n`);
   }
   plan(s: string): void {
-    const rec: ReportRecord = { level: "plan", msg: s };
+    const rec: ReportRecord = { level: "plan", msg: s, category: this.category };
     this.records.push(rec);
     if (this.json) return;
+    if (this.categoryMode && !this.verbose) return;
     if (this.bands) {
       this.bandEmit(rec);
       return;
@@ -304,9 +426,10 @@ export class Reporter {
   }
   warn(s: string): void {
     this.warnings++;
-    const rec: ReportRecord = { level: "warn", msg: s };
+    const rec: ReportRecord = { level: "warn", msg: s, category: this.category };
     this.records.push(rec);
     if (this.json) return;
+    if (this.categoryMode && !this.verbose) return;
     if (this.bands) {
       this.bandEmit(rec);
       return;
@@ -316,9 +439,10 @@ export class Reporter {
   }
   fail(s: string): void {
     this.failures++;
-    const rec: ReportRecord = { level: "fail", msg: s };
+    const rec: ReportRecord = { level: "fail", msg: s, category: this.category };
     this.records.push(rec);
     if (this.json) return;
+    if (this.categoryMode && !this.verbose) return;
     if (this.bands) {
       this.bandEmit(rec);
       return;
@@ -341,6 +465,9 @@ export class Reporter {
     // Bands mode only: the verdict band's outcome text on success (e.g. "v0.14.0 → v0.15.0"),
     // in place of the auto-generated count. Ignored on the classic surface and on failure.
     meta?: string;
+    // Category mode only: the elapsed-time suffix on the verdict's meta sub-line (e.g. "1.9s"),
+    // measured by the caller. Ignored elsewhere.
+    timecode?: string;
   }): number {
     const f = this.failures;
     const w = this.warnings;
@@ -348,6 +475,16 @@ export class Reporter {
     // mode doesn't print a stray banner right before the summary. The summary itself is an
     // `ok`/`warn`/`fail` line and is always shown.
     this.pendingHeader = undefined;
+    // Category mode (dense reconcile default): erase any live section line, draw the grouped
+    // category bands from the buffered records, then the two-line verdict block.
+    if (this.categoryMode && !this.verbose && !this.json) {
+      if (this.liveShown) {
+        this.out.write("\r\x1b[K");
+        this.liveShown = false;
+      }
+      const touched = this.renderCategorySummary();
+      return this.categoryVerdict(msgs.warn !== undefined, touched, msgs.timecode);
+    }
     // Bands mode: resolve the last section band, then draw the verdict band in place of the
     // classic summary. `msgs.warn` presence marks a warning-tier command (verify), same as below.
     if (this.bands) {
