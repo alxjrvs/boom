@@ -239,10 +239,9 @@ test("[boom] an absent table changes nothing (no self-wiring header)", async () 
 // ------------------------------------------------------------------- pkg apt (Linux)
 
 test("pkg apt: sync installs the listed packages via sudo apt-get; verify keys off dpkg", async () => {
-  const sb = await sandbox(
-    `[[section]]\nname = "P"\npkg = [{ manager = "apt", file = "packages.txt" }]\n`,
-    { BOOM_OS: "linux" },
-  );
+  const sb = await sandbox(`[[section]]\nname = "P"\npkg = [{ manager = "apt", file = "packages.txt" }]\n`, {
+    BOOM_OS: "linux",
+  });
   await writeFile(join(sb.repo, "packages.txt"), "# tools\nripgrep\nfd-find\n");
   const bin = join(sb.repo, ".fakebin");
   const log = join(sb.repo, "apt-calls.log");
@@ -267,10 +266,9 @@ test("pkg apt: sync installs the listed packages via sudo apt-get; verify keys o
 });
 
 test("pkg apt: off-platform (darwin) is a no-op, reported on verify", async () => {
-  const sb = await sandbox(
-    `[[section]]\nname = "P"\npkg = [{ manager = "apt", file = "packages.txt" }]\n`,
-    { BOOM_OS: "darwin" },
-  );
+  const sb = await sandbox(`[[section]]\nname = "P"\npkg = [{ manager = "apt", file = "packages.txt" }]\n`, {
+    BOOM_OS: "darwin",
+  });
   await writeFile(join(sb.repo, "packages.txt"), "ripgrep\n");
   expect(await reconcile("verify", sb.ctx, { verbose: true })).toBe(0);
   expect(sb.out()).toContain("Linux-only");
