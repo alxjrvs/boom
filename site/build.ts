@@ -135,7 +135,7 @@ const head = (o: { title: string; desc: string; slug: string; ogType?: string })
 <meta property="og:image:type" content="image/png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="The BOOMTUBE wordmark beside a Kirby boom-tube portal: declarative dev-machine setup — the file goes in, the machine comes out.">
+<meta property="og:image:alt" content="The BOOMTUBE card drawn as an equation: a boomfile.toml page feeds the Kirby boom-tube portal and a terminal comes out the far side — declarative dev-machine setup, the file goes in, the machine comes out.">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="${t}">
 <meta name="twitter:description" content="${d}">
