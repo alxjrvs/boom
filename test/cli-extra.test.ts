@@ -167,7 +167,7 @@ test("doctor --config --json emits a versioned report envelope", async () => {
   const { ctx, out } = ctxFor({ BOOM_CONFIG: repo, NO_COLOR: "1" }, repo);
   expect(await doctor(ctx, true, true)).toBe(0);
   const env = JSON.parse(out());
-  expect(env.schemaVersion).toBe(1);
+  expect(env.schemaVersion).toBe(2);
   expect(env.ok).toBe(true);
   expect(env.failures).toBe(0);
   expect(Array.isArray(env.records)).toBe(true);
@@ -214,7 +214,7 @@ test("doctor --json emits a versioned report envelope", async () => {
   );
   const rc = await doctor(ctx, true);
   const env = JSON.parse(out());
-  expect(env.schemaVersion).toBe(1);
+  expect(env.schemaVersion).toBe(2);
   expect(typeof env.ok).toBe("boolean");
   expect(Array.isArray(env.records)).toBe(true);
   expect([0, 2]).toContain(rc); // valid config + writable state; tool warnings may bump to 2

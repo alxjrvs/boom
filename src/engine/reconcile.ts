@@ -31,6 +31,12 @@ const SETUP_COPY: Record<Verb, string> = {
   uninstall: "UNMAKING WHAT WAS MADE…",
 };
 
+// Elapsed-time suffix for the verdict's meta sub-line: sub-second in ms, else one-decimal
+// seconds. Whole-run wall time (config sync + sections + self-wiring), measured by reconcile.
+function fmtElapsed(ms: number): string {
+  return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`;
+}
+
 export interface ReconcileOptions {
   readonly only?: string[];
   readonly dryRun?: boolean;
@@ -121,6 +127,8 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
   // resolved band. The cast is because the Stream contract is just { write }.
   const interactive = !json && color && Boolean((ctx.process.stdout as { isTTY?: boolean }).isTTY);
   // Human runs get the cosmic-bands surface; --json stays on the structured envelope (bands off).
+  // categoryMode groups the dense default by distinct category (DOTFILES/PACKAGES/…) instead of
+  // one band per section — it only diverges when quiet, so --verbose keeps the per-section firehose.
   const report = new Reporter(
     ctx.process.stdout,
     ctx.process.stderr,
@@ -129,22 +137,30 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
     verbose,
     !json,
     interactive,
+    true,
   );
   report.command = opts.command ?? verb;
+  // Every line until a section resource (or a later phase) sets its own category lands under
+  // CONFIG — including the config-repo sync below and any early bail-out failure.
+  report.category = "CONFIG";
+  const started = performance.now();
 
   const finish = (): number => {
     // The same structured envelope for every verb (verify carries a warning tier, mutating
     // verbs are 0/1), shared with doctor/validate via Reporter.finishJson.
     if (json) return report.finishJson(ctx.process.stdout, verb === "verify");
     // Human output: the shared Reporter epilogue owns the blank line + 0/2/1 mapping.
-    // verify has a warning tier; the mutating verbs (sync/uninstall) do not.
+    // verify has a warning tier; the mutating verbs (sync/uninstall) do not. The timecode is the
+    // category-mode verdict's elapsed suffix (ignored on the verbose/classic paths).
+    const timecode = fmtElapsed(performance.now() - started);
     return verb === "verify"
       ? report.finish({
           ok: "verify: all checks passed",
           warn: (w) => `verify: ${w} warning(s)`,
           fail: (f, w) => `verify: ${f} failure(s), ${w} warning(s)`,
+          timecode,
         })
-      : report.finish({ ok: `${verb} done`, fail: (f) => `${verb}: ${f} failure(s)` });
+      : report.finish({ ok: `${verb} done`, fail: (f) => `${verb}: ${f} failure(s)`, timecode });
   };
 
   const repo = await resolveConfigDir(ctx.env, ctx.cwd);
@@ -250,7 +266,10 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
     // Reaping compares the *whole* prior manifest against what this run declared. Under
     // --only just the named sections re-declared, so every other section would look
     // orphaned — skip reaping entirely for a scoped run.
-    if (verb !== "uninstall" && !only) await reapOrphans(rctx, priorManifest);
+    if (verb !== "uninstall" && !only) {
+      report.category = "ORPHANS";
+      await reapOrphans(rctx, priorManifest);
+    }
 
     if (mutating) {
       // Mark committed only when the run actually succeeded (zero failures). A run that
@@ -270,6 +289,7 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
     // it targets named sections, and these global behaviors aren't a section. Guarded like a
     // resource: an unexpected throw becomes a reported failure, never an unwound run.
     if (!only) {
+      report.category = "SELF-WIRING";
       try {
         await applyBoomSettings(config.boom, rctx);
       } catch (e) {
