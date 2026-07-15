@@ -6,7 +6,7 @@
 // verify's warning tier), 1 when nothing is linked or git can't answer.
 import { requireConfigBreadcrumb } from "../config/load.ts";
 import type { BoomContext } from "../context.ts";
-import { fetchOrigin, hasUpstream, repoDrift } from "../lib/git.ts";
+import { fetchOriginAsync, hasUpstream, repoDrift } from "../lib/git.ts";
 import { bandsReporter } from "../lib/reporter.ts";
 
 // Shared verdict wording for the read-only source commands: a warning tier (drift → exit 2) and
@@ -26,7 +26,8 @@ export async function statusConfigRepo(ctx: BoomContext): Promise<number> {
   report.header("Config repo");
   report.note(`${remote.url} → ${path}`);
 
-  if (fetchOrigin(path, ctx.env).code !== 0) {
+  const fetched = await report.spin("checking origin", () => fetchOriginAsync(path, ctx.env));
+  if (fetched.code !== 0) {
     report.warn(`could not reach ${remote.url} — reporting local state as-is`);
   }
   if (!hasUpstream(path, ctx.env)) {

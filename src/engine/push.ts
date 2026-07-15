@@ -7,7 +7,7 @@
 // linked, or git commit/push failed).
 import { requireConfigBreadcrumb } from "../config/load.ts";
 import type { BoomContext } from "../context.ts";
-import { push } from "../lib/git.ts";
+import { pushAsync } from "../lib/git.ts";
 import { bandsReporter } from "../lib/reporter.ts";
 import { commitLocalChanges } from "./commit.ts";
 
@@ -34,7 +34,7 @@ export async function pushConfigRepo(ctx: BoomContext, message?: string): Promis
 
   // git's own push output is passed through verbatim (its progress/refs go to stderr) —
   // the Reporter owns only boom's status line, mirroring how diff streams the raw git diff.
-  const result = push(breadcrumb.path, ctx.env);
+  const result = await report.spin("pushing", () => pushAsync(breadcrumb.path, ctx.env));
   if (result.stdout) ctx.process.stdout.write(`${result.stdout}\n`);
   if (result.stderr) ctx.process.stderr.write(`${result.stderr}\n`);
   if (result.code !== 0) report.fail("git push failed");

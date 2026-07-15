@@ -164,14 +164,21 @@ export class Reporter {
     this.out.write(`\n${this.hx(COSMIC.dim, `▎ ${msg}`)}\n`);
   }
 
-  // Run an awaited slow operation under the animated active-work spinner: an in-place krackle line
-  // (`  ✸ <label>…`) that pulses while `work` runs, erased when it resolves. The animation is
-  // interactive-only — under --verbose the tool's own streamed output is the progress signal, and
-  // in JSON / piped / CI runs the line is suppressed (no TTY to animate, no cursor to rewind). So
-  // spinning is transparent: it only ever adds a transient line to a live terminal, never to
-  // captured output. Always awaits `work` and always clears the timer, even if it throws.
+  // Run an awaited slow operation under an active-work indicator, so a network/tool wait never runs
+  // silently. Three presentations of the same beat, by mode:
+  //   • dense + interactive TTY → an in-place krackle line (`  ✸ <label>…`) that pulses while `work`
+  //     runs and is erased on resolve (transient — never in the final output);
+  //   • verbose (streaming commands: push/reset/diff, or --verbose) → a persistent `  ◇ <label>…`
+  //     line, since verbose has no buffered band to hide it under and its own tool output follows;
+  //   • JSON, or dense + non-interactive (piped/CI) → suppressed, so captured output stays clean.
+  // Always awaits `work` and always clears the animation timer, even if `work` throws.
   async spin<T>(label: string, work: () => Promise<T>): Promise<T> {
-    if (this.json || this.verbose || !this.interactive) return work();
+    if (this.json) return work();
+    if (this.verbose) {
+      this.out.write(`  ${this.hx(COSMIC.solar, "◇")} ${this.hx(COSMIC.dim, `${label}…`)}\n`);
+      return work();
+    }
+    if (!this.interactive) return work();
     let i = 0;
     const draw = (): void => {
       const frame = SPIN_FRAMES[i++ % SPIN_FRAMES.length] ?? "✸";

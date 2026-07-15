@@ -51,9 +51,11 @@ test("spin: still clears the spinner and rethrows if the work throws", async () 
   expect(s.read().endsWith("\r\x1b[K")).toBe(true); // erased even on failure
 });
 
-test("spin: pass-through under --verbose even on a TTY (raw tool output is the indicator)", async () => {
+test("spin: prints a persistent label line under --verbose (streaming commands' in-flight signal)", async () => {
   const s = sink();
   const r = new Reporter(s.stream, s.stream, true, false, true, true, true, false);
-  await r.spin("git fetch", async () => 1);
-  expect(s.read()).toBe("");
+  const value = await r.spin("git fetch", async () => 1);
+  expect(value).toBe(1);
+  expect(s.read()).toContain("git fetch…"); // a persistent line, not an erased animation
+  expect(s.read()).not.toContain("\x1b[K"); // no cursor rewind — verbose doesn't animate in place
 });

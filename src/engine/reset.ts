@@ -14,7 +14,7 @@ import type { BoomContext } from "../context.ts";
 import { confirm } from "../lib/confirm.ts";
 import {
   cleanUntracked,
-  fetchOrigin,
+  fetchOriginAsync,
   hasUnpushedCommits,
   hasUpstream,
   headSha,
@@ -46,7 +46,7 @@ export async function resetConfigRepo(ctx: BoomContext, opts: ResetOptions = {})
   });
   const fin = { ok: "reset to origin", fail: (f: number) => `${f} failure(s)` };
 
-  const fetch = fetchOrigin(path, ctx.env);
+  const fetch = await report.spin("checking origin", () => fetchOriginAsync(path, ctx.env));
   if (fetch.code !== 0) {
     report.fail(`could not reach ${remote.url}: ${fetch.stderr || "fetch failed"}`);
     return report.finish(fin);

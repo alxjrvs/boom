@@ -49,6 +49,9 @@ const setCommand = buildCommand<{ sync?: boolean; verbose?: boolean }, [string],
   },
   async func(flags, ref) {
     let target: string;
+    // The clone is a network round-trip (a first-time full fetch), so narrate it before the wait
+    // rather than announcing only once it's done — the one in-flight beat this one-shot has.
+    this.process.stdout.write(`boom: cloning ${ref}…\n`);
     try {
       target = await linkRemoteConfigRepo(this.env, ref);
     } catch (e) {

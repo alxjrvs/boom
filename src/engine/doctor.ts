@@ -7,7 +7,7 @@ import { mkdir } from "node:fs/promises";
 import { NO_CONFIG_REPO_MSG, readConfigBreadcrumb, resolveConfigDir } from "../config/load.ts";
 import { detectOs } from "../config/profile.ts";
 import type { BoomContext } from "../context.ts";
-import { remoteReachable } from "../lib/git.ts";
+import { remoteReachableAsync } from "../lib/git.ts";
 import { hasCommand } from "../lib/proc.ts";
 import { bandsReporter } from "../lib/reporter.ts";
 import { boomStateDir } from "./state.ts";
@@ -68,7 +68,11 @@ export async function doctor(ctx: BoomContext, json = false, configOnly = false)
   } else if (!hasCommand("git", ctx.env)) {
     gitRequiredAndMissing = true;
     report.fail("git not on PATH — required to sync the config repo (repo-only config)");
-  } else if (!remoteReachable(breadcrumb.remote.url, ctx.env)) {
+  } else if (
+    !(await report.spin(`checking ${breadcrumb.remote.url}`, () =>
+      remoteReachableAsync(breadcrumb.remote.url, ctx.env),
+    ))
+  ) {
     report.warn(`cannot reach ${breadcrumb.remote.url} — sync will be skipped until it's reachable`);
   } else {
     report.ok(`${breadcrumb.remote.url} reachable`);

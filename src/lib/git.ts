@@ -68,6 +68,11 @@ export function push(dir: string, env: Env): CaptureResult {
   return captureArgv(["git", "push"], env, { cwd: dir });
 }
 
+// Async twin, awaited under push's active-work indicator so the network round-trip narrates.
+export function pushAsync(dir: string, env: Env): Promise<CaptureResult> {
+  return captureArgvAsync(["git", "push"], env, { cwd: dir });
+}
+
 export function resetHard(dir: string, ref: string, env: Env): CaptureResult {
   return captureArgv(["git", "reset", "--hard", ref], env, { cwd: dir });
 }
@@ -148,6 +153,12 @@ export function untrackedFiles(dir: string, env: Env): string[] {
 // to call without mutating anything.
 export function remoteReachable(url: string, env: Env): boolean {
   return captureArgv(["git", "ls-remote", "--exit-code", url], env).code === 0;
+}
+
+// Async twin, awaited under doctor's active-work spinner — the reachability probe is a network
+// round-trip and shouldn't run silently.
+export async function remoteReachableAsync(url: string, env: Env): Promise<boolean> {
+  return (await captureArgvAsync(["git", "ls-remote", "--exit-code", url], env)).code === 0;
 }
 
 // How the local clone stands against its upstream: commits behind, whether it carries

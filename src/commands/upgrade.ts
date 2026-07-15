@@ -144,7 +144,7 @@ async function runUpgrade(flags: UpgradeFlags, report: Reporter, env: Env): Prom
 
   let release: Release;
   try {
-    release = await latestRelease();
+    release = await report.spin("checking for the latest release", () => latestRelease());
   } catch (err) {
     report.fail(`could not resolve latest release: ${(err as Error).message}`);
     return;
@@ -153,14 +153,18 @@ async function runUpgrade(flags: UpgradeFlags, report: Reporter, env: Env): Prom
   if (release.version === VERSION && !flags.force) return `already on the latest (${VERSION})`;
   if (flags.check) return `latest is ${release.version} — you have ${VERSION}`;
 
+  // Open a band so the install milestones (found, checksum verified) land as a summary; the live
+  // in-flight narration is the sequence of spinner labels (checking → downloading → installing).
+  report.header("Upgrade");
+  report.ok(`found ${release.tag} (you have v${VERSION})`);
+
   const asset = `boom-${target}`;
   const base = `https://github.com/${REPO}/releases/download/${release.tag}`;
-  report.note(`downloading ${asset} ${release.tag}`);
 
   let bin: Uint8Array;
   let sums: string;
   try {
-    [bin, sums] = await report.spin("downloading", () =>
+    [bin, sums] = await report.spin(`downloading ${release.tag}`, () =>
       Promise.all([
         fetchBytes(`${base}/${asset}`),
         fetchBytes(`${base}/SHA256SUMS`).then((b) => new TextDecoder().decode(b)),
@@ -188,24 +192,28 @@ async function runUpgrade(flags: UpgradeFlags, report: Reporter, env: Env): Prom
   // codesign, or the swap — never leaving a stray `.boom.upgrade.*`.
   let staged: string | undefined;
   try {
-    staged = await stageBinary(self, bin);
+    await report.spin("installing", async () => {
+      staged = await stageBinary(self, bin);
 
-    // macOS release binaries are signed on a real macOS host, so the download should already
-    // verify. Only re-sign ad-hoc as a fallback when it doesn't — re-signing a Developer-ID binary
-    // would clobber its signature and undo notarization. No-op on Linux. (Mirrors install.sh.)
-    if (process.platform === "darwin") {
-      const verified =
-        runArgv(["codesign", "--verify", "--strict", staged], env, { quietStdout: true }).code === 0;
-      if (!verified) {
-        const { code } = runArgv(["codesign", "--force", "--sign", "-", staged], env, { quietStdout: true });
-        if (code !== 0)
-          report.warn(
-            "ad-hoc re-sign failed — if boom is killed on launch, re-run after `xcode-select --install`",
-          );
+      // macOS release binaries are signed on a real macOS host, so the download should already
+      // verify. Only re-sign ad-hoc as a fallback when it doesn't — re-signing a Developer-ID binary
+      // would clobber its signature and undo notarization. No-op on Linux. (Mirrors install.sh.)
+      if (process.platform === "darwin") {
+        const verified =
+          runArgv(["codesign", "--verify", "--strict", staged], env, { quietStdout: true }).code === 0;
+        if (!verified) {
+          const { code } = runArgv(["codesign", "--force", "--sign", "-", staged], env, {
+            quietStdout: true,
+          });
+          if (code !== 0)
+            report.warn(
+              "ad-hoc re-sign failed — if boom is killed on launch, re-run after `xcode-select --install`",
+            );
+        }
       }
-    }
 
-    await swapInto(self, staged);
+      await swapInto(self, staged);
+    });
   } catch (err) {
     if (staged) await rm(staged, { force: true });
     report.fail(`install failed: ${(err as Error).message}`);
