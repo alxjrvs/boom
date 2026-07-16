@@ -13,6 +13,7 @@ import type { BoomContext } from "../context.ts";
 import { copyFile, linkTarget, mkdir, pathExists, stat } from "../lib/fs.ts";
 import { captureArgv, captureArgvAsync, hasCommand } from "../lib/proc.ts";
 import { bandsReporter, type Reporter } from "../lib/reporter.ts";
+import { findImporter, type ImportedEntry, importerNames } from "./importers.ts";
 
 // Common top-level dotfiles worth adopting when present. Deliberately files, not directories —
 // a bounded, legible set that copies cleanly, rather than dragging in a whole `~/.config` tree
@@ -52,6 +53,10 @@ interface Adopted {
   readonly linux?: LinuxPkgs;
   readonly dotfiles: string[]; // basenames copied into home/
   readonly others: Detected[]; // popular managers boom can't reconcile yet — surfaced, not applied
+  // Populated only by `--from <manager>`: a competing manager's layout translated into link/copy
+  // entries (+ scaffold notes for what couldn't be translated cleanly). Mutually exclusive with
+  // the live-machine sweep above — an import proposes exactly what that manager owned.
+  readonly imported?: { manager: string; entries: ImportedEntry[]; notes: string[] };
 }
 
 // System package managers boom's `pkg` resource CAN reconcile (apt/dnf), each with the query
@@ -245,6 +250,31 @@ function renderBoomfile(a: Adopted, host: string, stamp: string): string {
     "",
   ];
 
+  // `--from <manager>` path: render the imported layout as its own dotfiles section (link/copy
+  // entries) plus any scaffold notes, and return — an import proposes exactly what that manager
+  // owned, not a fresh machine sweep.
+  if (a.imported) {
+    lines.push(
+      `# Imported from ${a.imported.manager}. \`src\` paths point into that manager's existing tree —`,
+      "# review each, then move the files into this repo (or keep the paths) before reconciling.",
+      "",
+    );
+    if (a.imported.entries.length > 0) {
+      lines.push("[[section]]", `name = "${a.imported.manager}"`, "");
+      for (const e of a.imported.entries) {
+        lines.push(`[[section.${e.kind}]]`, `src = "${e.src}"`, `dst = "${e.dst}"`, "");
+      }
+    } else {
+      lines.push(`# No link/copy entries could be translated automatically from ${a.imported.manager}.`, "");
+    }
+    if (a.imported.notes.length > 0) {
+      lines.push("# Needs a human — not translated automatically:");
+      for (const n of a.imported.notes) lines.push(`#   • ${n}`);
+      lines.push("");
+    }
+    return `${lines.join("\n")}\n`;
+  }
+
   const pkg: string[] = [];
   if (a.brewCount > 0) pkg.push('[[section.pkg]]\nmanager = "brew"\nfile = "Brewfile"\n');
   if (Object.keys(a.miseTools).length > 0) pkg.push('[[section.pkg]]\nmanager = "mise"\n');
@@ -281,7 +311,10 @@ function renderBoomfile(a: Adopted, host: string, stamp: string): string {
   return `${lines.join("\n")}\n`;
 }
 
-export async function adopt(ctx: BoomContext, opts: { out?: string; force?: boolean }): Promise<number> {
+export async function adopt(
+  ctx: BoomContext,
+  opts: { out?: string; force?: boolean; from?: string },
+): Promise<number> {
   const report = bandsReporter(ctx.process, ctx.env, "adopt", { setup: "READING THE MACHINE…" });
   const out = resolve(ctx.cwd, opts.out ?? "boom-config");
 
@@ -289,6 +322,64 @@ export async function adopt(ctx: BoomContext, opts: { out?: string; force?: bool
     report.fail(`${out}/boomfile.toml already exists — pass --force to overwrite, or choose --out`);
     return report.finish({ ok: "adopt done", fail: (f) => `adopt: ${f} failure(s)` });
   }
+
+  // `--from <manager>`: import a competing dotfile manager's layout instead of sweeping the live
+  // machine. An unknown name fails loudly with the supported set; a missing source dir warns.
+  if (opts.from !== undefined) {
+    const importer = findImporter(opts.from);
+    if (!importer) {
+      report.fail(`unknown --from "${opts.from}" — supported: ${importerNames()}`);
+      return report.finish({ ok: "adopt done", fail: (f) => `adopt: ${f} failure(s)` });
+    }
+    await mkdir(out, { recursive: true });
+    report.header("Importing");
+    const host = ctx.env.BOOM_HOST ?? "this machine";
+    const stamp = new Date().toISOString().slice(0, 10);
+    const sourceDir = await importer.detect(ctx.env);
+    if (sourceDir === undefined) {
+      report.warn(`no ${importer.name} config found — nothing to import`);
+      await Bun.write(
+        join(out, "boomfile.toml"),
+        renderBoomfile(
+          {
+            brewCount: 0,
+            miseTools: {},
+            dotfiles: [],
+            others: [],
+            imported: { manager: importer.name, entries: [], notes: [] },
+          },
+          host,
+          stamp,
+        ),
+      );
+      report.ok(`empty proposal → ${out}`);
+      return report.finish({ ok: "adopt: nothing imported", fail: (f) => `adopt: ${f} failure(s)` });
+    }
+    const { entries, notes } = await report.spin(`reading ${importer.name}`, () =>
+      importer.collect(sourceDir, ctx.env),
+    );
+    report.ok(`imported ${entries.length} entr${entries.length === 1 ? "y" : "ies"} from ${importer.name}`);
+    for (const n of notes) report.note(n);
+    await Bun.write(
+      join(out, "boomfile.toml"),
+      renderBoomfile(
+        {
+          brewCount: 0,
+          miseTools: {},
+          dotfiles: [],
+          others: [],
+          imported: { manager: importer.name, entries, notes },
+        },
+        host,
+        stamp,
+      ),
+    );
+    report.header("Proposal written");
+    report.ok(`boom config proposal → ${out}`);
+    report.note("review it, then: cd into it, git init, and `boom source set <owner/repo>`");
+    return report.finish({ ok: "adopt: config proposed", fail: (f) => `adopt: ${f} failure(s)` });
+  }
+
   await mkdir(out, { recursive: true });
 
   report.header("Scanning");

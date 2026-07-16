@@ -701,3 +701,71 @@ test("verify --ci fails (exit 1) when no config repo resolves (strict gate)", as
   await run(app, ["verify", "--ci"], ctx);
   expect(ctx.process.exitCode).toBe(1);
 });
+
+// --- adopt --from <manager> (migration importers) -----------------------------------------
+
+test("adopt --from stow: mirrors a package's files into link entries under ~", async () => {
+  const sb = await sandbox('[[section]]\nname = "x"\n', { emptyPath: true });
+  await mkdir(join(sb.home, ".dotfiles", "vim"), { recursive: true });
+  await writeFile(join(sb.home, ".dotfiles", "vim", ".vimrc"), "set nocompatible\n");
+  await mkdir(join(sb.home, ".dotfiles", "git", ".config", "git"), { recursive: true });
+  await writeFile(join(sb.home, ".dotfiles", "git", ".config", "git", "config"), "[user]\n");
+  const out = join(sb.base, "proposal");
+  expect(await adopt(sb.ctx, { out, from: "stow" })).toBe(0);
+  const text = await Bun.file(join(out, "boomfile.toml")).text();
+  expect(text).toContain("Imported from stow");
+  expect(text).toContain("[[section.link]]");
+  expect(text).toContain('dst = "~/.vimrc"');
+  expect(text).toContain('dst = "~/.config/git/config"');
+});
+
+test("adopt --from chezmoi: translates dot_/attribute prefixes to ~ targets", async () => {
+  const sb = await sandbox('[[section]]\nname = "x"\n', { emptyPath: true });
+  const src = join(sb.home, ".local", "share", "chezmoi");
+  await mkdir(join(src, "private_dot_config", "nvim"), { recursive: true });
+  await writeFile(join(src, "dot_zshrc"), "export A=1\n");
+  await writeFile(join(src, "private_dot_config", "nvim", "init.lua"), "-- nvim\n");
+  await writeFile(join(src, "dot_gitconfig.tmpl"), "[user]\n  name = {{ .name }}\n");
+  const out = join(sb.base, "proposal");
+  expect(await adopt(sb.ctx, { out, from: "chezmoi" })).toBe(0);
+  const text = await Bun.file(join(out, "boomfile.toml")).text();
+  expect(text).toContain('dst = "~/.zshrc"');
+  expect(text).toContain('dst = "~/.config/nvim/init.lua"');
+  // the .tmpl becomes a scaffold note, not a bogus copy entry
+  expect(text).toContain("chezmoi template");
+  expect(text).not.toContain('dst = "~/.gitconfig"');
+});
+
+test("adopt --from dotbot: parses the link: map into link entries", async () => {
+  const sb = await sandbox('[[section]]\nname = "x"\n', { emptyPath: true });
+  await mkdir(join(sb.home, ".dotfiles"), { recursive: true });
+  await writeFile(
+    join(sb.home, ".dotfiles", "install.conf.yaml"),
+    "- link:\n    ~/.vimrc: vim/vimrc\n    ~/.zshrc:\n      path: zsh/zshrc\n      create: true\n",
+  );
+  const out = join(sb.base, "proposal");
+  expect(await adopt(sb.ctx, { out, from: "dotbot" })).toBe(0);
+  const text = await Bun.file(join(out, "boomfile.toml")).text();
+  expect(text).toContain('dst = "~/.vimrc"');
+  expect(text).toContain('dst = "~/.zshrc"');
+  expect(text).toContain('src = "~/.dotfiles/vim/vimrc"');
+  expect(text).toContain('src = "~/.dotfiles/zsh/zshrc"');
+});
+
+test("adopt --from foo: fails and lists the supported managers", async () => {
+  const sb = await sandbox('[[section]]\nname = "x"\n', { emptyPath: true });
+  const out = join(sb.base, "proposal");
+  expect(await adopt(sb.ctx, { out, from: "foo" })).toBe(1);
+  expect(sb.out()).toContain("unknown --from");
+  expect(sb.out()).toContain("stow");
+  expect(sb.out()).toContain("chezmoi");
+  expect(sb.out()).toContain("dotbot");
+});
+
+test("adopt --from stow with no source dir: warns, writes an empty proposal", async () => {
+  const sb = await sandbox('[[section]]\nname = "x"\n', { emptyPath: true });
+  const out = join(sb.base, "proposal");
+  expect(await adopt(sb.ctx, { out, from: "stow" })).toBe(0);
+  expect(sb.out()).toContain("no stow config found");
+  expect(await pathExists(join(out, "boomfile.toml"))).toBe(true);
+});

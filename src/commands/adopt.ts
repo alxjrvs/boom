@@ -6,7 +6,7 @@ import type { BoomContext } from "../context.ts";
 import { adopt } from "../engine/adopt.ts";
 import { str } from "./flags.ts";
 
-export const adoptCommand = buildCommand<{ out?: string; force?: boolean }, [], BoomContext>({
+export const adoptCommand = buildCommand<{ out?: string; force?: boolean; from?: string }, [], BoomContext>({
   docs: { brief: "Reverse-engineer a boomfile.toml proposal from this machine (packages, dotfiles)" },
   parameters: {
     flags: {
@@ -21,9 +21,15 @@ export const adoptCommand = buildCommand<{ out?: string; force?: boolean }, [], 
         optional: true,
         brief: "Overwrite an existing boomfile.toml in the output dir",
       },
+      from: {
+        kind: "parsed",
+        parse: str,
+        optional: true,
+        brief: "Import from an existing dotfile manager: stow|chezmoi|yadm|dotbot|nix-darwin",
+      },
     },
   },
   async func(flags) {
-    this.process.exitCode = await adopt(this, { out: flags.out, force: flags.force });
+    this.process.exitCode = await adopt(this, { out: flags.out, force: flags.force, from: flags.from });
   },
 });
