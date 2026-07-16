@@ -210,7 +210,7 @@ async function linkOne(entry: File, place: Placement, ctx: ReconcileCtx): Promis
 // Substitute `${env:VAR}` / `${host}` / `${os}` in an `expand`ed copy's content. Unknown
 // `${env:…}` resolves to empty; unmatched `${…}` is left verbatim (so a literal shell
 // `${...}` in a config survives). The escape hatch for per-machine content without a hook.
-function renderTemplate(text: string, ctx: ReconcileCtx): string {
+export function renderTemplate(text: string, ctx: ReconcileCtx): string {
   return text
     .replace(/\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g, (_, name: string) => ctx.env[name] ?? "")
     .replace(/\$\{host\}/g, () => hostname())

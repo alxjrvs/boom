@@ -222,6 +222,7 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
       update: opts.update ?? false,
       verbose,
       env: ctx.env,
+      vars: config.vars ?? {},
       report,
       declared: [],
       journal,

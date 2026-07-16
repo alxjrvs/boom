@@ -4,7 +4,7 @@
 // oracle style as engine.test.ts). launchctl itself is never invoked here — the timer paths
 // are exercised via dry-run/off-platform, and the effectful primitives are darwin-only.
 import { expect, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BoomContext } from "../src/context.ts";
@@ -523,4 +523,72 @@ exit 0
   // rollback re-applies the prior value from the journaled undo token.
   expect(await rollback(sb.ctx)).toBe(0);
   expect(await readFile(store, "utf8")).toContain("tilesize=64");
+});
+
+// ------------------------------------------------------------------------- tmpl ([vars])
+
+// The literal `${NAME}` placeholder the template files carry — built via a template literal
+// so it reads as data, not as an accidental un-interpolated string (biome flags a bare
+// `"${x}"`; this form is the deliberate placeholder the tmpl resource resolves).
+const ph = (name: string): string => `\${${name}}`;
+
+// A boomfile with a top-level [vars] table + a section that renders one template. Written as
+// a helper so each tmpl test starts from the same repo (boomfile + conf.tmpl on disk).
+async function tmplSandbox(
+  vars: string,
+  template: string,
+  entry = `tmpl = [{ src = "conf.tmpl", dst = "~/.conf" }]`,
+): Promise<Sandbox> {
+  const sb = await sandbox(`[vars]\n${vars}\n\n[[section]]\nname = "t"\n${entry}\n`);
+  await writeFile(join(sb.repo, "conf.tmpl"), template);
+  return sb;
+}
+
+test("tmpl: sync renders [vars] into dst, verify passes, uninstall removes it", async () => {
+  const sb = await tmplSandbox(`greeting = "howdy"`, `hello ${ph("greeting")}\n`);
+  const dst = join(sb.home, ".conf");
+
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  expect(await readFile(dst, "utf8")).toBe("hello howdy\n"); // var substituted, not left verbatim
+
+  expect(await reconcile("verify", sb.ctx, {})).toBe(0); // rendered file matches → clean
+  expect(await reconcile("uninstall", sb.ctx, {})).toBe(0);
+  expect(await pathExists(dst)).toBe(false);
+});
+
+test("tmpl: verify warns when the rendered file is edited or missing", async () => {
+  const sb = await tmplSandbox(`greeting = "howdy"`, `hello ${ph("greeting")}\n`);
+  const dst = join(sb.home, ".conf");
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+
+  await writeFile(dst, "hand-edited\n"); // drift
+  expect(await reconcile("verify", sb.ctx, {})).toBe(2); // stale → warning tier
+
+  await rm(dst);
+  expect(await reconcile("verify", sb.ctx, {})).toBe(2); // missing → warning tier
+});
+
+test("tmpl: a missing var is reported, not silently emitted", async () => {
+  const sb = await tmplSandbox(`greeting = "howdy"`, `hi ${ph("greeting")}, from ${ph("nickname")}\n`);
+  const dst = join(sb.home, ".conf");
+
+  expect(await reconcile("sync", sb.ctx, {})).toBe(1); // undefined ${nickname} → failure
+  expect(await pathExists(dst)).toBe(false); // nothing written with a dangling placeholder
+  expect(sb.out()).toContain(ph("nickname"));
+});
+
+test("tmpl: mode is applied and dryRun writes nothing", async () => {
+  const sb = await tmplSandbox(
+    `token = "abc"`,
+    `k=${ph("token")}\n`,
+    `tmpl = [{ src = "conf.tmpl", dst = "~/.conf", mode = "600" }]`,
+  );
+  const dst = join(sb.home, ".conf");
+
+  expect(await reconcile("sync", sb.ctx, { dryRun: true })).toBe(0);
+  expect(await pathExists(dst)).toBe(false); // dry-run plans, never writes
+
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  expect(await readFile(dst, "utf8")).toBe("k=abc\n");
+  expect(await mode(dst)).toBe("600");
 });

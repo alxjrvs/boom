@@ -117,6 +117,19 @@ export const SecretSchema = v.pipe(
   ),
 );
 
+// A rendered template: read one repo-relative `src`, substitute `${NAME}` placeholders from
+// the top-level `[vars]` table (plus the `${env:VAR}`/`${host}`/`${os}` vocabulary `copy`'s
+// `expand` already understands), and write the result to `dst`. The first-class,
+// strict-superset form of `copy` + `expand`: one template + per-profile vars instead of N
+// near-identical machine-specific overlay files. An unknown `${NAME}` is a hard failure (a
+// silently-unresolved placeholder in a config is worse than a loud error), whereas a literal
+// shell `${FOO:-bar}` (anything but a bare identifier) is left verbatim like `expand` does.
+export const TmplSchema = v.strictObject({
+  src: v.string(),
+  dst: v.string(),
+  mode: v.optional(ModeSchema),
+});
+
 // A macOS LaunchAgent: link a plist into ~/Library/LaunchAgents and own its launchctl
 // lifecycle (load -w on sync, unload on uninstall). OS-gated to darwin. `dst` defaults to
 // ~/Library/LaunchAgents/<basename(src)>.
@@ -158,6 +171,7 @@ export const SectionSchema = v.strictObject({
   pkg: v.optional(v.array(PkgSchema)),
   osx_default: v.optional(v.array(OsxDefaultSchema)),
   launchd: v.optional(v.array(LaunchdSchema)),
+  tmpl: v.optional(v.array(TmplSchema)),
   secret: v.optional(v.array(SecretSchema)),
   systemd: v.optional(v.array(SystemdSchema)),
   run: v.optional(v.array(RunSchema)),
@@ -218,6 +232,10 @@ export const BoomfileSchema = v.strictObject({
   boom: v.optional(BoomSettingsSchema),
   // Modules to compose in before this repo's own sections (resolved during reconcile).
   use: v.optional(v.array(UseSchema)),
+  // Machine-global substitution values for the `tmpl` resource. A flat string→string map,
+  // typically differentiated per machine via a `boomfile.<profile>.toml` overlay — the whole
+  // point of `tmpl` over N overlay files is that only these values change, not the template.
+  vars: v.optional(v.record(v.string(), v.string())),
   section: v.array(SectionSchema),
 });
 
@@ -227,6 +245,7 @@ export type Pkg = v.InferOutput<typeof PkgSchema>;
 export type Dir = v.InferOutput<typeof DirSchema>;
 export type Check = v.InferOutput<typeof CheckSchema>;
 export type Secret = v.InferOutput<typeof SecretSchema>;
+export type Tmpl = v.InferOutput<typeof TmplSchema>;
 export type Launchd = v.InferOutput<typeof LaunchdSchema>;
 export type Systemd = v.InferOutput<typeof SystemdSchema>;
 export type Run = v.InferOutput<typeof RunSchema>;

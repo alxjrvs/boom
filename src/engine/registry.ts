@@ -18,6 +18,7 @@ import { reconcilePkg } from "./resources/packages.ts";
 import { reconcileRun } from "./resources/run.ts";
 import { reconcileSecret } from "./resources/secret.ts";
 import { reconcileSystemd } from "./resources/systemd.ts";
+import { reconcileTmpl } from "./resources/template.ts";
 import type { ReconcileCtx } from "./types.ts";
 
 // One unit of work + the label the error boundary reports it under.
@@ -61,6 +62,11 @@ const RESOURCES: readonly ResourceType[] = [
     category: "DOTFILES",
     items: (s) =>
       (s.copy ?? []).map((e) => ({ label: `copy ${e.dst}`, run: (ctx) => reconcileCopy(e, ctx) })),
+  },
+  {
+    category: "DOTFILES",
+    items: (s) =>
+      (s.tmpl ?? []).map((e) => ({ label: `tmpl ${e.dst}`, run: (ctx) => reconcileTmpl(e, ctx) })),
   },
   {
     category: "SECRETS",

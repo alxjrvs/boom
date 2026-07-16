@@ -23,6 +23,9 @@ export interface ReconcileCtx {
   // silences it under the section band, so noisy resources (brew/mise, `run` steps) branch on it.
   readonly verbose: boolean;
   readonly env: Record<string, string | undefined>;
+  // The boomfile's top-level `[vars]` table — the substitution source for the `tmpl` resource.
+  // Empty when the boomfile declares none.
+  readonly vars: Record<string, string>;
   readonly report: Reporter;
   // Destinations boom owns this run — populated as handlers run (drives orphan
   // reaping + the persisted manifest).
