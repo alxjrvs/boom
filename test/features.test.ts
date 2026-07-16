@@ -2,7 +2,7 @@
 // checkpoints, boom.lock, drift notifications, adopt, and doctor --fix. Each is exercised
 // against a fully sandboxed $HOME + state dir (never the real machine), like engine.test.ts.
 import { expect, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "@stricli/core";
@@ -154,6 +154,62 @@ test("secret verify: a missing rendered file warns", async () => {
   });
   expect(await reconcile("verify", sb.ctx, {})).toBe(2);
   expect(sb.out()).toContain("secret not rendered");
+});
+
+// --- pluggable secret backends ------------------------------------------------------------
+
+// Write an executable fake tool into the sandbox's empty-bin dir (the dir emptyPath points PATH
+// at), so a backend that shells out resolves to this instead of the real tool.
+async function fakeBinEmpty(base: string, name: string, script: string): Promise<void> {
+  const p = join(base, "empty-bin", name);
+  await writeFile(p, `#!/bin/sh\n${script}`);
+  await chmod(p, 0o755);
+}
+
+test("secret env backend: needs no tool — sync writes the env value at 0600 even under emptyPath", async () => {
+  const sb = await sandbox(
+    '[[section]]\nname = "s"\nsecret = [{ dst = "~/.tok", ref = "env:MY_SECRET", backend = "env" }]\n',
+    { emptyPath: true },
+  );
+  sb.env.MY_SECRET = "s3cr3t-value";
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  const tok = join(sb.home, ".tok");
+  expect(await Bun.file(tok).text()).toBe("s3cr3t-value");
+  expect(((await stat(tok)).mode & 0o777).toString(8)).toBe("600");
+  // The plaintext must never leak into the reconcile's own output — only file content carries it.
+  expect(sb.out()).not.toContain("s3cr3t-value");
+});
+
+test("secret env backend: a missing env var is a clean reported failure, not a crash", async () => {
+  const sb = await sandbox(
+    '[[section]]\nname = "s"\nsecret = [{ dst = "~/.tok", ref = "env:ABSENT_VAR", backend = "env" }]\n',
+    { emptyPath: true },
+  );
+  expect(await reconcile("sync", sb.ctx, {})).toBe(1);
+  expect(sb.out()).toContain("$ABSENT_VAR not set");
+});
+
+test("secret backend inference: a bare op:// ref still routes to op (fails cleanly with no op)", async () => {
+  const sb = await sandbox('[[section]]\nname = "s"\nsecret = [{ dst = "~/.token", ref = "op://v/i/f" }]\n', {
+    emptyPath: true,
+  });
+  // No `backend =`: inferred as op from the `op://` scheme → same op-not-installed failure.
+  expect(await reconcile("sync", sb.ctx, {})).toBe(1);
+  expect(sb.out()).toContain("op (1Password CLI) not installed");
+});
+
+test("secret pass backend: sync writes the value `pass show` returns", async () => {
+  const sb = await sandbox(
+    '[[section]]\nname = "s"\nsecret = [{ dst = "~/.tok", ref = "pass:svc/token", backend = "pass" }]\n',
+    { emptyPath: true },
+  );
+  // Fake `pass show svc/token` → the secret (with a trailing newline the resolver strips).
+  await fakeBinEmpty(sb.base, "pass", 'echo "pass-provided-secret"\n');
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  const tok = join(sb.home, ".tok");
+  expect(await Bun.file(tok).text()).toBe("pass-provided-secret");
+  expect(((await stat(tok)).mode & 0o777).toString(8)).toBe("600");
+  expect(sb.out()).not.toContain("pass-provided-secret");
 });
 
 // --- use modules --------------------------------------------------------------------------

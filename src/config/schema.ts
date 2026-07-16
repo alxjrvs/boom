@@ -97,18 +97,22 @@ export const CheckSchema = v.strictObject({
   repair: v.optional(v.string()),
 });
 
-// A rendered secret: resolve a 1Password reference (or a whole template of them) to a file
-// at sync time, so a machine's secret-bearing config is declared like everything else instead
-// of living out of band. `ref` is a single `op://vault/item/field` reference (rendered with
-// `op read`); `template` is a repo-relative file whose embedded `op://…` references are filled
-// in (`op inject`) — exactly one is required. The plaintext is never journaled or backed up
-// (that would defeat the point), so a secret's undo is a plain remove, and `mode` defaults to
-// 0600 (a secret nobody else can read). The op-native counterpart to `copy` + `expand`.
+// A rendered secret: resolve a secret reference (or a whole template of them) to a file at sync
+// time, so a machine's secret-bearing config is declared like everything else instead of living
+// out of band. `ref` is a single reference (`op://vault/item/field`, `env:VAR`, `pass:path`, or
+// an encrypted file path); `template` is a repo-relative file whose embedded references are
+// filled in — exactly one is required. `backend` picks the resolver (op/env/pass/age/sops); when
+// absent it's inferred from the ref scheme (`op://`→op, `env:`→env, `pass:`→pass) or a file
+// extension (`.age`→age, `.sops.*`/`.enc`→sops), defaulting to op so every existing `op://…`
+// boomfile keeps working untouched. The plaintext is never journaled or backed up (that would
+// defeat the point), so a secret's undo is a plain remove, and `mode` defaults to 0600 (a secret
+// nobody else can read). The declarative counterpart to `copy` + `expand`, for secrets.
 export const SecretSchema = v.pipe(
   v.strictObject({
     dst: v.string(),
     ref: v.optional(v.string()),
     template: v.optional(v.string()),
+    backend: v.optional(v.picklist(["op", "env", "pass", "age", "sops"])),
     mode: v.optional(ModeSchema),
   }),
   v.check(

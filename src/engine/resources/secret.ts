@@ -11,33 +11,20 @@
 // auto-deletes one — dropping a secret from the config leaves the rendered file in place;
 // `uninstall` is the one path that removes it.
 import { writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import type { Secret } from "../../config/schema.ts";
 import { chmod, displayPath, expandTilde, mkdir, pathExists, rm, stat } from "../../lib/fs.ts";
-import { captureArgvAsync, hasCommand } from "../../lib/proc.ts";
+import { getBackend, type SecretResult } from "../secrets/backends.ts";
 import type { ReconcileCtx } from "../types.ts";
 
 const DEFAULT_MODE = 0o600;
 
-interface Rendered {
-  readonly ok: boolean;
-  readonly value?: string;
-  readonly err?: string;
-}
-
-// Resolve the secret's plaintext via `op`. A `ref` is one field (`op read --no-newline` strips
-// only the trailing newline op appends, so a bare API key lands without one); a `template` is a
-// whole file rendered by `op inject`. Runs under the active-work spinner — an `op` call is a
-// network round-trip. The plaintext stays in this function's locals; nothing logs or journals it.
-async function render(entry: Secret, ctx: ReconcileCtx): Promise<Rendered> {
-  const argv = entry.ref
-    ? ["op", "read", "--no-newline", entry.ref]
-    : ["op", "inject", "-i", join(ctx.repo, entry.template as string)];
-  const r = await ctx.report.spin(`op ${entry.ref ? "read" : "inject"}`, () =>
-    captureArgvAsync(argv, ctx.env),
-  );
-  if (r.code !== 0) return { ok: false, err: r.stderr.split("\n").filter(Boolean).at(-1) ?? "op failed" };
-  return { ok: true, value: r.stdout };
+// Resolve the secret's plaintext through its backend (op/env/pass/age/sops — see backends.ts).
+// Runs under the active-work spinner: a resolve may be a network round-trip (op) or a decrypt.
+// The plaintext stays in this function's locals; nothing logs or journals it.
+function render(entry: Secret, ctx: ReconcileCtx): Promise<SecretResult> {
+  const backend = getBackend(entry);
+  return ctx.report.spin(`secret (${backend.name})`, () => backend.read(entry, ctx));
 }
 
 // Write the rendered secret with a restrictive mode. Remove any prior file first so writeFile's
@@ -58,17 +45,19 @@ export async function reconcileSecret(entry: Secret, ctx: ReconcileCtx): Promise
 
   switch (ctx.verb) {
     case "sync": {
-      // A dry-run plan states intent without touching 1Password, so it never needs `op` present.
+      // A dry-run plan states intent without resolving anything, so it never needs the backend's
+      // tool present (or a reachable vault).
       if (ctx.dryRun) {
         report.plan(`${disp} would be rendered from ${entry.ref ?? entry.template}`);
         return;
       }
-      if (!hasCommand("op", ctx.env)) {
-        report.fail(`${disp} — op (1Password CLI) not installed, can't render secret`);
+      const backend = getBackend(entry);
+      if (!backend.available(ctx.env)) {
+        report.fail(`${disp} — ${backend.tool} not installed, can't render secret`);
         return;
       }
       const r = await render(entry, ctx);
-      if (!r.ok || r.value === undefined) {
+      if (!r.ok) {
         report.fail(`${disp} — ${r.err}`);
         return;
       }
@@ -105,15 +94,17 @@ export async function reconcileSecret(entry: Secret, ctx: ReconcileCtx): Promise
         report.warn(`${disp} mode 0${curMode.toString(8)}, expected 0${mode.toString(8)} — run: boom source`);
         return;
       }
-      // Without op (missing, or offline) we can still confirm the file is present but can't check
-      // its freshness against the vault — report that honestly rather than passing it as current.
-      if (!hasCommand("op", ctx.env)) {
-        report.skip(`${disp} present (op unavailable — freshness unchecked)`);
+      // Without the backend's tool (missing, or offline) we can still confirm the file is present
+      // but can't check its freshness against the source — report that honestly rather than
+      // passing it as current.
+      const backend = getBackend(entry);
+      if (!backend.available(ctx.env)) {
+        report.skip(`${disp} present (${backend.name} unavailable — freshness unchecked)`);
         return;
       }
       const r = await render(entry, ctx);
-      if (!r.ok || r.value === undefined) {
-        report.skip(`${disp} present (couldn't reach 1Password — freshness unchecked)`);
+      if (!r.ok) {
+        report.skip(`${disp} present (couldn't resolve secret — freshness unchecked)`);
         return;
       }
       if ((await Bun.file(dst).text()) === r.value) report.skip(`${disp} (secret current)`);
