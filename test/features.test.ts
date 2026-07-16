@@ -19,6 +19,7 @@ import {
   setRunLabel,
 } from "../src/engine/journal.ts";
 import { boomLock, readLock, writeLock } from "../src/engine/lock.ts";
+import { boomStatus } from "../src/engine/overview.ts";
 import { reconcile } from "../src/engine/reconcile.ts";
 import { checkpoint, rollbackTo } from "../src/engine/rollback.ts";
 import { pathExists } from "../src/lib/fs.ts";
@@ -237,4 +238,51 @@ test("adopt: refuses to overwrite an existing proposal without --force", async (
   await writeFile(join(out, "boomfile.toml"), "# existing\n");
   expect(await adopt(sb.ctx, { out })).toBe(1);
   expect(sb.out()).toContain("already exists");
+});
+
+// --- boom status (the machine dashboard) --------------------------------------------------
+
+test("status: composes config, last-sync, lock and secret health into one report", async () => {
+  // A boomfile that declares packages + a secret, on an empty PATH so op is absent and no
+  // sync has run yet — the dashboard should surface each as its own line without touching the
+  // real machine, and warn (exit 2) on the un-synced + op-missing signals.
+  const sb = await sandbox(
+    '[[section]]\nname = "dev"\npkg = [{ manager = "brew" }]\nsecret = [{ dst = "~/.tok", ref = "op://v/i/f" }]\n',
+    { emptyPath: true },
+  );
+  const rc = await boomStatus(sb.ctx);
+  const out = sb.out();
+  expect(out).toContain("Config");
+  expect(out).toContain("1 section(s)");
+  expect(out).toContain("no sync recorded yet");
+  expect(out).toContain("no boom.lock");
+  expect(out).toContain("secret(s) declared but op"); // op absent under emptyPath
+  expect(rc).toBe(2); // warning tier: un-synced + op missing
+});
+
+test("status: reports a clean last sync and lists checkpoints from the journal", async () => {
+  const sb = await sandbox('[[section]]\nname = "x"\n');
+  // Simulate a committed run + a named checkpoint directly through the journal the dashboard
+  // reads — no resource walk needed to exercise the composition.
+  const j = new Journal(sb.env, newRunId());
+  await j.done("link", join(sb.home, ".x"), { kind: "remove" });
+  j.markCommitted();
+  j.close();
+  await setRunLabel(sb.env, j.runId, "green");
+
+  const rc = await boomStatus(sb.ctx);
+  const out = sb.out();
+  expect(out).toContain("last sync clean");
+  expect(out).toContain("checkpoint(s): green");
+  expect(rc).toBe(0); // nothing needs attention
+});
+
+test("status: --json emits the shared report envelope", async () => {
+  const sb = await sandbox('[[section]]\nname = "x"\n');
+  const rc = await boomStatus(sb.ctx, true);
+  const env = JSON.parse(sb.out()) as { schemaVersion: number; records: { msg: string }[] };
+  expect(env.schemaVersion).toBeGreaterThanOrEqual(2);
+  expect(env.records.some((r) => r.msg.includes("section(s)"))).toBe(true);
+  // no config-repo/fleet/lock/secrets declared → un-synced is the only warning
+  expect(rc).toBe(2);
 });
