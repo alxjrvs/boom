@@ -10,6 +10,7 @@ import { completionsCommand } from "./commands/completions.ts";
 import { doctorCommand } from "./commands/doctor.ts";
 import { editCommand } from "./commands/edit.ts";
 import { fleetCommand } from "./commands/fleet.ts";
+import { initCommand } from "./commands/init.ts";
 import { lockCommand } from "./commands/lock.ts";
 import { manCommand } from "./commands/man.ts";
 import { mcpRouteMap } from "./commands/mcp.ts";
@@ -39,6 +40,7 @@ export const routes = buildRouteMap({
     doctor: doctorCommand,
     lock: lockCommand,
     adopt: adoptCommand,
+    init: initCommand,
     fleet: fleetCommand,
     module: moduleRouteMap,
     code: codeRouteMap,

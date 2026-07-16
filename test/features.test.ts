@@ -2,12 +2,12 @@
 // checkpoints, boom.lock, drift notifications, adopt, and doctor --fix. Each is exercised
 // against a fully sandboxed $HOME + state dir (never the real machine), like engine.test.ts.
 import { expect, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "@stricli/core";
 import { app } from "../src/cli.ts";
-import { loadConfig } from "../src/config/load.ts";
+import { loadConfig, readConfigBreadcrumb } from "../src/config/load.ts";
 import { resolveModule } from "../src/config/modules.ts";
 import { insertUseRef, searchRegistry } from "../src/config/registry.ts";
 import type { BoomContext } from "../src/context.ts";
@@ -21,6 +21,7 @@ import {
   readMachines,
   writeMachineSummary,
 } from "../src/engine/fleet.ts";
+import { boomInit } from "../src/engine/init.ts";
 import {
   findRunByLabel,
   Journal,
@@ -34,6 +35,7 @@ import { boomStatus } from "../src/engine/overview.ts";
 import { reconcile } from "../src/engine/reconcile.ts";
 import { checkpoint, rollbackTo } from "../src/engine/rollback.ts";
 import { pathExists } from "../src/lib/fs.ts";
+import { headSha } from "../src/lib/git.ts";
 import { notifyArgv } from "../src/lib/notify.ts";
 
 interface Sandbox {
@@ -584,4 +586,89 @@ test("fleet diff: an unrecorded host is a hard failure", async () => {
   const rc = await fleetDiff(sb.ctx, "alpha", "ghost");
   expect(sb.out()).toContain("no summary for ghost");
   expect(rc).toBe(1);
+});
+
+// --- init (cold-start lifecycle) ----------------------------------------------------------
+
+// An init driver over a *git-only* PATH: a bin dir holding just a `git` symlink, so adopt's
+// package-manager probes all miss (a hermetic bare proposal) while `git init`/commit still work,
+// and `gh` is deliberately absent so the real remote-create path is never exercised. Git identity
+// rides on GIT_AUTHOR_*/GIT_COMMITTER_* env vars so a commit needs no ambient git config.
+async function initDriver(
+  sb: Sandbox,
+): Promise<{ ctx: BoomContext; env: Record<string, string | undefined>; out(): string }> {
+  const bin = join(sb.base, "git-bin");
+  await mkdir(bin, { recursive: true });
+  const realGit = Bun.which("git");
+  if (!realGit) throw new Error("git not found on PATH — required for the init tests");
+  await symlink(realGit, join(bin, "git"));
+  const env: Record<string, string | undefined> = {
+    ...sb.env,
+    PATH: bin,
+    // Fully hermetic git: no system (NOSYSTEM, inherited) *and* no global config, so a developer's
+    // ~/.gitconfig (e.g. a global husky pre-commit hook, or commit signing) can't leak in and
+    // break the sandbox commit. Identity rides on the GIT_*_NAME/EMAIL vars below.
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_AUTHOR_NAME: "boom test",
+    GIT_AUTHOR_EMAIL: "test@boom.dev",
+    GIT_COMMITTER_NAME: "boom test",
+    GIT_COMMITTER_EMAIL: "test@boom.dev",
+  };
+  const buf = { out: "" };
+  const write = (s: string): void => {
+    buf.out += s;
+  };
+  const proc = { stdout: { write }, stderr: { write }, env, exitCode: 0 };
+  const ctx = { process: proc, env, cwd: sb.base } as unknown as BoomContext;
+  return { ctx, env, out: () => buf.out };
+}
+
+test("init --dry-run reports the planned steps and mutates nothing", async () => {
+  const sb = await sandbox('[[section]]\nname = "x"\n');
+  const drv = await initDriver(sb);
+  const target = join(sb.base, "cfg");
+  expect(await boomInit(drv.ctx, { dir: target, repo: "me/dots", dryRun: true })).toBe(0);
+  // Nothing on disk: no target dir, no breadcrumb.
+  expect(await pathExists(target)).toBe(false);
+  expect(await readConfigBreadcrumb(drv.env)).toBeUndefined();
+  expect(drv.out()).toContain("scaffold a boomfile.toml proposal");
+  expect(drv.out()).toContain("git init");
+});
+
+test("init --no-push scaffolds, inits + commits a repo, and records the breadcrumb", async () => {
+  const sb = await sandbox('[[section]]\nname = "x"\n');
+  const drv = await initDriver(sb);
+  const target = join(sb.base, "cfg");
+  expect(await boomInit(drv.ctx, { dir: target, repo: "me/dots", noPush: true })).toBe(0);
+  // adopt scaffolded the proposal, git init created the repo, and a commit landed.
+  expect(await pathExists(join(target, "boomfile.toml"))).toBe(true);
+  expect(await pathExists(join(target, ".git"))).toBe(true);
+  expect(headSha(target, drv.env)).toBeDefined();
+  // The breadcrumb points boom at the new repo, with the derived remote URL.
+  const crumb = await readConfigBreadcrumb(drv.env);
+  expect(crumb?.path).toBe(target);
+  expect(crumb?.remote.url).toBe("https://github.com/me/dots.git");
+});
+
+test("init into an existing non-empty repo without --force fails cleanly", async () => {
+  const sb = await sandbox('[[section]]\nname = "x"\n');
+  const drv = await initDriver(sb);
+  const target = join(sb.base, "existing");
+  await mkdir(target, { recursive: true });
+  // Seed an established repo (a commit) with git so the guard has history to refuse over. Reuse the
+  // driver's hermetic env (git-only PATH, no system/global config) so the seed commit reliably
+  // lands — otherwise the guard has no HEAD to detect and the test wouldn't exercise it.
+  const git = (...a: string[]): void => {
+    Bun.spawnSync(["git", "-C", target, ...a], { stdout: "ignore", stderr: "ignore", env: drv.env });
+  };
+  git("init", "-q", "-b", "main");
+  await writeFile(join(target, "keep.txt"), "precious\n");
+  git("-c", "user.email=t@t.com", "-c", "user.name=t", "add", "-A");
+  git("-c", "user.email=t@t.com", "-c", "user.name=t", "commit", "-q", "-m", "seed");
+
+  expect(await boomInit(drv.ctx, { dir: target, repo: "me/dots", noPush: true })).toBe(1);
+  expect(drv.out()).toContain("already a git repo with commits");
+  // The guard fired before adopt — the existing content is untouched.
+  expect(await pathExists(join(target, "keep.txt"))).toBe(true);
+  expect(await pathExists(join(target, "boomfile.toml"))).toBe(false);
 });

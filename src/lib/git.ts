@@ -16,6 +16,25 @@ export function cloneRepo(url: string, dest: string, env: Env): CaptureResult {
   return captureArgv(["git", "clone", url, dest], env);
 }
 
+// Initialize `dir` as a git repo on a `main` default branch — the cold-start half of
+// `boom init` (the clone half is cloneRepo). `-b main` pins the initial branch so the
+// later `git push -u origin main` names a branch that exists regardless of the host's
+// `init.defaultBranch`. Idempotent (re-init is a no-op) but callers guard first.
+export function initRepo(dir: string, env: Env): CaptureResult {
+  return captureArgv(["git", "init", "-b", "main", dir], env);
+}
+
+// Whether `dir` is already inside a git work tree — the guard `boom init` checks before
+// initializing, so it never re-inits (or clobbers) an established repo. False when `dir`
+// doesn't exist yet (captureArgv maps the spawn throw to code -1).
+export function isGitRepo(dir: string, env: Env): boolean {
+  return captureArgv(["git", "rev-parse", "--is-inside-work-tree"], env, { cwd: dir }).code === 0;
+}
+
+export function addRemote(dir: string, name: string, url: string, env: Env): CaptureResult {
+  return captureArgv(["git", "remote", "add", name, url], env, { cwd: dir });
+}
+
 export function fetchOrigin(dir: string, env: Env): CaptureResult {
   return captureArgv(["git", "fetch", "origin"], env, { cwd: dir });
 }
