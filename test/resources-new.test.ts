@@ -274,6 +274,105 @@ test("pkg apt: off-platform (darwin) is a no-op, reported on verify", async () =
   expect(sb.out()).toContain("Linux-only");
 });
 
+// ------------------------------------------------ pkg user-scoped managers (cargo/npm/pipx/…)
+
+// A stateful fake for a user-scoped manager: an env var ($<VAR>) holds the space-separated set of
+// "installed" package names. install appends, uninstall removes, and the query reports membership.
+// npm/gem/flatpak probe per-package (exit code); cargo/pipx list (parsed once) — so each fake
+// implements whichever discipline USER_MGR uses for it.
+
+test("pkg npm: sync installs missing globals, verify keys off `npm ls -g`, uninstall removes", async () => {
+  const sb = await sandbox(`[[section]]\nname = "P"\npkg = [{ manager = "npm", file = "npm.txt" }]\n`);
+  await writeFile(join(sb.repo, "npm.txt"), "# clis\nprettier\ntypescript\n");
+  const bin = join(sb.repo, ".fakebin");
+  const state = join(sb.repo, "npm.state"); // space-separated installed set, persisted across calls
+  await writeFile(state, "");
+  // npm install -g <p> | rm -g <p> | ls -g --depth=0 <p>  (exit 0 iff installed)
+  await fakeBin(
+    bin,
+    "npm",
+    `S="${state}"; touch "$S"; set=$(cat "$S")
+case "$1 $2" in
+  "install -g") echo "$set $3" | tr ' ' '\\n' | grep -v '^$' | sort -u | tr '\\n' ' ' > "$S";;
+  "rm -g") echo " $set " | sed "s/ $3 / /" | xargs > "$S";;
+  "ls -g") case " $set " in *" $4 "*) exit 0;; *) exit 1;; esac;;
+esac
+exit 0
+`,
+  );
+  const env = sb.ctx.env as Record<string, string | undefined>;
+  env.PATH = `${bin}:${process.env.PATH ?? ""}`;
+
+  // Nothing installed → verify warns (exit 2) and names the misses.
+  expect(await reconcile("verify", sb.ctx, {})).toBe(2);
+  expect(sb.out()).toContain("npm missing: prettier, typescript");
+
+  // sync installs both.
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  expect((await readFile(state, "utf8")).trim().split(/\s+/).sort()).toEqual(["prettier", "typescript"]);
+
+  // Now verify passes, and a re-sync is a no-op (already satisfied).
+  expect(await reconcile("verify", sb.ctx, {})).toBe(0);
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+
+  // uninstall removes what's declared.
+  expect(await reconcile("uninstall", sb.ctx, {})).toBe(0);
+  expect((await readFile(state, "utf8")).trim()).toBe("");
+});
+
+test("pkg cargo: list-query manager parses `cargo install --list` once; sync installs the missing crate", async () => {
+  const sb = await sandbox(`[[section]]\nname = "P"\npkg = [{ manager = "cargo", file = "crates.txt" }]\n`);
+  await writeFile(join(sb.repo, "crates.txt"), "ripgrep\nfd-find\n");
+  const bin = join(sb.repo, ".fakebin");
+  const log = join(sb.repo, "cargo-install.log");
+  // `cargo install --list` prints "<crate> vX:" then indented binary lines — ripgrep already there.
+  await fakeBin(
+    bin,
+    "cargo",
+    `case "$1" in
+  install)
+    case "$2" in
+      --list) printf 'ripgrep v13.0.0:\\n    rg\\n';;
+      *) echo "install $2" >> "${log}";;
+    esac;;
+esac
+exit 0
+`,
+  );
+  const env = sb.ctx.env as Record<string, string | undefined>;
+  env.PATH = `${bin}:${process.env.PATH ?? ""}`;
+
+  // ripgrep is present, fd-find is not → verify warns naming only the miss.
+  expect(await reconcile("verify", sb.ctx, {})).toBe(2);
+  expect(sb.out()).toContain("cargo missing: fd-find");
+
+  // sync installs only the missing crate (ripgrep is skipped — no rebuild).
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  const installs = (await readFile(log, "utf8")).trim();
+  expect(installs).toBe("install fd-find");
+});
+
+test("pkg flatpak: off-platform (darwin) is a no-op reported on verify", async () => {
+  const sb = await sandbox(`[[section]]\nname = "P"\npkg = [{ manager = "flatpak", file = "apps.txt" }]\n`, {
+    BOOM_OS: "darwin",
+  });
+  await writeFile(join(sb.repo, "apps.txt"), "org.gimp.GIMP\n");
+  expect(await reconcile("verify", sb.ctx, { verbose: true })).toBe(0);
+  expect(sb.out()).toContain("Linux-only");
+});
+
+test("pkg gem: a manager absent from PATH reports fail, not a crash", async () => {
+  const sb = await sandbox(`[[section]]\nname = "P"\npkg = [{ manager = "gem", file = "gems.txt" }]\n`);
+  await writeFile(join(sb.repo, "gems.txt"), "rubocop\n");
+  // PATH points at an empty dir: `gem` is not resolvable, so the arm must report fail (not throw).
+  const bin = join(sb.repo, ".empty");
+  await mkdir(bin, { recursive: true });
+  const env = sb.ctx.env as Record<string, string | undefined>;
+  env.PATH = bin;
+  expect(await reconcile("verify", sb.ctx, {})).toBe(1);
+  expect(sb.out()).toContain("gem not installed");
+});
+
 // ------------------------------------------------------ osx_default journaling + rollback
 
 test("osx_default: sync journals the prior value (type inferred) and rollback restores it", async () => {

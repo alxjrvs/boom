@@ -18,6 +18,12 @@ export async function reconcilePkg(entry: Pkg, ctx: ReconcileCtx): Promise<void>
       return reconcileLinuxPkgs("apt", entry.file, ctx);
     case "dnf":
       return reconcileLinuxPkgs("dnf", entry.file, ctx);
+    case "cargo":
+    case "npm":
+    case "pipx":
+    case "gem":
+    case "flatpak":
+      return reconcileUserPkgs(entry.manager, entry.file, ctx);
   }
 }
 
@@ -192,5 +198,178 @@ async function reconcileLinuxPkgs(
     }
     case "uninstall":
       return; // system packages survive uninstall, like brew
+  }
+}
+
+// The user-scoped managers: like apt/dnf they read a newline package list, but install into the
+// *user* toolchain (no sudo, not the OS package set) — a language/app installer per manager. Two
+// query disciplines: most expose a per-package "is it installed" probe whose exit code is the
+// answer; cargo and pipx have no per-package query, so their installed set is parsed once from a
+// list command and membership-tested. Every command shape mirrors adopt.ts's OTHER_MANAGERS so
+// detection (`boom adopt`) and management (`boom sync`) agree on the exact CLIs.
+type UserMgrName = "cargo" | "npm" | "pipx" | "gem" | "flatpak";
+
+// A per-package probe (its exit code is the answer) vs. a one-shot list parsed into an installed
+// set (for tools with no per-package query). `parse` returns the set of installed package names.
+type PkgQuery =
+  | { readonly each: (p: string) => string[] }
+  | { readonly list: string[]; readonly parse: (out: string) => Set<string> };
+
+interface UserMgr {
+  readonly cli: string;
+  // OS-gated like the Linux system managers: flatpak is a Linux desktop runtime, a no-op on mac.
+  readonly linuxOnly?: boolean;
+  readonly install: string[]; // base argv; the package name is appended
+  readonly uninstall: string[]; // base argv; the package name is appended
+  readonly query: PkgQuery;
+}
+
+// The first whitespace token of every non-indented line — the name column of `cargo install --list`
+// ("ripgrep v13.0.0:" → "ripgrep") and `pipx list --short` ("black 24.1.0" → "black").
+function firstTokens(out: string): Set<string> {
+  const names = new Set<string>();
+  for (const line of out.split("\n")) {
+    if (!/^\S/.test(line)) continue; // indented lines are a crate's binaries / a detail row
+    const name = line.trim().split(/\s+/)[0];
+    if (name) names.add(name);
+  }
+  return names;
+}
+
+const USER_MGR: Record<UserMgrName, UserMgr> = {
+  cargo: {
+    cli: "cargo",
+    install: ["cargo", "install"],
+    uninstall: ["cargo", "uninstall"],
+    query: { list: ["cargo", "install", "--list"], parse: firstTokens },
+  },
+  npm: {
+    cli: "npm",
+    install: ["npm", "install", "-g"],
+    uninstall: ["npm", "rm", "-g"],
+    query: { each: (p) => ["npm", "ls", "-g", "--depth=0", p] },
+  },
+  pipx: {
+    cli: "pipx",
+    install: ["pipx", "install"],
+    uninstall: ["pipx", "uninstall"],
+    query: { list: ["pipx", "list", "--short"], parse: firstTokens },
+  },
+  gem: {
+    cli: "gem",
+    install: ["gem", "install"],
+    // -a removes every version, -x its executables — so uninstall is non-interactive (a bare
+    // `gem uninstall` prompts when multiple versions are installed).
+    uninstall: ["gem", "uninstall", "-a", "-x"],
+    query: { each: (p) => ["gem", "list", "-i", p] },
+  },
+  flatpak: {
+    cli: "flatpak",
+    linuxOnly: true,
+    install: ["flatpak", "install", "-y"],
+    uninstall: ["flatpak", "uninstall", "-y"],
+    query: { each: (p) => ["flatpak", "info", p] },
+  },
+};
+
+async function reconcileUserPkgs(
+  mgr: UserMgrName,
+  file: string | undefined,
+  ctx: ReconcileCtx,
+): Promise<void> {
+  const { report } = ctx;
+  const spec = USER_MGR[mgr];
+
+  // OS-gated like the apt/dnf arm: a Linux-only manager on a mac is a reported no-op, not a fail.
+  if (spec.linuxOnly && detectOs(ctx.env) !== "linux") {
+    if (ctx.verb === "verify") report.skip(`${mgr} — Linux-only`);
+    return;
+  }
+  if (!file) {
+    report.fail(`${mgr} pkg requires a \`file\` listing packages`);
+    return;
+  }
+  if (!hasCommand(spec.cli, ctx.env)) {
+    report.fail(`${spec.cli} not installed`);
+    return;
+  }
+
+  let packages: string[];
+  try {
+    packages = await readPackages(file, ctx);
+  } catch (e) {
+    report.fail(`${mgr} package list ${file}: ${(e as Error).message}`);
+    return;
+  }
+  if (packages.length === 0) {
+    report.skip(`${mgr} — no packages listed in ${file}`);
+    return;
+  }
+
+  // Resolve "is this package installed" once per run: a list-query manager parses one command's
+  // output into a set (cargo/pipx have no per-package probe); the rest probe each name's exit code.
+  const q = spec.query;
+  const installed = "list" in q ? q.parse(captureArgv([...q.list], ctx.env).stdout) : undefined;
+  const isInstalled = (p: string): boolean =>
+    installed
+      ? installed.has(p)
+      : captureArgv((q as { each: (p: string) => string[] }).each(p), ctx.env).code === 0;
+
+  switch (ctx.verb) {
+    case "sync": {
+      // Unlike apt's batched, idempotent `install <all>`, these managers reinstall/rebuild a
+      // package even when it's current (an expensive no-op for cargo), so install only the misses.
+      const missing = packages.filter((p) => !isInstalled(p));
+      if (missing.length === 0) {
+        report.skip(`${mgr}: ${packages.length} package(s) satisfied`);
+        return;
+      }
+      if (ctx.dryRun) {
+        report.plan(`would run: ${spec.install.join(" ")} ${missing.join(" ")}`);
+        return;
+      }
+      // One invocation per package (these installers take a single name), so one failure is
+      // reported for that package without aborting the rest.
+      let failed = 0;
+      for (const p of missing) {
+        const r = await report.spin(`${mgr} install ${p}`, () =>
+          runArgvAsync([...spec.install, p], ctx.env, toolIo(ctx.json, ctx.verbose)),
+        );
+        if (r.code !== 0) {
+          failed++;
+          report.fail(`${mgr} install ${p} failed${lastLine(r.stderr) ? `: ${lastLine(r.stderr)}` : ""}`);
+        }
+      }
+      if (failed < missing.length) report.ok(`${mgr}: installed ${missing.length - failed} package(s)`);
+      return;
+    }
+    case "verify": {
+      const missing = packages.filter((p) => !isInstalled(p));
+      if (missing.length === 0) report.skip(`${mgr}: ${packages.length} package(s) installed`);
+      else report.warn(`${mgr} missing: ${missing.join(", ")} — run: boom source`);
+      return;
+    }
+    case "uninstall": {
+      // These user-scoped managers can cleanly remove what boom installed (unlike system packages,
+      // which survive uninstall), so uninstall reverses the declared set.
+      const present = packages.filter((p) => isInstalled(p));
+      if (present.length === 0) {
+        report.skip(`${mgr}: nothing to remove`);
+        return;
+      }
+      if (ctx.dryRun) {
+        report.plan(`would run: ${spec.uninstall.join(" ")} ${present.join(" ")}`);
+        return;
+      }
+      for (const p of present) {
+        const r = await report.spin(`${mgr} uninstall ${p}`, () =>
+          runArgvAsync([...spec.uninstall, p], ctx.env, toolIo(ctx.json, ctx.verbose)),
+        );
+        if (r.code === 0) report.ok(`${mgr}: removed ${p}`);
+        else
+          report.fail(`${mgr} uninstall ${p} failed${lastLine(r.stderr) ? `: ${lastLine(r.stderr)}` : ""}`);
+      }
+      return;
+    }
   }
 }

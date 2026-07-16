@@ -31,11 +31,12 @@ export const FileSchema = v.strictObject({
 // A package manager to satisfy: one array entry per manager, replacing the old scalar
 // `brewfile = "…"` + boolean `mise = true` (the two resources that broke the array-of-tables
 // shape every other resource has). `file` is the manager's manifest: a Brewfile path for
-// `brew` (default "Brewfile"); a newline-separated package list for `apt`/`dnf` (Linux, `#`
-// comments allowed); `mise` reads the repo's own mise config and ignores it. Each manager is
-// one dispatch arm in packages.ts — the registry north star, not a top-level key per manager.
+// `brew` (default "Brewfile"); a newline-separated package list for `apt`/`dnf` (Linux) and the
+// user-scoped managers `cargo`/`npm` (global)/`pipx`/`gem`/`flatpak` (`flatpak` Linux-only), `#`
+// comments allowed; `mise` reads the repo's own mise config and ignores it. Each manager is one
+// dispatch arm in packages.ts — the registry north star, not a top-level key per manager.
 export const PkgSchema = v.strictObject({
-  manager: v.picklist(["brew", "mise", "apt", "dnf"]),
+  manager: v.picklist(["brew", "mise", "apt", "dnf", "cargo", "npm", "pipx", "gem", "flatpak"]),
   file: v.optional(v.string()),
 });
 
