@@ -5,8 +5,11 @@ import { expect, test } from "bun:test";
 import { chmod, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { run } from "@stricli/core";
+import { app } from "../src/cli.ts";
 import { loadConfig } from "../src/config/load.ts";
 import { resolveModule } from "../src/config/modules.ts";
+import { insertUseRef, searchRegistry } from "../src/config/registry.ts";
 import type { BoomContext } from "../src/context.ts";
 import { adopt } from "../src/engine/adopt.ts";
 import { doctor } from "../src/engine/doctor.ts";
@@ -178,6 +181,98 @@ test("resolveModule: a local path without a boomfile is an error, not a throw", 
   const m = await resolveModule(sb.env, sb.repo, "./nope");
   expect(m.dir).toBeUndefined();
   expect(m.error).toContain("no boomfile.toml");
+});
+
+// --- nested modules + cycle detection -----------------------------------------------------
+
+test("modules: a nested module (A uses B) resolves both, composing B's sections too", async () => {
+  const sb = await sandbox('use = ["./mod-a"]\n[[section]]\nname = "local"\n');
+  const modA = join(sb.repo, "mod-a");
+  const modB = join(modA, "mod-b");
+  await mkdir(modB, { recursive: true });
+  // mod-a itself `use`s mod-b (one level deeper than the old cap allowed).
+  await writeFile(
+    join(modA, "boomfile.toml"),
+    'use = ["./mod-b"]\n[[section]]\nname = "shared-a"\ndir = [{ path = "~/.config/shared-a" }]\n',
+  );
+  await writeFile(
+    join(modB, "boomfile.toml"),
+    '[[section]]\nname = "shared-b"\ndir = [{ path = "~/.config/shared-b" }]\n',
+  );
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  // Both the nested (B) and intermediate (A) module sections applied.
+  expect(await pathExists(join(sb.home, ".config", "shared-b"))).toBe(true);
+  expect(await pathExists(join(sb.home, ".config", "shared-a"))).toBe(true);
+});
+
+test("modules: a cycle (A uses B, B uses A) terminates and warns instead of hanging", async () => {
+  const sb = await sandbox('use = ["./mod-a"]\n[[section]]\nname = "local"\n');
+  const modA = join(sb.repo, "mod-a");
+  const modB = join(sb.repo, "mod-b");
+  await mkdir(modA, { recursive: true });
+  await mkdir(modB, { recursive: true });
+  await writeFile(join(modA, "boomfile.toml"), 'use = ["../mod-b"]\n[[section]]\nname = "a"\n');
+  await writeFile(join(modB, "boomfile.toml"), 'use = ["../mod-a"]\n[[section]]\nname = "b"\n');
+  // If cycle detection failed this would recurse forever; a bounded resolve returns cleanly.
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  expect(sb.out()).toContain("cycle detected");
+});
+
+// --- module registry (search / add) -------------------------------------------------------
+
+test("registry: search matches a pack by a substring of its name or tag", () => {
+  expect(searchRegistry("node").some((p) => p.name === "node-dev")).toBe(true);
+  // tag match: cli-essentials carries the "terminal" tag, not the literal in its name.
+  expect(searchRegistry("terminal").some((p) => p.name === "cli-essentials")).toBe(true);
+  // an empty term lists everything; a nonsense term nothing.
+  expect(searchRegistry("").length).toBeGreaterThan(0);
+  expect(searchRegistry("zzznope")).toHaveLength(0);
+});
+
+test("insertUseRef: idempotent + least-destructive across the three shapes", () => {
+  // no `use` yet → prepend a fresh line.
+  const created = insertUseRef('[[section]]\nname = "x"\n', {}, "github:o/r");
+  expect(created.added).toBe(true);
+  expect(created.text).toContain('use = ["github:o/r"]');
+  // already present → no change.
+  const same = insertUseRef(created.text, { use: ["github:o/r"] }, "github:o/r");
+  expect(same.added).toBe(false);
+  expect(same.text).toBe(created.text);
+  // existing single-line array → splice in, preserving the comment after it.
+  const spliced = insertUseRef('use = ["a"] # keep\n[[section]]\nname="x"\n', { use: ["a"] }, "b");
+  expect(spliced.text).toContain("# keep");
+  expect(spliced.text).toContain('"b"');
+});
+
+test("module search: reports a matching pack via the reporter", async () => {
+  const sb = await sandbox('[[section]]\nname = "x"\n');
+  await run(app, ["module", "search", "rust"], sb.ctx);
+  expect(sb.ctx.process.exitCode).toBe(0);
+  expect(sb.out()).toContain("rust");
+});
+
+test("module add: appends the ref to `use`, is idempotent, and loadConfig sees it", async () => {
+  const sb = await sandbox('[[section]]\nname = "x"\n');
+  await run(app, ["module", "add", "node-dev"], sb.ctx);
+  expect(sb.ctx.process.exitCode).toBe(0);
+  const ref = "github:alxjrvs/boom-mod-node-dev";
+  expect((await loadConfig(sb.repo)).use).toContain(ref);
+  expect(sb.out()).toContain(ref);
+
+  // second add → skip, not a duplicate.
+  sb.ctx.process.exitCode = 0;
+  await run(app, ["module", "add", "node-dev"], sb.ctx);
+  expect(sb.ctx.process.exitCode).toBe(0);
+  const use = (await loadConfig(sb.repo)).use ?? [];
+  expect(use.filter((r) => r === ref)).toHaveLength(1);
+  expect(sb.out()).toContain("already");
+});
+
+test("module add: an unknown pack fails with a hint to search", async () => {
+  const sb = await sandbox('[[section]]\nname = "x"\n');
+  await run(app, ["module", "add", "no-such-pack"], sb.ctx);
+  expect(sb.ctx.process.exitCode).toBe(1);
+  expect(sb.out()).toContain("module search");
 });
 
 // --- fleet awareness ----------------------------------------------------------------------

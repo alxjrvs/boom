@@ -5,8 +5,10 @@
 //
 // Resolution runs during reconcile (not at every config load — `where`/`doctor` shouldn't clone).
 // Remotes clone once into a modules cache and are reused; a clone that fails (offline, typo)
-// degrades to a warning that skips that module, never a failed reconcile. Nesting is one level:
-// a module's own `use` is not followed, keeping resolution finite and legible.
+// degrades to a warning that skips that module, never a failed reconcile. Modules compose
+// recursively: a module's own `use` is followed (resolved relative to that module), so packs can
+// build on packs. A resolution-stack guard makes that finite — a ref already on the current
+// resolve path (a cycle) is warned and skipped instead of looping forever.
 import { isAbsolute, join } from "node:path";
 import { type Env, stateHome } from "../engine/state.ts";
 import { expandTilde, mkdir, rm } from "../lib/fs.ts";
@@ -75,12 +77,19 @@ export async function resolveModule(
 
 // Resolve every `use` module to its sections, in order, for reconcile to compose before the base
 // repo's own. A module that fails to resolve (or whose config is invalid) is reported via
-// `onError` and skipped — one bad module never sinks the whole reconcile.
+// `onError` and skipped — one bad module never sinks the whole reconcile. Composition is
+// recursive: a resolved module's own `use` is followed (relative to that module's dir), and its
+// nested modules' sections are composed *before* its own — so the same "modules compose first"
+// ordering holds at every depth. `stack` is the set of module dirs currently on the resolve path;
+// a ref that resolves back onto it is a cycle — warned via `onError` and skipped, so a cyclic
+// `use` terminates instead of recursing forever. (A dir that already resolved on a *sibling* path
+// is not a cycle and is composed again — diamonds duplicate, sections just merge, which is fine.)
 export async function resolveModuleSections(
   env: Env,
   repo: string,
   uses: readonly string[],
   onError: (ref: string, why: string) => void,
+  stack: Set<string> = new Set(),
 ): Promise<Section[]> {
   const out: Section[] = [];
   for (const ref of uses) {
@@ -93,7 +102,19 @@ export async function resolveModuleSections(
         onError(ref, m.error ?? "unresolved");
         continue;
       }
+      if (stack.has(m.dir)) {
+        onError(ref, `cycle detected (already resolving ${m.dir}) — skipped`);
+        continue;
+      }
       const cfg = await loadConfig(m.dir);
+      // Follow the module's own `use` first, relative to its own dir, then its sections — so
+      // nested modules compose before their parent, matching the top-level ordering. Push/pop the
+      // dir around the recursion so it guards only the current path (a stack, not a global seen-set).
+      if (cfg.use && cfg.use.length > 0) {
+        stack.add(m.dir);
+        out.push(...(await resolveModuleSections(env, m.dir, cfg.use, onError, stack)));
+        stack.delete(m.dir);
+      }
       out.push(...cfg.section);
     } catch (e) {
       onError(ref, (e as Error).message);
