@@ -8,7 +8,7 @@
 // otherwise make every later `verify` warn about uncommitted changes). Opt-in via `[boom] fleet`.
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
-import { loadConfig, resolveConfigDir } from "../config/load.ts";
+import { loadConfig, NO_CONFIG_REPO_MSG, resolveConfigDir } from "../config/load.ts";
 import { detectOs } from "../config/profile.ts";
 import type { BoomContext } from "../context.ts";
 import { pathExists } from "../lib/fs.ts";
@@ -117,6 +117,108 @@ export async function boomFleet(ctx: BoomContext, json = false): Promise<number>
     else if (newest && cmpVersion(m.boom, newest) < 0) report.warn(`${line} — behind v${newest}`);
     else report.ok(line);
   }
+  return finish();
+}
+
+// `boom fleet drift` — the attention-only slice of the fleet view: list *only* the machines worth
+// acting on (last sync wasn't clean, or running an older boom than the newest recorded), so a large
+// fleet's healthy majority doesn't bury the few that need a sync. Same warning-tier exit as `fleet`.
+export async function fleetDrift(ctx: BoomContext, json = false): Promise<number> {
+  const report = bandsReporter(ctx.process, ctx.env, "fleet", { json, setup: "HUNTING FOR DRIFT…" });
+  const finish = (): number =>
+    json
+      ? report.finishJson(ctx.process.stdout, true)
+      : report.finish({
+          ok: "fleet: no machines drifted",
+          warn: (w) => `fleet: ${w} machine(s) drifted`,
+          fail: (f) => `fleet: ${f} failure(s)`,
+        });
+
+  const repo = await resolveConfigDir(ctx.env, ctx.cwd);
+  if (!repo) {
+    report.fail(NO_CONFIG_REPO_MSG);
+    return finish();
+  }
+  const machines = await readMachines(repo);
+  report.header("Fleet drift");
+  if (machines.length === 0) {
+    report.warn("no machine summaries yet — sync with `[boom] fleet` enabled, then push");
+    return finish();
+  }
+  const newest = machines
+    .map((m) => m.boom)
+    .sort(cmpVersion)
+    .at(-1);
+  const self = fleetHost(ctx.env);
+  let flagged = 0;
+  for (const m of machines) {
+    const here = m.host === self ? " (this machine)" : "";
+    if (m.verdict === "fail") {
+      report.warn(`${m.host}${here} — last sync had failures (v${m.boom}, ${m.date})`);
+      flagged++;
+    } else if (m.verdict === "warn") {
+      report.warn(`${m.host}${here} — last sync had warnings (v${m.boom}, ${m.date})`);
+      flagged++;
+    } else if (newest && cmpVersion(m.boom, newest) < 0) {
+      report.warn(`${m.host}${here} — behind v${newest} (on v${m.boom}, synced ${m.date})`);
+      flagged++;
+    }
+  }
+  if (flagged === 0) report.ok(`all ${machines.length} machine(s) current + clean`);
+  return finish();
+}
+
+// The recorded fields two machines are compared on, in report order. Kept as data so `fleetDiff`
+// stays a loop, not a hand-unrolled per-field block — and so adding a field to MachineSummary is a
+// one-line change here.
+const DIFF_FIELDS: ReadonlyArray<{ label: string; of: (m: MachineSummary) => string }> = [
+  { label: "boom", of: (m) => `v${m.boom}` },
+  { label: "os", of: (m) => m.os },
+  { label: "last verdict", of: (m) => m.verdict },
+  { label: "last sync", of: (m) => m.date },
+];
+
+// `boom fleet diff <hostA> <hostB>` — a field-by-field comparison of two recorded machines. Read-
+// only and informational (exit 0), so the summary lines that *match* are held back as skips (the
+// dense default suppresses them) and only the differences surface. A host with no recorded summary
+// is a hard failure (exit 1) — you asked to compare a machine boom has never seen.
+export async function fleetDiff(
+  ctx: BoomContext,
+  hostA: string,
+  hostB: string,
+  json = false,
+): Promise<number> {
+  const report = bandsReporter(ctx.process, ctx.env, "fleet", { json, setup: "COMPARING TWO MACHINES…" });
+  const finish = (): number =>
+    json
+      ? report.finishJson(ctx.process.stdout, false)
+      : report.finish({ ok: "fleet: compared", fail: (f) => `fleet: ${f} failure(s)` });
+
+  const repo = await resolveConfigDir(ctx.env, ctx.cwd);
+  if (!repo) {
+    report.fail(NO_CONFIG_REPO_MSG);
+    return finish();
+  }
+  const machines = await readMachines(repo);
+  const a = machines.find((m) => m.host === hostA);
+  const b = machines.find((m) => m.host === hostB);
+  report.header(`${hostA} ↔ ${hostB}`);
+  if (!a) report.fail(`no summary for ${hostA} — is it recorded? (\`boom fleet\`)`);
+  if (!b) report.fail(`no summary for ${hostB} — is it recorded? (\`boom fleet\`)`);
+  if (!a || !b) return finish();
+
+  let diffs = 0;
+  for (const { label, of } of DIFF_FIELDS) {
+    const av = of(a);
+    const bv = of(b);
+    if (av === bv) report.skip(`${label}: ${av} (same)`);
+    else {
+      report.note(`${label}: ${hostA}=${av} · ${hostB}=${bv}`);
+      diffs++;
+    }
+  }
+  if (diffs === 0) report.ok("identical — same boom, os, verdict, and sync date");
+  else report.ok(`${diffs} field(s) differ`);
   return finish();
 }
 

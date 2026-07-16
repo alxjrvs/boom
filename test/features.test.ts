@@ -10,7 +10,14 @@ import { resolveModule } from "../src/config/modules.ts";
 import type { BoomContext } from "../src/context.ts";
 import { adopt } from "../src/engine/adopt.ts";
 import { doctor } from "../src/engine/doctor.ts";
-import { boomFleet, machineSummary, readMachines, writeMachineSummary } from "../src/engine/fleet.ts";
+import {
+  boomFleet,
+  fleetDiff,
+  fleetDrift,
+  machineSummary,
+  readMachines,
+  writeMachineSummary,
+} from "../src/engine/fleet.ts";
 import {
   findRunByLabel,
   Journal,
@@ -333,4 +340,97 @@ test("status: --json emits the shared report envelope", async () => {
   expect(env.records.some((r) => r.msg.includes("section(s)"))).toBe(true);
   // no config-repo/fleet/lock/secrets declared → un-synced is the only warning
   expect(rc).toBe(2);
+});
+
+// --- fleet drift / diff -------------------------------------------------------------------
+
+test("fleet drift: flags only machines behind on version or with an unclean last sync", async () => {
+  const sb = await sandbox('[[section]]\nname = "x"\n');
+  await writeMachineSummary(sb.repo, {
+    host: "alpha",
+    os: "darwin",
+    boom: "0.17.0",
+    verdict: "ok",
+    date: "2026-07-10",
+  });
+  await writeMachineSummary(sb.repo, {
+    host: "bravo",
+    os: "linux",
+    boom: "0.16.0",
+    verdict: "ok",
+    date: "2026-07-09",
+  }); // behind newest
+  await writeMachineSummary(sb.repo, {
+    host: "charlie",
+    os: "linux",
+    boom: "0.17.0",
+    verdict: "warn",
+    date: "2026-07-11",
+  }); // not clean
+  const rc = await fleetDrift(sb.ctx);
+  const out = sb.out();
+  expect(out).toContain("bravo");
+  expect(out).toContain("behind v0.17.0");
+  expect(out).toContain("charlie");
+  expect(out).not.toContain("alpha"); // current + clean → not flagged
+  expect(rc).toBe(2); // warning tier
+});
+
+test("fleet drift: a fleet that's all-current is a clean pass", async () => {
+  const sb = await sandbox('[[section]]\nname = "x"\n');
+  await writeMachineSummary(sb.repo, {
+    host: "alpha",
+    os: "darwin",
+    boom: "0.17.0",
+    verdict: "ok",
+    date: "2026-07-10",
+  });
+  await writeMachineSummary(sb.repo, {
+    host: "bravo",
+    os: "linux",
+    boom: "0.17.0",
+    verdict: "ok",
+    date: "2026-07-10",
+  });
+  const rc = await fleetDrift(sb.ctx);
+  expect(sb.out()).toContain("all 2 machine(s) current + clean");
+  expect(rc).toBe(0);
+});
+
+test("fleet diff: surfaces the fields where two machines differ", async () => {
+  const sb = await sandbox('[[section]]\nname = "x"\n');
+  await writeMachineSummary(sb.repo, {
+    host: "alpha",
+    os: "darwin",
+    boom: "0.17.0",
+    verdict: "ok",
+    date: "2026-07-10",
+  });
+  await writeMachineSummary(sb.repo, {
+    host: "bravo",
+    os: "linux",
+    boom: "0.16.0",
+    verdict: "ok",
+    date: "2026-07-10",
+  });
+  const rc = await fleetDiff(sb.ctx, "alpha", "bravo");
+  const out = sb.out();
+  expect(out).toContain("boom: alpha=v0.17.0 · bravo=v0.16.0");
+  expect(out).toContain("os: alpha=darwin · bravo=linux");
+  expect(out).toContain("2 field(s) differ"); // verdict + date match → held back as skips
+  expect(rc).toBe(0); // informational
+});
+
+test("fleet diff: an unrecorded host is a hard failure", async () => {
+  const sb = await sandbox('[[section]]\nname = "x"\n');
+  await writeMachineSummary(sb.repo, {
+    host: "alpha",
+    os: "darwin",
+    boom: "0.17.0",
+    verdict: "ok",
+    date: "2026-07-10",
+  });
+  const rc = await fleetDiff(sb.ctx, "alpha", "ghost");
+  expect(sb.out()).toContain("no summary for ghost");
+  expect(rc).toBe(1);
 });
