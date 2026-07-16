@@ -672,3 +672,32 @@ test("init into an existing non-empty repo without --force fails cleanly", async
   expect(await pathExists(join(target, "keep.txt"))).toBe(true);
   expect(await pathExists(join(target, "boomfile.toml"))).toBe(false);
 });
+
+// --- verify --ci (config-repo CI gate; wraps `doctor --config`) -----------------------------
+
+test("verify --ci passes (exit 0) on a valid boomfile without walking the machine", async () => {
+  const sb = await sandbox('[[section]]\nname = "x"\nlink = [{ src = "a", dst = "~/.a" }]\n');
+  await run(app, ["verify", "--ci"], sb.ctx);
+  expect(sb.ctx.process.exitCode).toBe(0);
+  // A CI gate schema-checks the config; it must not walk the machine. The validator reports
+  // one line per config file (the boomfile), never per resource/section drift.
+  expect(sb.out()).toContain("boomfile.toml");
+  expect(sb.out()).not.toContain("~/.a"); // no link-resource walk happened
+});
+
+test("verify --ci fails (exit 1) on a schema-invalid boomfile (unknown key)", async () => {
+  const sb = await sandbox('[[section]]\nname = "x"\nbogus = true\n');
+  await run(app, ["verify", "--ci"], sb.ctx);
+  expect(sb.ctx.process.exitCode).toBe(1);
+});
+
+test("verify --ci fails (exit 1) when no config repo resolves (strict gate)", async () => {
+  const sb = await sandbox('[[section]]\nname = "x"\n');
+  // Strip the config pointer and point cwd at an empty dir so nothing resolves.
+  const empty = join(sb.base, "empty");
+  await mkdir(empty, { recursive: true });
+  const env = { ...sb.env, BOOM_CONFIG: undefined };
+  const ctx = { process: { ...sb.ctx.process, env, exitCode: 0 }, env, cwd: empty } as unknown as BoomContext;
+  await run(app, ["verify", "--ci"], ctx);
+  expect(ctx.process.exitCode).toBe(1);
+});

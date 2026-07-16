@@ -1,0 +1,25 @@
+# boom verify — CI-gate a boom config repo (dotfiles) on every PR.
+#
+# A composite action a dotfiles repo consumes with:
+#   uses: alxjrvs/boom/examples/github-action@main
+# It installs boom and runs `boom verify --ci` in the checked-out repo, which
+# parse- and schema-checks boomfile.toml + every overlay non-interactively and
+# exits 0 (valid) / 1 (invalid) — no machine walk, so it's safe on a runner.
+#
+# The consuming workflow must `actions/checkout` the config repo first; boom
+# resolves the config from the working directory (cwd) when it holds a boomfile.toml.
+name: boom verify
+description: Validate a boom config repo (boomfile.toml + overlays) as a CI gate.
+runs:
+  using: composite
+  steps:
+    - name: Install boom
+      shell: bash
+      # install.sh drops the binary in $HOME/.local/bin, which isn't on a runner's
+      # PATH by default — add it via $GITHUB_PATH so the next step (and any after) sees it.
+      run: |
+        curl -fsSL https://raw.githubusercontent.com/alxjrvs/boom/main/install.sh | sh
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+    - name: Validate the config
+      shell: bash
+      run: boom verify --ci

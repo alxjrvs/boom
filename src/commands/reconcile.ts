@@ -4,6 +4,7 @@
 // forces overwrite instead of sync's safe skip-by-default.
 import { buildCommand } from "@stricli/core";
 import type { BoomContext } from "../context.ts";
+import { doctor } from "../engine/doctor.ts";
 import { reconcile } from "../engine/reconcile.ts";
 import type { LinkMode } from "../engine/types.ts";
 import { confirm } from "../lib/confirm.ts";
@@ -32,7 +33,7 @@ const verboseFlag = {
   brief: "Show every step, including already-in-place items (default: only changes + attention)",
 } as const;
 
-type VerifyFlags = { only?: string[]; json?: boolean; profile?: string[]; verbose?: boolean };
+type VerifyFlags = { only?: string[]; json?: boolean; profile?: string[]; verbose?: boolean; ci?: boolean };
 type SyncFlags = {
   dryRun?: boolean;
   fix?: boolean;
@@ -111,9 +112,21 @@ export const verifyCommand = buildCommand<VerifyFlags, [], BoomContext>({
       profile: profileFlag,
       json: { kind: "boolean", optional: true, brief: "Emit a structured JSON drift report" },
       verbose: verboseFlag,
+      ci: {
+        kind: "boolean",
+        optional: true,
+        brief: "Validate the config non-interactively for CI (schema-check only; no machine walk)",
+      },
     },
   },
   async func(flags) {
+    // --ci is a config-repo CI gate, not a machine check: reuse the exact validation path
+    // `boom doctor --config` provides (parse + schema-check the boomfile and overlays,
+    // binary 0/1, a missing config repo is a failure) instead of walking the machine.
+    if (flags.ci) {
+      this.process.exitCode = await doctor(this, flags.json ?? false, true, false);
+      return;
+    }
     this.process.exitCode = await reconcile("verify", this, {
       only: flags.only,
       json: flags.json,
