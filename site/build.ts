@@ -68,7 +68,7 @@ const PAGES: Page[] = [
     slug: "spec",
     src: "SPEC.md",
     title: "The Design Spec — BoomTube",
-    desc: "BoomTube's design of record: the reconcile model, config-repo git sync, the typed boomfile.toml schema, the hook extension contract, the transaction journal, and the stack.",
+    desc: "BoomTube's design of record: the sync/verify model, config-repo git sync, the typed boomfile.toml schema, the hook extension contract, the transaction journal, and the stack.",
   },
 ];
 
