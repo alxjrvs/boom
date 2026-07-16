@@ -18,7 +18,11 @@ A `boom` invocation does one of two things:
    the bare `boom source` command (and its explicit `boom source sync` spelling); the
    rest are their own top-level commands:
    - `boom source` / `boom source sync` — reconcile the machine to the boomfile, running the `sync` verb (`--fix` repairs drift by overwriting conflicts; `--update` also updates outdated brew formulae)
-   - `boom verify` — check drift, exit 0 ok / 2 warn / 1 fail (`--json` for a report)
+   - `boom verify` — check drift, exit 0 ok / 2 warn / 1 fail (`--json` for a report; `--ci`
+     narrows to a non-interactive schema-check gate, 0/1, no machine walk)
+   - `boom status` — a read-only one-screen dashboard composing the health signals other
+     commands already own (config, config-repo drift, last sync + checkpoints, fleet, lock,
+     secrets); introduces no new state
    - `boom uninstall`
    These share **one verb-parameterized loop** (`src/engine/reconcile.ts`) over a
    resource-type registry — siblings, not separate scripts. `boom rollback` undoes
@@ -39,8 +43,11 @@ A `boom` invocation does one of two things:
    `source --commit` so the default message/behavior can't drift between the two.
 
 2. **Discovered subcommands** — built-ins are the `@stricli` route map (`source`,
-   `code`, `mcp`, `where`, `rollback`, `upgrade`, `doctor`, `completions`,
-   `man`, `skill`); user commands resolve at runtime from `<config>/commands/<name>.ts`.
+   `status`, `init`, `code`, `mcp`, `where`, `rollback`, `upgrade`, `doctor`, `fleet`,
+   `module`, `adopt`, `completions`, `man`, `skill`); `fleet` and `module` are themselves
+   nested route maps (`fleet drift|diff`, `module search|add`). `boom init` is the greenfield
+   cold-start (adopt → `git init` + commit → create remote → push → breadcrumb). User commands
+   resolve at runtime from `<config>/commands/<name>.ts`.
    The route map is the **single registry, with no hardcoded dispatch anywhere**: `mcp`
    is an ordinary route (its `-- <server args>` ride through verbatim via the scanner's
    argument-escape sequence, so it needs no pre-Stricli passthrough), and `index.ts`
@@ -101,25 +108,31 @@ ahead-of-upstream) — `boom source push` or `boom source reset` first, then re-
 `boomfile.toml` is a TOML document validated against a schema (`src/config/schema.ts`,
 valibot). It is grouped into `[[section]]`s; within a section, resources run in a
 fixed phase order:
-`link → copy → secret → dir → pkg → osx_default → launchd → run → check → hook`.
+`link → copy → tmpl → secret → dir → pkg → osx_default → launchd → systemd → run → check → hook`.
 Resources:
 
 - `link` / `copy` `= [{ src, dst, mode?, expand? }]` — place a repo file at `dst` (symlink vs
   byte-copy). `src` may be a **glob** (then `dst` is a directory and each match is placed
   under it, structure preserved below the pattern's static prefix). `expand` (copy only)
   substitutes `${env:VAR}`/`${host}`/`${os}` in the content — per-machine files without a hook
-- `secret = [{ dst, ref? | template?, mode? }]` — render a 1Password secret to a file at sync
-  time (`op read` for a single `ref`, `op inject` for a `template` of references); `mode`
-  defaults to `0600`. The plaintext is **never journaled or backed up** (undo is a plain
-  remove), and secrets stay out of the owned-destinations manifest, so orphan reaping never
-  auto-deletes one — the op-native counterpart to `copy` + `expand`
+- `tmpl = [{ src, dst, mode? }]` — render `src` to `dst`, interpolating `${NAME}` from the
+  top-level `[vars]` table (plus the same `${env:VAR}`/`${host}`/`${os}` vocab as `expand`). A
+  strict superset of `copy` + `expand`: one template with per-machine `[vars]` replaces N
+  near-identical overlay files. An unknown `${NAME}` is a hard failure (never a dangling write)
+- `secret = [{ dst, ref? | template?, mode?, backend? }]` — render a secret to a file at sync
+  time; `mode` defaults to `0600`. The `backend` is inferred from the ref scheme (`op://`→op,
+  `env:`→env, `pass:`→pass, `*.age`→age, `*.sops`→sops) or set explicitly — 1Password
+  (`op read`/`op inject`), a plain env var, `pass`, or an age/sops-encrypted file. The
+  plaintext is **never journaled or backed up** (undo is a plain remove), and secrets stay out
+  of the owned-destinations manifest, so orphan reaping never auto-deletes one
 - `dir = [{ path, mode?, remove_on_uninstall? }]` — ensure a standalone directory exists
   (declarative `mkdir -p`/`chmod`); `remove_on_uninstall = true` removes it on uninstall *only
   if empty*
-- `pkg = [{ manager = "brew"|"mise"|"apt"|"dnf", file? }]` — satisfy a package manager:
-  `brew` runs `brew bundle` over `file` (default `Brewfile`); `mise` runs `mise install`;
-  `apt`/`dnf` install a newline-separated `file` package list (Linux, via `sudo`). One array
-  entry per manager; a new manager is one dispatch arm, not a new section key
+- `pkg = [{ manager, file? }]` — satisfy a package manager. `brew` runs `brew bundle` over
+  `file` (default `Brewfile`); `mise` runs `mise install`; `apt`/`dnf`/`cargo`/`npm` (global)/
+  `pipx`/`gem`/`flatpak` install a newline-separated `file` package list, each gating on its
+  CLI being present (a missing tool is a reported failure, not a crash). One array entry per
+  manager; a new manager is one dispatch arm, not a new section key
 - `osx_default = [{ domain, key, value, type? }]` — a `defaults write`; `type` is inferred
   from the TOML value (`bool`/`int`/`float`/`string`) and only stated to override an edge
   case. The prior value is journaled, so `boom rollback` restores it (or deletes a key boom
@@ -127,6 +140,11 @@ Resources:
 - `launchd = [{ src, dst? }]` — link a macOS LaunchAgent plist into
   `~/Library/LaunchAgents` and own its launchctl lifecycle (`load -w` on sync, `unload` on
   uninstall); darwin-only, `dst` defaults to `~/Library/LaunchAgents/<basename(src)>`
+- `systemd = [{ name, exec, description?, timer?, enable?, env? }]` — the Linux twin of
+  `launchd`: **generate** a `.service` (and, when `timer` is a systemd OnCalendar expression, a
+  `.timer`) into `~/.config/systemd/user` and own its `systemctl --user` lifecycle
+  (daemon-reload + `enable --now` on sync, `disable --now` on uninstall); linux-only. Because
+  the unit text is generated, an unchanged stanza re-renders byte-identical → a no-op sync
 - `run = [{ on, cmd, timeout? }]` — the inline imperative escape; `on` is a verb or a list of
   `"sync"|"verify"|"uninstall"`; `timeout` (seconds) caps a step's wall-clock so a hung
   command can't block reconcile
@@ -146,7 +164,10 @@ A top-level `use = [<module>, …]` composes other boom config repos — a git r
 (`owner/repo[@ref]`, a URL) or a path relative to this repo — whose sections are merged in
 **before** this repo's own (so the repo can override a module). Modules resolve during
 reconcile (remotes clone into a cache; a failed resolve warns and is skipped, never fatal);
-`boom module` inspects them and `--update` re-fetches. Nesting is one level deep.
+`boom module` lists them and `--update` re-fetches. A module may itself declare `use`, composed
+**recursively** (a resolution-stack guard breaks cycles). `boom module search <term>` / `add
+<name>` browse a curated registry of vetted packs and splice a ref into `use`. A top-level
+`[vars]` table (a name→string map) supplies the values `tmpl` resources interpolate.
 
 ### `[boom]` — machine-global self-wiring
 
@@ -167,7 +188,8 @@ verb-aware (sync installs/refreshes, verify reports drift, uninstall tears the t
   without a hand-authored plist. Removing an entry unloads its timer on the next sync.
 - `fleet = true` — after a sync, record this machine's summary (boom version, drift verdict,
   date) into `.boom/machines/<host>.json` in the config repo, so `boom fleet` can show a
-  cross-machine view from the repo you already push. Low-churn: date-granular, written only
+  cross-machine view from the repo you already push (`fleet drift` narrows to the machines
+  needing attention; `fleet diff <a> <b>` compares two). Low-churn: date-granular, written only
   when it changed.
 - `notify = true` — when a (typically scheduled) `boom verify` finds drift, raise a desktop
   notification (macOS `osascript` / Linux `notify-send`) so the signal doesn't die in a timer
@@ -234,13 +256,18 @@ src/
     sync.ts                pre-reconcile config-repo fetch/pull(--rebase --autostash)-and-report
     commit.ts              commit local config-repo changes (shared by `boom source push` + source --commit)
     diff.ts                boom source diff (read-only: working-tree diff vs HEAD + untracked)
-    status.ts              boom source status (read-only drift vs origin, shared repoDrift helper)
+    status.ts              boom source status (read-only drift vs origin, shared reportRepoDrift)
     push.ts reset.ts       boom source push / boom source reset
+    overview.ts            boom status (read-only dashboard composing the existing readers)
+    init.ts                boom init (greenfield: adopt → git init + commit → remote → breadcrumb)
+    fleet.ts               boom fleet (list · drift · diff) over .boom/machines/<host>.json
+    importers.ts           boom adopt --from (stow · chezmoi · yadm · dotbot · nix-darwin)
     registry.ts            data-driven resource table (phase order) + finalize hooks
-    resources/             link · copy · secret · dir · pkg · osx · launchd · run · check · hook
+    resources/             link · copy · tmpl · secret · dir · pkg · osx · launchd · systemd · run · check · hook
+    secrets/backends.ts    pluggable secret backends (op · env · pass · age · sops)
     db.ts journal.ts state.ts   bun:sqlite store: transaction journal + manifest
     rollback.ts code.ts discovery.ts
-  config/  schema.ts load.ts remote.ts profile.ts
+  config/  schema.ts load.ts remote.ts profile.ts modules.ts registry.ts (curated module packs)
   lib/     reporter.ts color.ts fs.ts proc.ts git.ts version.ts
 test/                       bun test (unit + sandboxed integration)
 examples/dotfiles/          a runnable boomfile.toml example

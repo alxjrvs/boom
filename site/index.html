@@ -552,11 +552,13 @@
         <div class="pipe">
           <div class="pstep"><span class="i">01</span>link</div>
           <div class="pstep"><span class="i">02</span>copy</div>
-          <div class="pstep"><span class="i">03</span>dir</div>
-          <div class="pstep"><span class="i">04</span>pkg <span class="note">brew · mise</span></div>
-          <div class="pstep"><span class="i">05</span>osx_default</div>
-          <div class="pstep"><span class="i">06</span>run</div>
-          <div class="pstep"><span class="i">07</span>hook</div>
+          <div class="pstep"><span class="i">03</span>tmpl <span class="note">[vars]</span></div>
+          <div class="pstep"><span class="i">04</span>dir</div>
+          <div class="pstep"><span class="i">05</span>pkg <span class="note">brew · mise · cargo · …</span></div>
+          <div class="pstep"><span class="i">06</span>osx_default</div>
+          <div class="pstep"><span class="i">07</span>systemd <span class="note">/ launchd</span></div>
+          <div class="pstep"><span class="i">08</span>run</div>
+          <div class="pstep"><span class="i">09</span>hook</div>
         </div>
         <div class="balloon">
           <h4>Can't say it declaratively? Write a hook.</h4>
@@ -590,10 +592,10 @@
       <div class="panel legend lead-c">
         <h3>What a section can hold</h3>
         <ul>
-          <li><b>link · copy</b> — symlink or copy files (a glob <code>src</code> fans out; <code>copy</code> can <code>expand</code> per machine)</li>
-          <li><b>secret</b> — render a 1Password reference to a 0600 file, never journaled in plaintext</li>
-          <li><b>pkg</b> — a Brewfile, mise tool versions, or an apt/dnf list</li>
-          <li><b>osx_default</b> — macOS defaults, on darwin</li>
+          <li><b>link · copy · tmpl</b> — symlink, copy, or render a template with <code>[vars]</code> (a glob <code>src</code> fans out; per-machine without a hook)</li>
+          <li><b>secret</b> — render a 0600 secret, never journaled in plaintext (1Password, env, pass, age/sops)</li>
+          <li><b>pkg</b> — a Brewfile, mise tool versions, or an apt/dnf/cargo/npm/pipx/gem/flatpak list</li>
+          <li><b>osx_default · launchd · systemd</b> — macOS defaults + agents, or generated systemd user units on Linux</li>
           <li><b>dir · check</b> — ensure a directory exists; assert (and repair) file content</li>
           <li><b>run</b> — a shell step tied to a verb</li>
           <li><b>hook</b> — your own typed module</li>
@@ -612,13 +614,14 @@
       <div class="rchips">
         <span class="rchip"><b>boom source</b> — reconcile</span>
         <span class="rchip"><b>boom verify</b> — prove it</span>
+        <span class="rchip"><b>boom status</b> — the whole picture</span>
         <span class="rchip"><b>boom source --fix</b> — mend drift</span>
         <span class="rchip"><b>boom rollback</b> — undo</span>
       </div>
-      <div class="rrow"><h3>Source</h3><p>Point BoomTube at your dotfiles repo and sync from it; inspect, push, or reset the managed config. <code>boom source set owner/repo</code></p></div>
+      <div class="rrow"><h3>Bootstrap</h3><p>Point BoomTube at your dotfiles repo — or start from nothing: <code>boom init</code> scaffolds, inits, and pushes a fresh config repo; <code>boom adopt --from chezmoi|stow|…</code> imports another manager. <code>boom source set owner/repo</code></p></div>
+      <div class="rrow"><h3>See everything</h3><p>One screen for where the machine stands, a cross-machine view of your whole fleet, and a registry of shareable module packs. <code>boom status · fleet · module</code></p></div>
       <div class="rrow"><h3>Code portals</h3><p>Open portals to your repos — symlink them all into one dir for agents, or spin up a separate workspace for each. <code>boom code …</code></p></div>
-      <div class="rrow"><h3>Prove &amp; recover</h3><p>The file is validated on every load; doctor the install, then roll back any journaled run. <code>boom doctor · rollback</code></p></div>
-      <div class="rrow"><h3>Housekeeping</h3><p>Find where things live, self-upgrade, shell completions, the man page, a Claude skill, MCP servers. <code>boom where · upgrade · …</code></p></div>
+      <div class="rrow"><h3>Prove &amp; recover</h3><p>Validated on every load; gate CI with <code>verify --ci</code>, doctor the install, then roll back any journaled run. <code>boom doctor · rollback</code></p></div>
     </div>
     <p class="churn"><b>Still taking shape.</b> This is the map, not the manual — the <a href="spec.html">docs</a> carry the exact reference, every flag and verb.</p>
   </section>
@@ -628,7 +631,7 @@
     <div class="sec-head">
       <p class="kicker"><span class="narrbox">Bare metal to reconciled — five steps.</span></p>
       <h2 class="disp">Get it running!</h2>
-      <p class="sub">Your dotfiles repo is the source of truth — write one <code>boomfile.toml</code> at its root, point BoomTube at the repo, and from then on you just reconcile. There's no <code>boom init</code>; you author the file.</p>
+      <p class="sub">Your dotfiles repo is the source of truth — <code>boom init</code> can scaffold and push a fresh one for you, or write a <code>boomfile.toml</code> at the root of an existing repo. Point BoomTube at it, and from then on you just reconcile.</p>
     </div>
     <div class="panel filmpanel lead-s">
       <div class="steps">

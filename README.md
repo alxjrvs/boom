@@ -47,7 +47,15 @@ fresh-machine one-liner is `curl install.sh | sh && boom source set owner/repo`.
 
 Starting from an already-configured machine instead? `boom adopt` reverse-engineers a
 reviewable `boomfile.toml` proposal — capturing your Homebrew/mise/apt packages and
-common dotfiles — that you turn into your config repo.
+common dotfiles — that you turn into your config repo. Migrating off another manager?
+`boom adopt --from chezmoi|stow|yadm|dotbot|nix-darwin` translates its layout into that
+proposal.
+
+Greenfield — no dotfiles repo at all yet? `boom init [owner/repo]` runs the whole cold
+start in one shot: `adopt` to scaffold the proposal, `git init` + commit, create the remote
+(via `gh`), push, and record the breadcrumb — leaving you on a live, boom-managed config
+repo. `--dry-run` previews every step and changes nothing; `--no-push` stops before touching
+a remote.
 
 ## The reconcile loop
 
@@ -65,9 +73,16 @@ boom source --resume    # continue an interrupted sync (skips completed steps)
 
 boom verify             # check for drift — exit 0 ok / 2 warn / 1 fail
 boom verify --json      # …as a structured drift report
+boom verify --ci        # non-interactive config gate for CI (schema-check only; exit 0/1)
+boom status             # one-screen dashboard: config, repo drift, last sync, fleet, lock, secrets
 boom rollback           # undo the most recent sync (restores backed-up files)
 boom checkpoint <name>  # name the current state; boom rollback --to <name> returns to it
 ```
+
+`boom status` composes the cheap health signals every other command already owns into a
+single glance — read-only, no machine walk. A shippable GitHub Action wrapping `verify --ci`
+lives in [`examples/github-action/`](examples/github-action/) so a config repo can gate its
+own PRs.
 
 `sync` syncs the config repo against its remote first (`pull --rebase
 --autostash`, so local edits ride along and land back on top). `verify` reports
@@ -98,9 +113,10 @@ boom edit               # open the boomfile in $EDITOR, validate on save, then p
 boom doctor --config    # parse + schema-check the boomfile; change nothing (exit 0/1)
 boom doctor             # check boom's own preconditions (tools, keychain, state)
 boom doctor --fix       # …and mend the safe ones (state dir, boom skill)
+boom doctor --secrets   # audit that every secret ref (op:// and pluggable backends) resolves
 boom lock               # pin resolved package versions to boom.lock (--check reports drift)
-boom fleet              # show every machine's last-sync summary (needs [boom] fleet)
-boom module             # list the `use` modules this config composes (--update re-fetches)
+boom fleet              # every machine's last-sync summary; fleet drift | diff <a> <b> for more
+boom module             # list `use` modules; module search <term> | add <name> for the registry
 boom where config|code|engine   # resolve where boom keeps things
 boom upgrade            # upgrade the boom binary itself
 boom completions bash|zsh|fish  # shell completions
@@ -115,12 +131,17 @@ cmd>` (it wraps the server in `op run --env-file` so secrets resolve from `op://
 
 Your dotfiles repo's config is a typed, validated TOML document, grouped into
 sections that run in phase order
-(`link → copy → secret → dir → pkg → osx_default → launchd → run → check → hook`):
+(`link → copy → tmpl → secret → dir → pkg → osx_default → launchd → systemd → run → check → hook`):
 
 ```toml
-# Optional: compose shared, vetted sections from other boom repos before your own
-# (a git remote, or a path relative to this repo). `boom module` inspects them.
+# Optional: compose shared, vetted sections from other boom repos before your own (a git
+# remote, or a path relative to this repo). `boom module search|add` browse a curated registry;
+# a module may itself `use` further modules — they compose recursively (cycles are broken).
 use = ["myorg/boom-base", "./modules/node-dev"]
+
+# Optional: named values `tmpl` templates interpolate as ${NAME} (per-machine via overlays).
+[vars]
+git_email = "me@example.com"
 
 [[section]]
 name = "Shell + git"
@@ -130,17 +151,21 @@ link = [
   { src = "zsh/*.zsh",  dst = "~/.config/zsh/" },   # a glob src fans out into the dst dir
 ]
 dir  = [{ path = "~/.ssh/cm", mode = "700" }]       # ensure a directory exists (no file to place)
+# Render a template with the [vars] above (${NAME}) — a superset of an overlay-per-machine.
+tmpl = [{ src = "gitconfig.tmpl", dst = "~/.gitconfig" }]
 
 [[section]]
 name = "Packages"
 pkg = [
   { manager = "brew", file = "Brewfile" },          # brew bundle over the Brewfile
   { manager = "mise" },                             # mise install (reads the repo's mise config)
+  { manager = "cargo", file = "cargo.txt" },        # also: apt, dnf, npm (-g), pipx, gem, flatpak
 ]
 
 [[section]]
 name = "Secrets"
-# Render a 1Password reference to a 0600 file at sync time — never journaled in plaintext.
+# Render a secret to a 0600 file at sync time — never journaled in plaintext. The backend is
+# inferred from the ref scheme (op://, env:, pass:, *.age, *.sops) or set with `backend = …`.
 secret = [{ dst = "~/.config/gh/token", ref = "op://Private/GitHub/token" }]
 
 [[section]]
@@ -148,6 +173,12 @@ name = "macOS only"
 when = { os = "darwin" }          # gate by os / host / profile
 osx_default = [{ domain = "com.apple.dock", key = "autohide", value = true }]
 launchd = [{ src = "launchd/com.me.agent.plist" }]   # link + launchctl load -w, idempotent
+
+[[section]]
+name = "Linux services"
+when = { os = "linux" }
+# A generated systemd *user* unit (the Linux twin of launchd) + an optional OnCalendar timer.
+systemd = [{ name = "sync-code", exec = "boom code fetch", timer = "hourly" }]
 
 [[section]]
 name = "Guardrails"
