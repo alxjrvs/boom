@@ -19,6 +19,7 @@ import { uninstallCommand, verifyCommand } from "./commands/reconcile.ts";
 import { rollbackCommand } from "./commands/rollback.ts";
 import { skillCommand } from "./commands/skill.ts";
 import { sourceRouteMap } from "./commands/source.ts";
+import { statusCommand } from "./commands/status.ts";
 import { upgradeCommand } from "./commands/upgrade.ts";
 import { whereCommand } from "./commands/where.ts";
 import { VERSION } from "./lib/version.ts";
@@ -26,6 +27,7 @@ import { VERSION } from "./lib/version.ts";
 export const routes = buildRouteMap({
   routes: {
     verify: verifyCommand,
+    status: statusCommand,
     plan: planCommand,
     uninstall: uninstallCommand,
     source: sourceRouteMap,
