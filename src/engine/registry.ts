@@ -17,6 +17,7 @@ import { finalizeOsx, reconcileOsxDefault } from "./resources/osx.ts";
 import { reconcilePkg } from "./resources/packages.ts";
 import { reconcileRun } from "./resources/run.ts";
 import { reconcileSecret } from "./resources/secret.ts";
+import { reconcileSystemd } from "./resources/systemd.ts";
 import type { ReconcileCtx } from "./types.ts";
 
 // One unit of work + the label the error boundary reports it under.
@@ -88,6 +89,11 @@ const RESOURCES: readonly ResourceType[] = [
     category: "SERVICES",
     items: (s) =>
       (s.launchd ?? []).map((e) => ({ label: `launchd ${e.src}`, run: (ctx) => reconcileLaunchd(e, ctx) })),
+  },
+  {
+    category: "SERVICES",
+    items: (s) =>
+      (s.systemd ?? []).map((e) => ({ label: `systemd ${e.name}`, run: (ctx) => reconcileSystemd(e, ctx) })),
   },
   {
     category: "COMMANDS",

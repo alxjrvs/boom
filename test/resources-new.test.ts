@@ -201,6 +201,119 @@ test("launchd: non-darwin verify reports macOS-only rather than failing", async 
   expect(sb.out()).toContain("macOS-only"); // verbose: off-platform no-ops are quiet by default
 });
 
+// ----------------------------------------------------------------- systemd (Linux)
+
+// A stateful fake `systemctl --user`: enable/disable maintain a set of enabled units in a
+// file; is-enabled exits 0 iff the unit is in it; daemon-reload is a no-op. Mirrors the apt
+// tests' dpkg fake. `shift` drops the leading `--user`, so $1 is the subcommand thereafter.
+const FAKE_SYSTEMCTL = (state: string) => `STATE="${state}"; touch "$STATE"
+shift
+case "$1" in
+  enable) echo "$3" >> "$STATE";;
+  disable) grep -v "^$3$" "$STATE" > "$STATE.tmp" 2>/dev/null; mv "$STATE.tmp" "$STATE";;
+  is-enabled) grep -q "^$2$" "$STATE" && exit 0 || exit 1;;
+esac
+exit 0
+`;
+
+// A sandbox wired for the systemd resource: Linux, with a fake systemctl on PATH recording
+// enabled units into `enabled.log`. Returns the enabled-units reader alongside the sandbox.
+async function systemdSandbox(boomfile: string): Promise<Sandbox & { enabled(): Promise<string> }> {
+  const sb = await sandbox(boomfile, { BOOM_OS: "linux" });
+  const bin = join(sb.repo, ".fakebin");
+  const log = join(sb.repo, "enabled.log");
+  await fakeBin(bin, "systemctl", FAKE_SYSTEMCTL(log));
+  const env = sb.ctx.env as Record<string, string | undefined>;
+  env.PATH = `${bin}:${process.env.PATH ?? ""}`;
+  return { ...sb, enabled: async () => ((await pathExists(log)) ? readFile(log, "utf8") : "") };
+}
+
+test("systemd: sync renders + enables the .service unit; verify passes", async () => {
+  const sb = await systemdSandbox(
+    `[[section]]\nname = "s"\nsystemd = [{ name = "backup", exec = "/usr/bin/backup --now", description = "Nightly backup", env = { TZ = "UTC" } }]\n`,
+  );
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  const unit = join(sb.home, ".config", "systemd", "user", "backup.service");
+  expect(await pathExists(unit)).toBe(true);
+  const text = await readFile(unit, "utf8");
+  expect(text).toContain("ExecStart=/usr/bin/backup --now");
+  expect(text).toContain("Description=Nightly backup");
+  expect(text).toContain("Environment=TZ=UTC");
+  expect(text).toContain("WantedBy=default.target");
+  expect(await sb.enabled()).toContain("backup.service");
+  expect(await reconcile("verify", sb.ctx, { verbose: true })).toBe(0);
+  expect(sb.out()).toContain("backup.service (enabled)");
+});
+
+test("systemd: a timer stanza writes the .timer unit and enables the timer, not the service", async () => {
+  const sb = await systemdSandbox(
+    `[[section]]\nname = "s"\nsystemd = [{ name = "backup", exec = "/usr/bin/backup", timer = "daily" }]\n`,
+  );
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  const dir = join(sb.home, ".config", "systemd", "user");
+  expect(await pathExists(join(dir, "backup.service"))).toBe(true);
+  const timer = await readFile(join(dir, "backup.timer"), "utf8");
+  expect(timer).toContain("OnCalendar=daily");
+  expect(timer).toContain("WantedBy=timers.target");
+  const enabled = await sb.enabled();
+  expect(enabled).toContain("backup.timer");
+  expect(enabled).not.toContain("backup.service\n");
+});
+
+test("systemd: verify warns when the unit is missing, and when it has been edited", async () => {
+  const missing = await systemdSandbox(
+    `[[section]]\nname = "s"\nsystemd = [{ name = "svc", exec = "/bin/true" }]\n`,
+  );
+  expect(await reconcile("verify", missing.ctx, {})).toBe(2);
+  expect(missing.out()).toContain("not installed");
+
+  const edited = await systemdSandbox(
+    `[[section]]\nname = "s"\nsystemd = [{ name = "svc", exec = "/bin/true" }]\n`,
+  );
+  expect(await reconcile("sync", edited.ctx, {})).toBe(0);
+  const unit = join(edited.home, ".config", "systemd", "user", "svc.service");
+  await writeFile(unit, "[Service]\nExecStart=/bin/false\n"); // drift
+  expect(await reconcile("verify", edited.ctx, {})).toBe(2);
+  expect(edited.out()).toContain("outdated");
+});
+
+test("systemd: uninstall disables + removes the unit file", async () => {
+  const sb = await systemdSandbox(
+    `[[section]]\nname = "s"\nsystemd = [{ name = "svc", exec = "/bin/true" }]\n`,
+  );
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  const unit = join(sb.home, ".config", "systemd", "user", "svc.service");
+  expect(await pathExists(unit)).toBe(true);
+  expect(await reconcile("uninstall", sb.ctx, {})).toBe(0);
+  expect(await pathExists(unit)).toBe(false);
+  expect(await sb.enabled()).not.toContain("svc.service");
+});
+
+test("systemd: off-platform (darwin) is a clean skip; missing systemctl is a reported failure", async () => {
+  const darwin = await sandbox(
+    `[[section]]\nname = "s"\nsystemd = [{ name = "svc", exec = "/bin/true" }]\n`,
+    {
+      BOOM_OS: "darwin",
+    },
+  );
+  expect(await reconcile("verify", darwin.ctx, { verbose: true })).toBe(0);
+  expect(darwin.out()).toContain("Linux-only");
+
+  // Linux but no systemctl on PATH → a fail (exit 1), not a crash. Point PATH at an empty dir
+  // so the lookup misses regardless of the host CI runner.
+  const noTool = await sandbox(
+    `[[section]]\nname = "s"\nsystemd = [{ name = "svc", exec = "/bin/true" }]\n`,
+    {
+      BOOM_OS: "linux",
+    },
+  );
+  const emptyBin = join(noTool.repo, ".emptybin");
+  await mkdir(emptyBin, { recursive: true });
+  (noTool.ctx.env as Record<string, string | undefined>).PATH = emptyBin;
+  expect(await reconcile("sync", noTool.ctx, {})).toBe(1);
+  expect(noTool.out()).toContain("systemctl not found");
+});
+
 // ------------------------------------------------------------------- [boom] table
 
 test("[boom] skill_on_sync: sync installs the skill; verify reports it current", async () => {

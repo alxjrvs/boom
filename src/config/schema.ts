@@ -125,6 +125,22 @@ export const LaunchdSchema = v.strictObject({
   dst: v.optional(v.string()),
 });
 
+// A systemd *user* unit: the Linux twin of `launchd`. boom renders a `.service` (and, when
+// `timer` is set, a `.timer`) from these fields into ~/.config/systemd/user and owns its
+// `systemctl --user` lifecycle (daemon-reload + enable --now on sync, disable --now on
+// uninstall). OS-gated to linux. Unlike `launchd` (which links a user-authored plist), the
+// unit text is generated here, so an unchanged stanza re-renders byte-identical → a no-op
+// sync. `timer` is a systemd OnCalendar expression ("daily", "*-*-* 04:00:00"); with it set,
+// the timer (not the service) is what gets enabled. `env` becomes `Environment=K=V` lines.
+export const SystemdSchema = v.strictObject({
+  name: v.string(),
+  description: v.optional(v.string()),
+  exec: v.string(),
+  timer: v.optional(v.string()),
+  enable: v.optional(v.boolean()),
+  env: v.optional(v.record(v.string(), v.string())),
+});
+
 // A section/overlay gate: runs only when every specified constraint matches the
 // host. `os`/`host` auto-match the machine; `profile` requires `--profile <name>`.
 export const WhenSchema = v.strictObject({
@@ -143,6 +159,7 @@ export const SectionSchema = v.strictObject({
   osx_default: v.optional(v.array(OsxDefaultSchema)),
   launchd: v.optional(v.array(LaunchdSchema)),
   secret: v.optional(v.array(SecretSchema)),
+  systemd: v.optional(v.array(SystemdSchema)),
   run: v.optional(v.array(RunSchema)),
   check: v.optional(v.array(CheckSchema)),
   hook: v.optional(v.array(HookSchema)),
@@ -211,6 +228,7 @@ export type Dir = v.InferOutput<typeof DirSchema>;
 export type Check = v.InferOutput<typeof CheckSchema>;
 export type Secret = v.InferOutput<typeof SecretSchema>;
 export type Launchd = v.InferOutput<typeof LaunchdSchema>;
+export type Systemd = v.InferOutput<typeof SystemdSchema>;
 export type Run = v.InferOutput<typeof RunSchema>;
 export type Hook = v.InferOutput<typeof HookSchema>;
 export type OsxDefault = v.InferOutput<typeof OsxDefaultSchema>;
