@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>BoomTube — the file goes in, the machine comes out</title>
-<meta name="description" content="BoomTube is declarative dev-machine setup: one typed boomfile.toml declares your whole machine — shell, packages, macOS defaults, secrets. Reconcile, prove, and roll back any change. One self-contained binary, zero runtime dependencies.">
+<meta name="description" content="BoomTube is declarative dev-machine setup: one typed boomfile.toml declares your whole machine — shell, packages, macOS defaults, secrets. Sync, prove, and roll back any change. One self-contained binary, zero runtime dependencies.">
 <link rel="canonical" href="https://alxjrvs.github.io/boom/">
 <meta name="robots" content="index,follow">
 <meta name="theme-color" content="#08060F">
@@ -16,7 +16,7 @@
 <meta property="og:site_name" content="BoomTube">
 <meta property="og:url" content="https://alxjrvs.github.io/boom/">
 <meta property="og:title" content="BoomTube — one-binary declarative dev-machine setup">
-<meta property="og:description" content="The file goes in — the machine comes out. Declare your machine in one boomfile.toml; reconcile, prove, and roll it back.">
+<meta property="og:description" content="The file goes in — the machine comes out. Declare your machine in one boomfile.toml; sync it, prove it, roll it back.">
 <meta property="og:image" content="https://alxjrvs.github.io/boom/og.png">
 <meta property="og:image:type" content="image/png">
 <meta property="og:image:width" content="1200">
@@ -24,12 +24,12 @@
 <meta property="og:image:alt" content="The BOOMTUBE card drawn as an equation: a boomfile.toml page feeds the Kirby boom-tube portal and a terminal comes out the far side — declarative dev-machine setup, the file goes in, the machine comes out.">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="BoomTube — one-binary declarative dev-machine setup">
-<meta name="twitter:description" content="The file goes in — the machine comes out. Declare your machine in one boomfile.toml; reconcile, prove, and roll it back.">
+<meta name="twitter:description" content="The file goes in — the machine comes out. Declare your machine in one boomfile.toml; sync it, prove it, roll it back.">
 <meta name="twitter:image" content="https://alxjrvs.github.io/boom/og.png">
 <meta name="twitter:image:alt" content="The BOOMTUBE card drawn as an equation: a boomfile.toml page feeds the Kirby boom-tube portal and a terminal comes out the far side — declarative dev-machine setup, the file goes in, the machine comes out.">
 <script type="application/ld+json">
 {"@context":"https://schema.org","@graph":[
-{"@type":"SoftwareApplication","name":"BoomTube","description":"Declarative dev-machine setup: one typed boomfile.toml declares your whole machine — shell, packages, macOS defaults, secrets. Reconcile, prove, and roll back any change. One self-contained binary, zero runtime dependencies.","applicationCategory":"DeveloperApplication","operatingSystem":"macOS, Linux","url":"https://alxjrvs.github.io/boom/","downloadUrl":"https://github.com/alxjrvs/boom","softwareVersion":"0.18.0","image":"https://alxjrvs.github.io/boom/og.png","sameAs":["https://github.com/alxjrvs/boom"],"author":{"@type":"Person","name":"alxjrvs"},"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}},
+{"@type":"SoftwareApplication","name":"BoomTube","description":"Declarative dev-machine setup: one typed boomfile.toml declares your whole machine — shell, packages, macOS defaults, secrets. Sync, prove, and roll back any change. One self-contained binary, zero runtime dependencies.","applicationCategory":"DeveloperApplication","operatingSystem":"macOS, Linux","url":"https://alxjrvs.github.io/boom/","downloadUrl":"https://github.com/alxjrvs/boom","softwareVersion":"0.18.0","image":"https://alxjrvs.github.io/boom/og.png","sameAs":["https://github.com/alxjrvs/boom"],"author":{"@type":"Person","name":"alxjrvs"},"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}},
 {"@type":"WebSite","name":"BoomTube","url":"https://alxjrvs.github.io/boom/","inLanguage":"en"}
 ]}
 </script>
@@ -421,7 +421,7 @@
           <p class="definer">Declarative dev-machine setup</p>
           <p class="lede">Declare your dotfiles, packages, macOS defaults, and secrets in one file. BoomTube makes the real machine match — same fixed order, every run — and journals what it changed, so <b>rollback</b> can undo it. One binary, zero runtime deps.</p>
         </div>
-        <div class="equation" role="img" aria-label="A boomfile.toml goes in. BoomTube reconciles. Your whole machine comes out.">
+        <div class="equation" role="img" aria-label="A boomfile.toml goes in. BoomTube sets up your machine. Your whole machine comes out.">
           <span class="eqcell file" aria-hidden="true">
             <span class="eqicon"><svg viewBox="0 0 64 64" width="54" height="54"><path d="M13 5 H39 L55 21 V57 Q55 60 52 60 H13 Q10 60 10 57 V8 Q10 5 13 5 Z" fill="#FBF7FF" stroke="#05040A" stroke-width="3.2" stroke-linejoin="round"/><path d="M39 5 V18 Q39 21 42 21 H55 Z" fill="#DCD5EC" stroke="#05040A" stroke-width="3.2" stroke-linejoin="round"/><rect x="17" y="30" width="24" height="3.6" rx="1.8" fill="#2BE8FF"/><rect x="17" y="38" width="30" height="3.6" rx="1.8" fill="#FF2E86"/><rect x="17" y="46" width="19" height="3.6" rx="1.8" fill="#7A3CFF"/></svg></span>
             <span class="eqk">the file goes in</span>
@@ -453,7 +453,7 @@
   <section id="saga" style="--band:var(--cyan);--on:var(--ink)">
     <div class="sec-head">
       <p class="kicker"><span class="narrbox c">Three panels. That's the whole trick!</span></p>
-      <h2 class="disp">File in. Reconcile. Machine out!</h2>
+      <h2 class="disp">File in. Machine out!</h2>
     </div>
     <div class="flow">
       <div class="panel flowp lead-c">
@@ -467,7 +467,7 @@
       </div>
       <div class="arrow" aria-hidden="true">→</div>
       <div class="panel flowp portal">
-        <span class="narrbox g cornertag" style="top:-26px;left:-8px">Reconcile!</span>
+        <span class="narrbox g cornertag" style="top:-26px;left:-8px">Sync!</span>
         <div class="stage">
           <canvas class="bst" data-mark="burst-big" width="640" height="640" style="width:230px;height:230px" aria-hidden="true"></canvas>
           <canvas class="mk" data-mark="master" width="540" height="540" style="width:180px;height:180px" aria-hidden="true"></canvas>
@@ -525,7 +525,7 @@
       </div>
       <div class="panel power lead-m">
         <h3>Honest about drift</h3>
-        <p><code>boom verify</code> reports what's drifted without touching a thing. And if the config pull fails, BoomTube reconciles from the last good clone instead of leaving you stuck.</p>
+        <p><code>boom verify</code> reports what's drifted without touching a thing. And if the config pull fails, BoomTube syncs from the last good clone instead of leaving you stuck.</p>
       </div>
     </div>
   </section>
@@ -608,11 +608,11 @@
   <section id="arsenal" style="--band:var(--magenta);--on:var(--ink)">
     <div class="sec-head">
       <h2 class="disp">The rest of the arsenal!</h2>
-      <p class="sub">The reconcile loop is the heart of it. Around that sit a handful of surfaces — one line apiece.</p>
+      <p class="sub">The core loop — sync, verify — is the heart of it. Around that sit a handful of surfaces — one line apiece.</p>
     </div>
     <div class="roster">
       <div class="rchips">
-        <span class="rchip"><b>boom source</b> — reconcile</span>
+        <span class="rchip"><b>boom source</b> — sync your machine</span>
         <span class="rchip"><b>boom verify</b> — prove it</span>
         <span class="rchip"><b>boom status</b> — the whole picture</span>
         <span class="rchip"><b>boom source --fix</b> — mend drift</span>
@@ -629,9 +629,9 @@
   <!-- QUICK START -->
   <section id="start" style="--band:var(--cyan);--on:var(--ink)">
     <div class="sec-head">
-      <p class="kicker"><span class="narrbox">Bare metal to reconciled — five steps.</span></p>
+      <p class="kicker"><span class="narrbox">Bare metal to set up — five steps.</span></p>
       <h2 class="disp">Get it running!</h2>
-      <p class="sub">Your dotfiles repo is the source of truth — <code>boom init</code> can scaffold and push a fresh one for you, or write a <code>boomfile.toml</code> at the root of an existing repo. Point BoomTube at it, and from then on you just reconcile.</p>
+      <p class="sub">Your dotfiles repo is the source of truth — <code>boom init</code> can scaffold and push a fresh one for you, or write a <code>boomfile.toml</code> at the root of an existing repo. Point BoomTube at it, and from then on you just sync.</p>
     </div>
     <div class="panel filmpanel lead-s">
       <div class="steps">
@@ -670,7 +670,7 @@ pkg = [{ manager = <span class="s">"brew"</span> }]</pre>
           <div class="body">
             <div>
               <h3>Commit it with your dotfiles</h3>
-              <p>BoomTube reconciles from a git remote, not a local folder — so the boomfile ships inside your dotfiles repo. Commit and push to a repo you own.</p>
+              <p>BoomTube syncs from a git remote, not a local folder — so the boomfile ships inside your dotfiles repo. Commit and push to a repo you own.</p>
             </div>
             <pre><span class="c">git</span> add boomfile.toml
 <span class="c">git</span> commit -m <span class="s">"declare the machine"</span>
@@ -693,7 +693,7 @@ pkg = [{ manager = <span class="s">"brew"</span> }]</pre>
           <div class="n" aria-hidden="true">05</div>
           <div class="body">
             <div>
-              <h3>Reconcile — prove — undo</h3>
+              <h3>Sync — prove — undo</h3>
               <p>From here on it's one loop. <code>source</code> makes reality match the file, <code>verify</code> reports drift without touching a thing, <code>rollback</code> walks the last run backward.</p>
             </div>
             <pre><span class="c">boom</span> source           <span class="d"># make it so</span>
@@ -708,7 +708,7 @@ pkg = [{ manager = <span class="s">"brew"</span> }]</pre>
       <div class="bar" aria-hidden="true"></div>
       <div>
         <h4>Whoever can write that repo can run code on your machine.</h4>
-        <p>BoomTube reconciles from a git remote you choose; <code>run</code> steps and <code>hook</code> modules execute as you. Treat push access to that repo like shell access, and pin to a tag or SHA when you want a fixed, reviewed state. Release binaries are checksum-verified.</p>
+        <p>BoomTube syncs from a git remote you choose; <code>run</code> steps and <code>hook</code> modules execute as you. Treat push access to that repo like shell access, and pin to a tag or SHA when you want a fixed, reviewed state. Release binaries are checksum-verified.</p>
       </div>
     </div>
   </section>
