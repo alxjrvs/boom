@@ -2,13 +2,14 @@
 // checkpoints, boom.lock, drift notifications, adopt, and doctor --fix. Each is exercised
 // against a fully sandboxed $HOME + state dir (never the real machine), like engine.test.ts.
 import { expect, test } from "bun:test";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "../src/config/load.ts";
 import { resolveModule } from "../src/config/modules.ts";
 import type { BoomContext } from "../src/context.ts";
 import { adopt } from "../src/engine/adopt.ts";
+import { doctor } from "../src/engine/doctor.ts";
 import { boomFleet, machineSummary, readMachines, writeMachineSummary } from "../src/engine/fleet.ts";
 import {
   findRunByLabel,
@@ -62,6 +63,53 @@ async function sandbox(boomfile: string, opts: { emptyPath?: boolean } = {}): Pr
   const ctx = { process: proc, env, cwd: repo } as unknown as BoomContext;
   return { home, repo, base, env, ctx, out: () => buf.out };
 }
+
+// Write an executable fake binary into `dir`; the caller prepends `dir` to PATH so the
+// sandboxed code shells out to this instead of the real tool.
+async function fakeBin(dir: string, name: string, script: string): Promise<void> {
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, name), `#!/bin/sh\n${script}`);
+  await chmod(join(dir, name), 0o755);
+}
+
+// --- doctor --secrets: audit op:// references ---------------------------------------------
+
+test("doctor --secrets: resolvable ref passes, unresolvable warns (exit 2), no value leaks", async () => {
+  const sb = await sandbox(
+    '[[section]]\nname = "s"\nsecret = [' +
+      '{ dst = "~/.good", ref = "op://vault/good/field" },' +
+      '{ dst = "~/.bad", ref = "op://vault/bad/field" }]\n',
+  );
+  // Fake `op`: exit 0 for the good ref (printing a secret to stdout that must NOT surface in the
+  // report), non-zero + stderr for the bad one. $3 is the ref (op read --no-newline <ref>).
+  const bin = join(sb.base, "bin");
+  await fakeBin(
+    bin,
+    "op",
+    'case "$3" in\n' +
+      "  op://vault/good/field) printf SUPERSECRETVALUE; exit 0;;\n" +
+      '  *) echo "item not found" >&2; exit 1;;\n' +
+      "esac\n",
+  );
+  sb.env.PATH = `${bin}:${sb.env.PATH}`;
+
+  // secretsOnly → doctor(ctx, json, configOnly, fix, secretsOnly)
+  expect(await doctor(sb.ctx, false, false, false, true)).toBe(2);
+  const out = sb.out();
+  expect(out).toContain("op://vault/good/field resolves");
+  expect(out).toContain("op://vault/bad/field — unresolvable");
+  expect(out).toContain("item not found");
+  // The plaintext op printed to stdout must never reach the report.
+  expect(out).not.toContain("SUPERSECRETVALUE");
+});
+
+test("doctor --secrets: warns cleanly when op is not on PATH", async () => {
+  const sb = await sandbox('[[section]]\nname = "s"\nsecret = [{ dst = "~/.k", ref = "op://v/i/f" }]\n', {
+    emptyPath: true,
+  });
+  expect(await doctor(sb.ctx, false, false, false, true)).toBe(2);
+  expect(sb.out()).toContain("op (1Password CLI) not on PATH");
+});
 
 // --- secret resource schema ---------------------------------------------------------------
 

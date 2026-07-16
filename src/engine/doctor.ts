@@ -5,12 +5,12 @@
 // Exit code mirrors verify: 0 ok / 2 warnings / 1 failures.
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
-import { NO_CONFIG_REPO_MSG, readConfigBreadcrumb, resolveConfigDir } from "../config/load.ts";
+import { loadConfig, NO_CONFIG_REPO_MSG, readConfigBreadcrumb, resolveConfigDir } from "../config/load.ts";
 import { detectOs } from "../config/profile.ts";
 import type { BoomContext } from "../context.ts";
 import { pathExists } from "../lib/fs.ts";
 import { remoteReachableAsync } from "../lib/git.ts";
-import { hasCommand } from "../lib/proc.ts";
+import { captureArgvAsync, hasCommand, lastLine } from "../lib/proc.ts";
 import { bandsReporter, type Reporter } from "../lib/reporter.ts";
 import { VERSION } from "../lib/version.ts";
 import { boomStateDir } from "./state.ts";
@@ -61,16 +61,71 @@ async function checkSkill(ctx: BoomContext, report: Reporter, fix: boolean): Pro
   report.ok(`installed boom skill → ${file} (v${VERSION})`);
 }
 
+// `secretsOnly` (the `--secrets` flag): audit every `op://` reference the boomfile declares —
+// does each still resolve? — so a stale/renamed/missing ref surfaces here rather than mid-sync.
+// Only the exit code of `op read` is inspected; the resolved plaintext is NEVER logged. Warning
+// tier like verify: an unresolvable ref is "attention" (exit 2), not a hard failure. `template`
+// secrets are noted, not resolved — checking one needs `op inject`, out of scope for an audit.
+async function auditSecrets(ctx: BoomContext, report: Reporter): Promise<void> {
+  const repo = await resolveConfigDir(ctx.env, ctx.cwd);
+  if (!repo) {
+    report.warn(NO_CONFIG_REPO_MSG);
+    return;
+  }
+  const config = await loadConfig(repo);
+  const secrets = config.section.flatMap((s) => s.secret ?? []);
+
+  report.header("Secrets");
+  if (!hasCommand("op", ctx.env)) {
+    report.warn("op (1Password CLI) not on PATH — cannot audit refs");
+    return;
+  }
+  const refs = secrets.filter((s) => s.ref);
+  const templates = secrets.filter((s) => s.template);
+  if (refs.length === 0 && templates.length === 0) {
+    report.ok("no secret references declared");
+    return;
+  }
+  for (const s of refs) {
+    const ref = s.ref as string;
+    // An `op read` is a network round-trip → run it under the spinner. Check only the exit code:
+    // stdout is the secret and is never read here, so no value can leak into the report.
+    const r = await report.spin(`op read ${ref}`, () =>
+      captureArgvAsync(["op", "read", "--no-newline", ref], ctx.env),
+    );
+    if (r.code === 0) report.ok(`${ref} resolves`);
+    else report.warn(`${ref} — unresolvable (${lastLine(r.stderr) || "op read failed"})`);
+  }
+  // A template's op:// refs live inside a file rendered by `op inject`; auditing them means
+  // running the injection (out of scope), so we only surface that the template exists.
+  for (const s of templates) {
+    report.note(`${s.template} — template (op inject); resolvability not audited`);
+  }
+}
+
 export async function doctor(
   ctx: BoomContext,
   json = false,
   configOnly = false,
   fix = false,
+  secretsOnly = false,
 ): Promise<number> {
   const report = bandsReporter(ctx.process, ctx.env, "doctor", {
     json,
     setup: fix ? "MENDING WHAT WE CAN…" : "TAKING THE MACHINE'S PULSE…",
   });
+
+  // `--secrets` narrows doctor to just the op:// audit — a single warning-tier job (0/2/1),
+  // fully independent of the rest, exactly as `--config` narrows it to the boomfile parse.
+  if (secretsOnly) {
+    await auditSecrets(ctx, report);
+    if (json) return report.finishJson(ctx.process.stdout, true);
+    return report.finish({
+      ok: "doctor: all secret refs resolve",
+      warn: (w) => `doctor: ${w} secret warning(s)`,
+      fail: (f, w) => `doctor: ${f} failure(s), ${w} warning(s)`,
+    });
+  }
 
   report.header("Config");
   const repo = await resolveConfigDir(ctx.env, ctx.cwd);
