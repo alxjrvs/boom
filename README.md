@@ -221,6 +221,18 @@ escalate runs under a persistent label rather than the animated spinner, because
 redrawing that line 11×/second was the one and only reason the prompt ever went missing (sudo
 writes it to `/dev/tty`, which silencing stdout does not touch). Answer it and the sync continues.
 
+boom also tells you *what* is asking, since a bare `Password:` mid-run is indistinguishable from
+any other program on the machine deciding it wants one:
+
+```
+  ◇ brew bundle… (may ask for your password)
+    ▸ Upgrading cask tuple
+[boom] brew bundle needs administrator rights — password for jarvis:
+```
+
+The prompt line itself comes from `SUDO_PROMPT`; the specific cask comes from relaying Homebrew's
+own `==>` headlines (sudo's prompt escapes can't name a command, so the tool's output has to).
+
 Set `sudo_askpass` for the case where nobody is *there* to answer — an unattended sync from a
 launchd timer or CI, where a visible prompt is still an indefinite block. Point it at any secret
 reference (`op://…`, `env:VAR`, `pass:…` — the same vocabulary and backends as the `secret`

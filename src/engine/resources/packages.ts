@@ -41,6 +41,30 @@ async function declaresCask(brewfile: string): Promise<boolean> {
   }
 }
 
+// Tell sudo who is asking and why. `SUDO_PROMPT` replaces the bare "Password:" — which, arriving
+// mid-run with no referent, is indistinguishable from any other program on the machine deciding to
+// ask. sudo reads this from the invoking environment and it survives into a tool's own sudo calls
+// (Homebrew execs /usr/bin/sudo with -E and never scrubs it), so one variable relabels every prompt
+// the step can produce. `%p` is sudo's escape for the user whose password is wanted — the only
+// substitution worth having here; sudoers' escape set has nothing for the command, which is exactly
+// why the *what* has to come from the tool's own output instead (see relayProgress).
+function sudoPrompt(what: string): string {
+  return `[boom] ${what} needs administrator rights — password for %p: `;
+}
+
+// Relay a tool's progress headers as live boom lines, so the thing directly above a password prompt
+// says what is about to escalate. Homebrew prefixes every headline with "==>"
+// (Library/Homebrew/utils/formatter.rb) — "==> Upgrading cask tuple" is precisely the answer to
+// "what is asking?", and piping stdout strips its colors, so the match stays a plain prefix test.
+// Everything else brew says (download byte counts, pour progress) stays hidden under the band.
+function relayProgress(ctx: ReconcileCtx): ((line: string) => void) | undefined {
+  if (ctx.json || ctx.verbose) return undefined; // envelope stays clean; verbose already streams it
+  return (line) => {
+    const m = /^==>\s+(.*\S)/.exec(line);
+    if (m?.[1]) ctx.report.live(m[1]);
+  };
+}
+
 async function reconcileBrew(file: string, ctx: ReconcileCtx): Promise<void> {
   const { report } = ctx;
   if (!hasCommand("brew", ctx.env)) {
@@ -74,14 +98,17 @@ async function reconcileBrew(file: string, ctx: ReconcileCtx): Promise<void> {
         // safe. `ctx.env.SUDO_ASKPASS` is the same seam reconcile used to install it, so the
         // presentation follows the mechanism automatically.
         const mayPrompt = !ctx.env.SUDO_ASKPASS && (await declaresCask(path));
+        // When a prompt is possible, name the asker: label the prompt itself via SUDO_PROMPT, and
+        // relay Homebrew's own "==> …" headers so the line above it says which cask is escalating.
+        // Neither is worth doing when a shim is answering — nothing will ask.
+        const env = mayPrompt ? { ...ctx.env, SUDO_PROMPT: sudoPrompt("brew bundle") } : ctx.env;
         const r = await report.spin(
           "brew bundle",
           () =>
-            runArgvAsync(
-              ["brew", "bundle", `--file=${path}`, ...noUpgrade],
-              ctx.env,
-              toolIo(ctx.json, ctx.verbose),
-            ),
+            runArgvAsync(["brew", "bundle", `--file=${path}`, ...noUpgrade], env, {
+              ...toolIo(ctx.json, ctx.verbose),
+              ...(mayPrompt ? { onStdoutLine: relayProgress(ctx) } : {}),
+            }),
           { mayPrompt },
         );
         if (r.code === 0) report.skip("brew bundle satisfied");
@@ -219,16 +246,17 @@ async function reconcileLinuxPkgs(
       }
       {
         // Same bargain as brew: this argv literally starts with `sudo`, so without an askpass shim
-        // it may need the terminal to ask.
+        // it may need the terminal to ask. Here boom *built* the command, so the prompt can name it
+        // outright — no output-relaying needed to work out what escalated.
+        const mayPrompt = !ctx.env.SUDO_ASKPASS;
+        const env = mayPrompt
+          ? { ...ctx.env, SUDO_PROMPT: sudoPrompt(`${cli} install (${packages.length} package(s))`) }
+          : ctx.env;
         const r = await report.spin(
           `${mgr} install`,
           () =>
-            runArgvAsync(
-              [...withAskpass(install, ctx.env), ...packages],
-              ctx.env,
-              toolIo(ctx.json, ctx.verbose),
-            ),
-          { mayPrompt: !ctx.env.SUDO_ASKPASS },
+            runArgvAsync([...withAskpass(install, ctx.env), ...packages], env, toolIo(ctx.json, ctx.verbose)),
+          { mayPrompt },
         );
         if (r.code === 0) report.skip(`${mgr}: ${packages.length} package(s) satisfied`);
         else report.fail(`${mgr} install failed${lastLine(r.stderr) ? `: ${lastLine(r.stderr)}` : ""}`);

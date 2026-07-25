@@ -214,6 +214,18 @@ export class Reporter {
     }
   }
 
+  // A live progress line, written straight out *now* — deliberately not a ReportRecord and not
+  // band-buffered. Every other sub-line (note/ok/skip) is collected and flushed when its band
+  // closes, which is the wrong shape for narrating a step that's still running: the whole point is
+  // to name what a tool is doing at the moment it stops to ask for a password, and a buffered line
+  // would print after the prompt it was supposed to explain. Only meaningful under the `mayPrompt`
+  // presentation (no animation to fight with); suppressed for JSON so an envelope stays clean, and
+  // in verbose, where the tool's own unfiltered output is already streaming past.
+  live(s: string): void {
+    if (this.json || this.verbose) return;
+    this.out.write(`    ${this.hx(COSMIC.dim, `▸ ${s}`)}\n`);
+  }
+
   // Render one buffered sub-line under a band (indent + colored glyph). Fail goes to stderr to
   // match the classic surface; everything else to stdout.
   private writeSub(rec: ReportRecord): void {
