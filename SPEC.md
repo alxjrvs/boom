@@ -194,22 +194,31 @@ verb-aware (sync installs/refreshes, verify reports drift, uninstall tears the t
 - `notify = true` — when a (typically scheduled) `boom verify` finds drift, raise a desktop
   notification (macOS `osascript` / Linux `notify-send`) so the signal doesn't die in a timer
   log. Best-effort; a platform with no notifier is a silent no-op.
-- `sudo_askpass = "<ref>"` — answer a *spawned tool's* `sudo` password prompt from the vault.
-  The one field here that isn't a work item: it's a run-scoped input, resolved through the same
-  backends as the `secret` resource (`op://…`, `env:VAR`, `pass:…`).
+- `sudo_askpass = "<ref>"` — answer a *spawned tool's* `sudo` prompt from the vault instead of
+  asking the operator. The one field here that isn't a work item: it's a run-scoped input,
+  resolved through the same backends as the `secret` resource (`op://…`, `env:VAR`, `pass:…`).
 
-  It exists because a tool boom spawns can escalate on its own — Homebrew runs `sudo` for any
+  The background is that a tool boom spawns can escalate on its own — Homebrew runs `sudo` for any
   cask carrying a `launchctl`/`pkgutil` stanza, which `boom source --update` reaches whenever an
-  outdated cask is declared. boom silences that tool's stdout under a section band and animates a
-  spinner on the same terminal line, so sudo's `/dev/tty` prompt is printed and then *erased by
-  the next frame*: an indefinite, invisible wait that reads as a hang. Set this and a mutating
-  sync exports `SUDO_ASKPASS` (sudo's own hook — Homebrew appends `-A` when it sees it; boom does
-  the same for the `sudo` argv it builds itself for apt/dnf), pointing at a generated 0700 shim
-  under the state dir that execs `boom askpass <ref>`. An executable is required because sudo
-  takes a program path, not a command line — hence the shim rather than a plain env var. Only the
-  *reference* is written to disk; the plaintext exists solely in the pipe between the helper and
-  sudo, the same discipline `secret` applies by refusing to journal one. Absent this key nothing
-  changes: sudo stays interactive.
+  outdated cask is declared (`greedy` or not). **By default boom just lets it ask you**: sudo
+  writes its prompt to `/dev/tty`, which no amount of silenced stdout suppresses, so the only
+  thing that ever hid it was boom's own spinner redrawing that line 11×/second — an escalating
+  step therefore runs under a persistent label instead of an animation, and the prompt survives.
+  That needs no configuration.
+
+  This key is for when there is **nobody to ask** — an unattended sync (launchd timer, CI, remote
+  session), where a visible prompt is still an indefinite block. Set it and a mutating sync
+  exports `SUDO_ASKPASS` (sudo's own hook, and a documented Homebrew variable: it appends `-A`
+  when it sees one; boom does the same for the `sudo` argv it builds itself for apt/dnf), pointing
+  at a generated 0700 shim under the state dir that execs `boom askpass <ref>`. An executable is
+  required because sudo takes a program path, not a command line — hence a shim rather than a bare
+  env var. Only the *reference* is written to disk; the plaintext exists solely in the pipe
+  between the helper and sudo, the same discipline `secret` applies by refusing to journal one.
+  Configuring it also means nothing will prompt, so the animated spinner comes back.
+
+  One caveat for the unattended case it targets: the `op` backend resolves through *your* 1Password
+  session, so a launchd timer with no unlocked session can't read the vault. Use a backend that
+  needs no session (`env:`), or keep mutating syncs interactive.
 
 ### Hooks = the resource-type extension contract
 

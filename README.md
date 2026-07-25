@@ -215,13 +215,19 @@ schedule = [
 ]
 ```
 
-`sudo_askpass` earns its keep on `boom source --update`. Homebrew shells out to `sudo` for any
-cask with a `launchctl`/`pkgutil` stanza, and under boom's quiet section bands that prompt is
-printed to the terminal and then erased by the next spinner frame — the run looks hung when it's
-really waiting, indefinitely, for a password nobody can see. Point this at any secret reference
-(`op://…`, `env:VAR`, `pass:…` — the same vocabulary and backends as the `secret` resource) and
-boom hands spawned tools a `SUDO_ASKPASS` helper that resolves it on demand. The reference is what
-lands on disk; the password itself only ever exists in the pipe between the helper and `sudo`.
+`sudo_askpass` is about `boom source --update`, where Homebrew shells out to `sudo` for any cask
+with a `launchctl`/`pkgutil` stanza. **By default boom simply lets it ask you** — a step that can
+escalate runs under a persistent label rather than the animated spinner, because the spinner
+redrawing that line 11×/second was the one and only reason the prompt ever went missing (sudo
+writes it to `/dev/tty`, which silencing stdout does not touch). Answer it and the sync continues.
+
+Set `sudo_askpass` for the case where nobody is *there* to answer — an unattended sync from a
+launchd timer or CI, where a visible prompt is still an indefinite block. Point it at any secret
+reference (`op://…`, `env:VAR`, `pass:…` — the same vocabulary and backends as the `secret`
+resource) and boom hands spawned tools a `SUDO_ASKPASS` helper that resolves it on demand. The
+reference is what lands on disk; the password only ever exists in the pipe between the helper and
+`sudo`. Note that the `op` backend needs your unlocked 1Password session, so for a genuinely
+headless run use a backend that doesn't (`env:`).
 
 ## Code portals
 

@@ -1,12 +1,19 @@
 // Answering `sudo` from the vault instead of the terminal.
 //
-// The problem this solves: a spawned tool can shell out to `sudo` on its own (Homebrew does it
-// for any cask with a `launchctl`/`pkgutil` stanza — `brew upgrade --cask <app>`), and boom runs
-// that tool with its stdout silenced under a section band while an animated spinner owns the
-// line. sudo writes its prompt to /dev/tty, so the prompt is *printed and then erased by the next
-// spinner frame* — the run looks hung when it's really parked on an invisible password prompt,
-// forever, with no timeout. Found the hard way: `boom source --update` sitting for ten minutes on
-// `sudo -u root -E -- /bin/launchctl list app.<cask>.app-LaunchAtLoginHelper`.
+// Context, because it decides what this file is *for*. A spawned tool can shell out to `sudo` on
+// its own (Homebrew does, for any cask with a `launchctl`/`pkgutil` stanza — `brew upgrade --cask
+// <app>`). That used to read as a hang: sudo writes its prompt to /dev/tty, and the active-work
+// spinner redraws that same line 11×/second with `\r\x1b[K`, so the prompt was printed and then
+// erased — `boom source --update` sat ten minutes on `sudo -u root -E -- /bin/launchctl list
+// app.<cask>.app-LaunchAtLoginHelper`. That defect is fixed where it belongs, in the reporter: a
+// step that can escalate gives up the line (`spin(…, { mayPrompt })`), so sudo asks and the user
+// answers. Being asked directly is the DEFAULT and needs no configuration.
+//
+// So this file is not the fix for the erased prompt. It's for the case where there is nobody to
+// ask: an unattended run (a launchd timer, CI, a remote session) has no one at the terminal, and
+// there a visible prompt is still an indefinite block. Configure `[boom].sudo_askpass` and the
+// password comes from the vault instead — which also means nothing will prompt, so the animated
+// spinner is safe again (see packages.ts, which keys the presentation off SUDO_ASKPASS).
 //
 // Why an executable shim and not something simpler:
 //   • boom can't answer the prompt itself — it doesn't build that sudo argv, Homebrew does. The

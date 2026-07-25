@@ -55,12 +55,19 @@ async function reconcileBrew(file: string, ctx: ReconcileCtx): Promise<void> {
         return;
       }
       {
-        const r = await report.spin("brew bundle", () =>
-          runArgvAsync(
-            ["brew", "bundle", `--file=${path}`, ...noUpgrade],
-            ctx.env,
-            toolIo(ctx.json, ctx.verbose),
-          ),
+        // Bundle can escalate (a cask's launchctl/pkgutil stanza), so it may want the terminal for
+        // a password — unless an askpass shim is answering for it, in which case nothing will
+        // prompt and the animated spinner is safe. `ctx.env.SUDO_ASKPASS` is the same seam
+        // reconcile used to install it, so the presentation follows the mechanism automatically.
+        const r = await report.spin(
+          "brew bundle",
+          () =>
+            runArgvAsync(
+              ["brew", "bundle", `--file=${path}`, ...noUpgrade],
+              ctx.env,
+              toolIo(ctx.json, ctx.verbose),
+            ),
+          { mayPrompt: !ctx.env.SUDO_ASKPASS },
         );
         if (r.code === 0) report.skip("brew bundle satisfied");
         else report.fail(`brew bundle failed${lastLine(r.stderr) ? `: ${lastLine(r.stderr)}` : ""}`);
@@ -196,12 +203,17 @@ async function reconcileLinuxPkgs(
         return;
       }
       {
-        const r = await report.spin(`${mgr} install`, () =>
-          runArgvAsync(
-            [...withAskpass(install, ctx.env), ...packages],
-            ctx.env,
-            toolIo(ctx.json, ctx.verbose),
-          ),
+        // Same bargain as brew: this argv literally starts with `sudo`, so without an askpass shim
+        // it may need the terminal to ask.
+        const r = await report.spin(
+          `${mgr} install`,
+          () =>
+            runArgvAsync(
+              [...withAskpass(install, ctx.env), ...packages],
+              ctx.env,
+              toolIo(ctx.json, ctx.verbose),
+            ),
+          { mayPrompt: !ctx.env.SUDO_ASKPASS },
         );
         if (r.code === 0) report.skip(`${mgr}: ${packages.length} package(s) satisfied`);
         else report.fail(`${mgr} install failed${lastLine(r.stderr) ? `: ${lastLine(r.stderr)}` : ""}`);
