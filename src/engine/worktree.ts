@@ -177,14 +177,43 @@ export async function pushBranch(wt: string, branch: string, env: Env): Promise<
   return code === 0;
 }
 
+export type Removal = { readonly ok: true } | { readonly ok: false; readonly error: string };
+
 // Remove the worktree directory, leaving the branch ref untouched. `--force` covers the
 // prunable case (a registered worktree whose directory already vanished) and nothing
 // else: every reapable entry has already been proven clean by judge().
-export async function removeWorktree(repo: string, wt: string, env: Env): Promise<boolean> {
-  const { code } = await runArgvAsync(["git", "worktree", "remove", "--force", wt], env, {
+//
+// `wasLocked` handles the crashed-session case. A killed agent leaves its worktree locked,
+// and git refuses to remove a locked tree even under a single `--force` ("use 'remove -f -f'
+// to override or unlock first") — so without this, judge() correctly rules a stale-locked
+// worktree reapable and the removal then fails forever. We unlock first rather than passing
+// `-f -f`, because that is the narrower instrument: it only ever runs for an entry judge()
+// already cleared, which for a locked entry means the holding PID is provably dead. A live
+// lock never reaches here. Unlock failure is ignored — the remove below reports the truth.
+export async function removeWorktree(
+  repo: string,
+  wt: string,
+  env: Env,
+  wasLocked = false,
+): Promise<Removal> {
+  if (wasLocked) await runArgvAsync(["git", "worktree", "unlock", wt], env, { cwd: repo, silent: true });
+  const { code, stderr } = await runArgvAsync(["git", "worktree", "remove", "--force", wt], env, {
     cwd: repo,
     silent: true,
   });
+  if (code === 0) return { ok: true };
+  // git's own first line is far more useful than "it failed" — a lock, a missing dir, a
+  // dirty tree all read differently and lead to different fixes.
+  return { ok: false, error: (stderr ?? "").split("\n")[0]?.trim() || `git worktree remove exited ${code}` };
+}
+
+// Delete a local branch outright, losing any commit it alone held. This is the ONLY
+// destructive operation in the module — everything else preserves the ref precisely so a
+// misjudgement costs nothing — so the automatic sweep never reaches it. It runs only from
+// an explicit per-worktree "delete" answer under --interactive. `-D`, not `-d`, because
+// discarding work git would otherwise refuse to drop as unmerged is the entire point.
+export async function deleteBranch(repo: string, branch: string, env: Env): Promise<boolean> {
+  const { code } = await runArgvAsync(["git", "branch", "-D", branch], env, { cwd: repo, silent: true });
   return code === 0;
 }
 
