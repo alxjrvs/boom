@@ -221,11 +221,34 @@ schedule = [
 boom code init ~/Code    # record your code dir
 boom code claude         # symlink every repo into one dir, open `claude agents` there
 boom code cmux           # one cmux workspace per repo
+boom code fetch          # git fetch every repo (keep origin warm for agent worktrees)
+boom code reap           # remove spent agent worktrees (keeps every branch)
 ```
 
 `code claude` flattens every repo into a symlink farm so each is `@`-taggable for
 agent dispatch even with no running agents; `code cmux` opens one workspace per
-repo. Both honor `--dry-run` and only spawn the backend tool when it's present.
+repo. All honor `--dry-run` and only spawn the backend tool when it's present.
+
+`code reap` cleans up after agent worktrees. Claude Code refuses to remove a
+worktree whose HEAD commits exist on no remote — but it tests *SHA* identity, so a
+squash-merged branch always fails it: the content landed on the default branch under
+a new SHA, and the branch's own commits genuinely exist nowhere by SHA even though
+every line of them is merged. Worktrees therefore pile up and sessions can't be
+closed. `reap` re-asks the question by **content**, using git's patch-id equivalence,
+and removes a worktree only when it is clean, unlocked (or locked by a dead process),
+and either fully pushed or already merged. It deletes the directory and never the
+branch ref, so nothing it does can lose a commit.
+
+Its default answer is *keep* — anything it cannot prove safe stays exactly where it
+is, and a removal failure is a warning rather than an error, so a scheduled sweep
+can never wedge. `--dry-run` classifies without touching anything.
+
+`--push` closes the remaining gap. A clean worktree held back only because its
+commits exist nowhere but this machine is *published* first (`git push -u origin
+<branch>`, never forced), which makes the work verifiably safe and lets it reap on
+the same rule as everything else. It applies only to that one case — never to a
+dirty tree, a live session, or a detached HEAD, which has no branch to publish. If
+the push fails for any reason, the worktree is kept.
 
 ## Security model
 

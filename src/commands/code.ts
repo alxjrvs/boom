@@ -1,10 +1,11 @@
-// `boom code <init|claude|cmux>` — open portals to your code workspaces. A nested
-// route map. `claude` flattens every repo into a symlink farm and opens the agent
-// view there; `cmux` opens one workspace per repo. Both honor --dry-run (the tested
-// path) and only spawn the backend tool when it's present.
+// `boom code <init|claude|cmux|fetch|reap>` — open portals to your code workspaces, and
+// keep them tidy. A nested route map. `claude` flattens every repo into a symlink farm
+// and opens the agent view there; `cmux` opens one workspace per repo; `fetch` keeps
+// every repo's origin warm; `reap` sweeps away spent agent worktrees. All honor
+// --dry-run (the tested path) and only spawn the backend tool when it's present.
 
 import { mkdir, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { basename, dirname } from "node:path";
 import { buildCommand, buildRouteMap } from "@stricli/core";
 import type { BoomContext } from "../context.ts";
 import {
@@ -16,6 +17,7 @@ import {
   pruneFarmProject,
   resolveCodeDir,
 } from "../engine/code.ts";
+import { defaultRemoteRef, judge, linkedWorktrees, pushBranch, removeWorktree } from "../engine/worktree.ts";
 import { cleanEnv, hasCommand, runArgvAsync } from "../lib/proc.ts";
 import { bandsReporter } from "../lib/reporter.ts";
 import { str } from "./flags.ts";
@@ -176,9 +178,113 @@ const fetchCommand = buildCommand<{ dryRun?: boolean }, [], BoomContext>({
   },
 });
 
+// `boom code reap` — remove agent worktrees whose work is already safe, across every
+// repo under the code dir. Claude Code keeps a worktree whenever a HEAD commit exists on
+// no remote *by SHA*, which a squash-merge always violates even though the content
+// landed — so they pile up and sessions can't be closed. This re-asks the question by
+// content (patch-id) and removes only the directory, never the branch ref.
+const reapCommand = buildCommand<{ dryRun?: boolean; push?: boolean }, [], BoomContext>({
+  docs: { brief: "Remove agent worktrees whose work is merged or pushed (keeps branches)" },
+  parameters: {
+    flags: {
+      dryRun: { kind: "boolean", optional: true, brief: "Classify only; remove nothing" },
+      push: {
+        kind: "boolean",
+        optional: true,
+        brief: "Publish branches whose commits exist nowhere else, then reap them too",
+      },
+    },
+  },
+  async func(flags) {
+    const root = await resolveCodeDir(this.env);
+    if (!root) {
+      this.process.stderr.write("boom code: no code dir — run: boom code init [DIR]\n");
+      this.process.exitCode = 1;
+      return;
+    }
+    const repos = await findRepos(root);
+    const report = bandsReporter(this.process, this.env, "code reap", {
+      setup: "SWEEPING AGENT WORKTREES…",
+    });
+    report.header(`agent worktrees (${root})`);
+    let reaped = 0;
+    let kept = 0;
+    for (const repo of repos) {
+      const entries = await linkedWorktrees(repo, this.env);
+      if (entries.length === 0) continue;
+      const target = await defaultRemoteRef(repo, this.env);
+      for (const entry of entries) {
+        const name = `${rel(root, repo)}/${basename(entry.path)}`;
+        let { verdict, why, pushable } = await report.spin(name, () => judge(entry, target, this.env));
+        // --push closes the last gap between this sweep and "a session can always be closed":
+        // a clean worktree held back only because its commits live nowhere else. Publishing
+        // the branch makes that false, so it reaps on the same "work exists elsewhere" rule
+        // everything else does. Only ever applied to a `pushable` keep — never to a dirty
+        // tree, a live session, or anything the judgement couldn't read.
+        const willPush =
+          verdict === "keep" && pushable === true && flags.push === true && entry.branch !== undefined;
+        if (willPush && flags.dryRun) {
+          reaped++;
+          report.plan(`${name} → push ${entry.branch} to origin, then remove (${why})`);
+          continue;
+        }
+        if (willPush) {
+          if (
+            await report.spin(`${name} (push)`, () =>
+              pushBranch(entry.path, entry.branch as string, this.env),
+            )
+          ) {
+            verdict = "reap";
+            why = `pushed ${entry.branch} to origin`;
+          } else {
+            // A push can fail for reasons a sweep must not paper over (no remote, auth, a
+            // diverged branch of the same name). Keeping is always the safe answer.
+            report.warn(`${name} kept — ${why}; push failed`);
+            kept++;
+            continue;
+          }
+        }
+        if (verdict !== "reap") {
+          kept++;
+          // "keep" is the guard working as intended (real unmerged work); "skip" is a live
+          // session or an unreadable tree. Neither is a problem, so neither is a warning.
+          const hint = pushable && !flags.push ? " (--push would publish and reap it)" : "";
+          report.ok(`${name} kept — ${why}${hint}`);
+          continue;
+        }
+        if (flags.dryRun) {
+          reaped++;
+          report.plan(`${name} → remove (${why})`);
+          continue;
+        }
+        if (await removeWorktree(repo, entry.path, this.env)) {
+          reaped++;
+          const ref = entry.branch ? `branch ${entry.branch} kept` : "detached HEAD, commits kept";
+          report.ok(`${name} reaped — ${why}; ${ref}`);
+        } else {
+          report.warn(`${name} could not be removed (git worktree remove failed)`);
+        }
+      }
+    }
+    const verb = flags.dryRun ? "reapable" : "reaped";
+    const summary = `${reaped} ${verb}, ${kept} kept`;
+    // `meta` (not `ok`) is what the bands verdict prints on success — the counts are the
+    // whole point of a sweep, so they belong on the verdict line rather than "all clear".
+    report.finish({ ok: summary, meta: summary, warn: (w) => `${w} removal(s) failed` });
+    // A removal failure stays a warning (finish maps that to exit 2): the sweep is a
+    // courtesy and the next run retries, so nothing here should ever wedge a scheduled timer.
+  },
+});
+
 export const codeRouteMap = buildRouteMap({
-  routes: { init: initCommand, claude: claudeCommand, cmux: cmuxCommand, fetch: fetchCommand },
+  routes: {
+    init: initCommand,
+    claude: claudeCommand,
+    cmux: cmuxCommand,
+    fetch: fetchCommand,
+    reap: reapCommand,
+  },
   // Bare `boom code` is the everyday entrypoint — go straight to the agent farm.
   defaultCommand: "claude",
-  docs: { brief: "Open portals to your code workspaces (default: claude / cmux / fetch)" },
+  docs: { brief: "Open portals to your code workspaces (default: claude / cmux / fetch / reap)" },
 });
