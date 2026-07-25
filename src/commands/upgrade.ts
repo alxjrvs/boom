@@ -122,6 +122,13 @@ export function expectedHash(sums: string, asset: string): string | undefined {
   return undefined;
 }
 
+// The one rendering of "which version am I moving between" — used by both the up-front banner and
+// the closing verdict, so the two can never disagree about the target (or about the `v` prefix,
+// which the raw values don't carry).
+export function versionSpan(from: string, to: string): string {
+  return `v${from} → v${to}`;
+}
+
 type UpgradeFlags = { force?: boolean; check?: boolean };
 
 // The upgrade flow, returning the verdict band's outcome text on success (e.g. "v0.14.0 → v0.15.0")
@@ -150,13 +157,20 @@ async function runUpgrade(flags: UpgradeFlags, report: Reporter, env: Env): Prom
     return;
   }
 
-  if (release.version === VERSION && !flags.force) return `already on the latest (${VERSION})`;
-  if (flags.check) return `latest is ${release.version} — you have ${VERSION}`;
+  if (release.version === VERSION && !flags.force) return `already on the latest (v${VERSION})`;
+  if (flags.check) return `latest is v${release.version} — you have v${VERSION}`;
 
-  // Open a band so the install milestones (found, checksum verified) land as a summary; the live
-  // in-flight narration is the sequence of spinner labels (checking → downloading → installing).
-  report.header("Upgrade");
-  report.ok(`found ${release.tag} (you have v${VERSION})`);
+  // Announce the target the moment it's known, as an *eager* banner — a persistent line printed
+  // before the multi-second download, rather than a detail line buffered into the section band
+  // that only closes after it. "What am I being upgraded to?" is the one thing worth having on
+  // screen while the download runs, and the band's own detail is too late to answer it.
+  report.header(`upgrading ${versionSpan(VERSION, release.version)}`, true);
+
+  // Open a band so the install milestones (checksum verified) land as a summary; the live in-flight
+  // narration is the sequence of spinner labels (checking → downloading → installing), each of
+  // which also names the target so a non-interactive log records it too. Labelled "Install" rather
+  // than "Upgrade" so it doesn't read as a duplicate of the banner above and the verdict below.
+  report.header("Install");
 
   const asset = `boom-${target}`;
   const base = `https://github.com/${REPO}/releases/download/${release.tag}`;
@@ -164,7 +178,7 @@ async function runUpgrade(flags: UpgradeFlags, report: Reporter, env: Env): Prom
   let bin: Uint8Array;
   let sums: string;
   try {
-    [bin, sums] = await report.spin(`downloading ${release.tag}`, () =>
+    [bin, sums] = await report.spin(`downloading ${release.tag} (${asset})`, () =>
       Promise.all([
         fetchBytes(`${base}/${asset}`),
         fetchBytes(`${base}/SHA256SUMS`).then((b) => new TextDecoder().decode(b)),
@@ -185,14 +199,14 @@ async function runUpgrade(flags: UpgradeFlags, report: Reporter, env: Env): Prom
     report.fail(`checksum mismatch for ${asset} — refusing to install (want ${want}, got ${got})`);
     return;
   }
-  report.ok("checksum verified");
+  report.ok(`checksum verified for ${release.tag}`);
 
   // Stage beside the target (same filesystem → rename is atomic) then swap. `staged` is declared
   // out here so the catch can clean it up no matter where the flow threw — stageBinary's own chmod,
   // codesign, or the swap — never leaving a stray `.boom.upgrade.*`.
   let staged: string | undefined;
   try {
-    await report.spin("installing", async () => {
+    await report.spin(`installing ${release.tag}`, async () => {
       staged = await stageBinary(self, bin);
 
       // macOS release binaries are signed on a real macOS host, so the download should already
@@ -220,7 +234,7 @@ async function runUpgrade(flags: UpgradeFlags, report: Reporter, env: Env): Prom
     return;
   }
 
-  return `${VERSION} → ${release.version}`;
+  return versionSpan(VERSION, release.version);
 }
 
 export const upgradeCommand = buildCommand<UpgradeFlags, [], BoomContext>({

@@ -315,7 +315,7 @@ async function applyUpgrade(settings: BoomSettings, ctx: ReconcileCtx): Promise<
       report.note(`newer boom v${latest} available — run \`boom upgrade\` (dev run can't self-upgrade)`);
       return;
     }
-    report.plan(`upgrading boom ${VERSION} → ${latest}`);
+    report.plan(`upgrading boom v${VERSION} → v${latest}`);
     const { code } = runArgv([self, "upgrade"], ctx.env, { quietStdout: ctx.json });
     if (code === 0) report.ok(`upgraded to v${latest}`);
     else report.warn(`auto-upgrade to v${latest} failed — run \`boom upgrade\` manually`);
