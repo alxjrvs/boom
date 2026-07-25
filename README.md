@@ -223,6 +223,7 @@ boom code claude         # symlink every repo into one dir, open `claude agents`
 boom code cmux           # one cmux workspace per repo
 boom code fetch          # git fetch every repo (keep origin warm for agent worktrees)
 boom code reap           # remove spent agent worktrees (keeps every branch)
+boom code reap -i        # ...and ask what to do with the ones it won't touch
 ```
 
 `code claude` flattens every repo into a symlink farm so each is `@`-taggable for
@@ -243,12 +244,35 @@ Its default answer is *keep* — anything it cannot prove safe stays exactly whe
 is, and a removal failure is a warning rather than an error, so a scheduled sweep
 can never wedge. `--dry-run` classifies without touching anything.
 
+A killed session leaves its worktree *locked*, and git won't remove a locked tree even
+under `--force`. When the lock names a process that is no longer alive, `reap` clears
+the stale lock and reclaims the worktree; a lock whose holder is still running is left
+strictly alone. Removal failures report git's own reason rather than a generic error.
+
 `--push` closes the remaining gap. A clean worktree held back only because its
 commits exist nowhere but this machine is *published* first (`git push -u origin
 <branch>`, never forced), which makes the work verifiably safe and lets it reap on
 the same rule as everything else. It applies only to that one case — never to a
 dirty tree, a live session, or a detached HEAD, which has no branch to publish. If
 the push fails for any reason, the worktree is kept.
+
+`--interactive` / `-i` works the kept pile by hand. After the sweep has proved it
+can't clear a worktree, it asks — one at a time, naming the reason and the branch:
+
+```
+SU-SRD/rail-top-right — 2 commit(s) not on any remote
+  p=push & remove  d=DELETE worktree + branch rail-top-right — loses these commits
+  s=skip (keep it)  q=stop asking
+  choice
+```
+
+`p` is offered only when there's something publishable; `d` is the one genuinely
+destructive action in the command (`git branch -D` after the directory is gone, since
+git won't drop a checked-out branch); `s` is the default, so pressing return always
+keeps. `q` stops the questions without stopping the safe cleanup. Only worktrees the
+sweep *kept* are ever offered — a live session or an unreadable repo is skipped
+silently, because there the right answer is never a question. A non-TTY is never
+prompted and takes the do-nothing answer, so `-i` is harmless in a launchd timer.
 
 ## Security model
 

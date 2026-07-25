@@ -9,12 +9,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   defaultRemoteRef,
+  deleteBranch,
   judge,
   linkedWorktrees,
   lockPid,
   parseWorktreeList,
   pidAlive,
   pushBranch,
+  removeWorktree,
   type WorktreeEntry,
 } from "../src/engine/worktree.ts";
 
@@ -231,6 +233,60 @@ test("pushBranch: reports failure (rather than throwing) when there is no such r
   const { repo, wt } = await repoWithSquashMergedWorktree();
   git(repo, "remote", "remove", "origin");
   expect(await pushBranch(wt, "feature", ENV)).toBe(false);
+});
+
+// The only destructive path in the module, reachable solely from an explicit "delete"
+// answer under --interactive. Worth proving it (a) really discards unmerged work, and
+// (b) needs the worktree gone first — git refuses to drop a checked-out branch.
+test("deleteBranch: refuses while the branch is checked out, and discards it once freed", async () => {
+  const { repo, wt } = await repoWithSquashMergedWorktree();
+  await Bun.write(join(wt, "feature.txt"), "one\ntwo\nthree\n");
+  git(wt, "add", "-A");
+  git(wt, "commit", "-qm", "unmerged work about to be thrown away");
+  expect(git(repo, "rev-parse", "--verify", "feature")).toBeTruthy();
+
+  // Checked out in the worktree — git will not delete it, so this can't be half-done.
+  expect(await deleteBranch(repo, "feature", ENV)).toBe(false);
+  expect(git(repo, "rev-parse", "--verify", "feature")).toBeTruthy();
+
+  expect((await removeWorktree(repo, wt, ENV)).ok).toBe(true);
+  expect(await deleteBranch(repo, "feature", ENV)).toBe(true);
+
+  const gone = Bun.spawnSync(["git", "rev-parse", "--verify", "feature"], {
+    cwd: repo,
+    env: ENV as Record<string, string>,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  expect(gone.exitCode).not.toBe(0);
+});
+
+// Regression: judge() rules a stale-locked worktree reapable (holder PID is dead), but git
+// refuses to remove a locked tree even under a single --force — so the sweep detected the
+// crashed-session case and could never actually clear it. removeWorktree unlocks first when
+// told the entry was locked.
+test("removeWorktree: reclaims a stale-locked worktree, but only when told it was locked", async () => {
+  const { repo, wt } = await repoWithSquashMergedWorktree();
+  git(repo, "worktree", "lock", "--reason", "claude session feature (pid 2147483632 start then)", wt);
+
+  // judge() already clears it — the holder is long gone.
+  const entry = (await linkedWorktrees(repo, ENV))[0] as WorktreeEntry;
+  expect((await judge(entry, "origin/main", ENV)).verdict).toBe("reap");
+
+  // Without the lock hint, git blocks and says why.
+  const blocked = await removeWorktree(repo, wt, ENV);
+  expect(blocked.ok).toBe(false);
+  if (!blocked.ok) expect(blocked.error).toContain("locked");
+
+  expect((await removeWorktree(repo, wt, ENV, true)).ok).toBe(true);
+});
+
+test("removeWorktree alone leaves the branch — the non-destructive default", async () => {
+  const { repo, wt } = await repoWithSquashMergedWorktree();
+  const before = git(repo, "rev-parse", "feature");
+  expect((await removeWorktree(repo, wt, ENV)).ok).toBe(true);
+  // Same SHA, still resolvable: `git worktree add` restores a checkout of exactly this.
+  expect(git(repo, "rev-parse", "feature")).toBe(before);
 });
 
 test("judge: with no remote default branch, unpushed commits are always kept", async () => {

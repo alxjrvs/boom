@@ -17,7 +17,15 @@ import {
   pruneFarmProject,
   resolveCodeDir,
 } from "../engine/code.ts";
-import { defaultRemoteRef, judge, linkedWorktrees, pushBranch, removeWorktree } from "../engine/worktree.ts";
+import {
+  defaultRemoteRef,
+  deleteBranch,
+  judge,
+  linkedWorktrees,
+  pushBranch,
+  removeWorktree,
+} from "../engine/worktree.ts";
+import { type Choice, choose } from "../lib/confirm.ts";
 import { cleanEnv, hasCommand, runArgvAsync } from "../lib/proc.ts";
 import { bandsReporter } from "../lib/reporter.ts";
 import { str } from "./flags.ts";
@@ -183,7 +191,11 @@ const fetchCommand = buildCommand<{ dryRun?: boolean }, [], BoomContext>({
 // no remote *by SHA*, which a squash-merge always violates even though the content
 // landed — so they pile up and sessions can't be closed. This re-asks the question by
 // content (patch-id) and removes only the directory, never the branch ref.
-const reapCommand = buildCommand<{ dryRun?: boolean; push?: boolean }, [], BoomContext>({
+const reapCommand = buildCommand<
+  { dryRun?: boolean; push?: boolean; interactive?: boolean },
+  [],
+  BoomContext
+>({
   docs: { brief: "Remove agent worktrees whose work is merged or pushed (keeps branches)" },
   parameters: {
     flags: {
@@ -193,7 +205,13 @@ const reapCommand = buildCommand<{ dryRun?: boolean; push?: boolean }, [], BoomC
         optional: true,
         brief: "Publish branches whose commits exist nowhere else, then reap them too",
       },
+      interactive: {
+        kind: "boolean",
+        optional: true,
+        brief: "Ask what to do with each worktree that isn't safe to remove",
+      },
     },
+    aliases: { i: "interactive" },
   },
   async func(flags) {
     const root = await resolveCodeDir(this.env);
@@ -209,6 +227,10 @@ const reapCommand = buildCommand<{ dryRun?: boolean; push?: boolean }, [], BoomC
     report.header(`agent worktrees (${root})`);
     let reaped = 0;
     let kept = 0;
+    let deleted = 0;
+    // Set by answering "q" to any prompt: stop asking for the rest of the sweep, but let the
+    // sweep itself finish — quitting the questions is not quitting the safe cleanup.
+    let stopAsking = false;
     for (const repo of repos) {
       const entries = await linkedWorktrees(repo, this.env);
       if (entries.length === 0) continue;
@@ -245,6 +267,54 @@ const reapCommand = buildCommand<{ dryRun?: boolean; push?: boolean }, [], BoomC
           }
         }
         if (verdict !== "reap") {
+          // --interactive turns the kept list into a work queue: the sweep has just proved it
+          // can't clear this one, so ask. Only a "keep" is ever offered — a "skip" is a live
+          // session or a repo we couldn't read, where the right answer is never a question.
+          // Asking after the judgement (not before) is what lets the prompt state the stakes.
+          if (flags.interactive && !flags.dryRun && verdict === "keep" && !stopAsking) {
+            const choices: Choice<"push" | "delete" | "skip" | "quit">[] = [];
+            if (pushable && entry.branch) choices.push({ key: "p", label: "push & remove", value: "push" });
+            choices.push({
+              key: "d",
+              label: entry.branch
+                ? `DELETE worktree + branch ${entry.branch} — loses these commits`
+                : "DELETE worktree — loses these commits",
+              value: "delete",
+            });
+            choices.push({ key: "s", label: "skip (keep it)", value: "skip" });
+            choices.push({ key: "q", label: "stop asking", value: "quit" });
+            const pick = choose(`${name} — ${why}`, choices, "skip");
+
+            if (pick === "quit") stopAsking = true;
+            else if (pick === "push" && entry.branch) {
+              if (await pushBranch(entry.path, entry.branch, this.env)) {
+                const gone = await removeWorktree(repo, entry.path, this.env, entry.lock !== undefined);
+                if (gone.ok) {
+                  reaped++;
+                  report.ok(`${name} reaped — pushed ${entry.branch} to origin; branch kept`);
+                  continue;
+                }
+                report.warn(`${name} pushed, but not removed — ${gone.error}`);
+              } else report.warn(`${name} kept — ${why}; push failed`);
+              kept++;
+              continue;
+            } else if (pick === "delete") {
+              // Order matters: git refuses to delete a branch that is checked out in a
+              // worktree, so the directory has to go first.
+              const removed = await removeWorktree(repo, entry.path, this.env, entry.lock !== undefined);
+              if (removed.ok) {
+                const dropped = entry.branch ? await deleteBranch(repo, entry.branch, this.env) : true;
+                deleted++;
+                report.warn(
+                  `${name} DELETED — ${entry.branch && dropped ? `branch ${entry.branch} deleted` : "worktree removed"}; ${why}`,
+                );
+                continue;
+              }
+              report.warn(`${name} not removed — ${removed.error}`);
+              kept++;
+              continue;
+            }
+          }
           kept++;
           // "keep" is the guard working as intended (real unmerged work); "skip" is a live
           // session or an unreadable tree. Neither is a problem, so neither is a warning.
@@ -257,17 +327,20 @@ const reapCommand = buildCommand<{ dryRun?: boolean; push?: boolean }, [], BoomC
           report.plan(`${name} → remove (${why})`);
           continue;
         }
-        if (await removeWorktree(repo, entry.path, this.env)) {
+        const removed = await removeWorktree(repo, entry.path, this.env, entry.lock !== undefined);
+        if (removed.ok) {
           reaped++;
           const ref = entry.branch ? `branch ${entry.branch} kept` : "detached HEAD, commits kept";
-          report.ok(`${name} reaped — ${why}; ${ref}`);
+          const stale = entry.lock !== undefined ? " (stale lock cleared)" : "";
+          report.ok(`${name} reaped — ${why}${stale}; ${ref}`);
         } else {
-          report.warn(`${name} could not be removed (git worktree remove failed)`);
+          kept++;
+          report.warn(`${name} not removed — ${removed.error}`);
         }
       }
     }
     const verb = flags.dryRun ? "reapable" : "reaped";
-    const summary = `${reaped} ${verb}, ${kept} kept`;
+    const summary = `${reaped} ${verb}, ${kept} kept${deleted > 0 ? `, ${deleted} deleted` : ""}`;
     // `meta` (not `ok`) is what the bands verdict prints on success — the counts are the
     // whole point of a sweep, so they belong on the verdict line rather than "all clear".
     report.finish({ ok: summary, meta: summary, warn: (w) => `${w} removal(s) failed` });
