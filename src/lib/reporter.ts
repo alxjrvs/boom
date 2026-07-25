@@ -173,13 +173,29 @@ export class Reporter {
   //     line, since verbose has no buffered band to hide it under and its own tool output follows;
   //   • JSON, or dense + non-interactive (piped/CI) → suppressed, so captured output stays clean.
   // Always awaits `work` and always clears the animation timer, even if `work` throws.
-  async spin<T>(label: string, work: () => Promise<T>): Promise<T> {
+  //
+  // `mayPrompt` is the fourth case, and it exists because the animation is destructive: the frame
+  // is redrawn with `\r\x1b[K` 11×/second, which erases anything the *child* wrote to that line.
+  // A tool that shells out to `sudo` writes its password prompt straight to /dev/tty — verified:
+  // "Password:" reaches the terminal even with the child's stdout ignored and stderr piped, so
+  // boom's quiet stdio never hid it, the spinner did. The prompt was printed and then wiped, and
+  // the run read as a hang. So when a step can escalate, boom gives up the line: a persistent
+  // label (the verbose presentation) instead of an animated one, and the prompt survives to be
+  // answered. Cosmetics lose to being able to type your password.
+  async spin<T>(label: string, work: () => Promise<T>, opts?: { mayPrompt?: boolean }): Promise<T> {
     if (this.json) return work();
     if (this.verbose) {
       this.out.write(`  ${this.hx(COSMIC.solar, "◇")} ${this.hx(COSMIC.dim, `${label}…`)}\n`);
       return work();
     }
     if (!this.interactive) return work();
+    if (opts?.mayPrompt) {
+      // Say so, rather than letting a bare "Password:" appear from nowhere: the child's own
+      // "==> Upgrading cask …" context is silenced under the band, so the label is all there is.
+      const hint = this.hx(COSMIC.dim, "(may ask for your password)");
+      this.out.write(`  ${this.hx(COSMIC.solar, "◇")} ${this.hx(COSMIC.dim, `${label}…`)} ${hint}\n`);
+      return work();
+    }
     let i = 0;
     const draw = (): void => {
       const frame = SPIN_FRAMES[i++ % SPIN_FRAMES.length] ?? "✸";

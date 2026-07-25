@@ -59,3 +59,42 @@ test("spin: prints a persistent label line under --verbose (streaming commands' 
   expect(s.read()).toContain("git fetch…"); // a persistent line, not an erased animation
   expect(s.read()).not.toContain("\x1b[K"); // no cursor rewind — verbose doesn't animate in place
 });
+
+// A step that can escalate must not be animated over: the frame is redrawn with `\r\x1b[K`
+// 11×/second, and sudo writes its password prompt straight to /dev/tty — so the animation
+// *erases* the prompt and an ordinary wait-for-password reads as a hang. Verified out of band:
+// "Password:" reaches the terminal even with the child's stdout ignored and stderr piped, so the
+// quiet stdio was never what hid it. These pin the fix in place.
+
+test("spin: mayPrompt yields the terminal — a persistent line, no in-place animation to erase a prompt", async () => {
+  const s = sink();
+  const r = new Reporter(s.stream, s.stream, true, false, false, true, true, false);
+  const value = await r.spin("brew bundle", async () => 5, { mayPrompt: true });
+  expect(value).toBe(5);
+  expect(s.read()).toContain("brew bundle…");
+  // The whole point: no clear-to-EOL anywhere, so nothing the child prints can be wiped.
+  expect(s.read()).not.toContain("\x1b[K");
+  expect(s.read().endsWith("\n")).toBe(true); // the line is committed, not rewound
+});
+
+test("spin: mayPrompt says a password may be wanted (the tool's own context is silenced)", async () => {
+  const s = sink();
+  const r = new Reporter(s.stream, s.stream, true, false, false, true, true, false);
+  await r.spin("brew bundle", async () => 0, { mayPrompt: true });
+  expect(s.read()).toContain("may ask for your password");
+});
+
+test("spin: mayPrompt false keeps the animation (an askpass shim means nothing will prompt)", async () => {
+  const s = sink();
+  const r = new Reporter(s.stream, s.stream, true, false, false, true, true, false);
+  await r.spin("brew bundle", async () => 0, { mayPrompt: false });
+  expect(s.read()).toContain("\x1b[K"); // animated in place, as before
+  expect(s.read()).not.toContain("may ask for your password");
+});
+
+test("spin: mayPrompt stays a silent pass-through when non-interactive (no tty to prompt on)", async () => {
+  const s = sink();
+  const r = new Reporter(s.stream, s.stream, true, false, false, true, false, false);
+  expect(await r.spin("apt install", async () => 3, { mayPrompt: true })).toBe(3);
+  expect(s.read()).toBe("");
+});

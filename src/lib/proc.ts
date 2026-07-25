@@ -113,9 +113,22 @@ export async function runShellAsync(cmd: string, env: Env, opts?: RunOptions): P
 export async function runArgvAsync(args: string[], env: Env, opts?: RunOptions): Promise<ShellResult> {
   const io = stdioFor(opts);
   const proc = Bun.spawn(args, { env: cleanEnv(env), cwd: opts?.cwd, ...io });
+  // Same deadline discipline as runShellAsync. This used to ignore `timeoutMs` outright, which
+  // made the documented cap a lie for every engine-owned argv invocation (brew/mise/apt) — the
+  // exact callers most able to block forever. No caller passes one today; the point is that the
+  // next one gets the behavior RunOptions advertises instead of an unbounded wait.
+  const timeout = opts?.timeoutMs && opts.timeoutMs > 0 ? opts.timeoutMs : undefined;
+  let timedOut = false;
+  const timer = timeout
+    ? setTimeout(() => {
+        timedOut = true;
+        proc.kill();
+      }, timeout)
+    : undefined;
   const stderr = opts?.silent ? await new Response(proc.stderr as ReadableStream).text() : undefined;
   await proc.exited;
-  return { code: exitOf(proc), ...(opts?.silent ? { stderr: stderr?.trim() ?? "" } : {}) };
+  if (timer) clearTimeout(timer);
+  return { code: exitOf(proc), timedOut, ...(opts?.silent ? { stderr: stderr?.trim() ?? "" } : {}) };
 }
 
 export async function captureArgvAsync(args: string[], env: Env, opts?: RunOptions): Promise<CaptureResult> {

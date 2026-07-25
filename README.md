@@ -119,6 +119,7 @@ boom fleet              # every machine's last-sync summary; fleet drift | diff 
 boom module             # list `use` modules; module search <term> | add <name> for the registry
 boom where config|code|engine   # resolve where boom keeps things
 boom upgrade            # upgrade the boom binary itself
+boom askpass <ref>      # resolve a secret ref to stdout (the SUDO_ASKPASS helper; see [boom])
 boom completions bash|zsh|fish  # shell completions
 boom man                # the man page
 boom skill              # emit a Claude Code SKILL.md (--install writes it to ~/.claude)
@@ -198,8 +199,8 @@ express. Multi-machine setups gate sections with `when`, layer overlay files
 
 A top-level `[boom]` table folds boom's own self-wiring into the reconcile — refresh the
 Claude skill, nudge/auto-upgrade when a newer boom ships, record a fleet summary,
-desktop-notify on drift, and manage scheduled `boom` launchd timers (macOS) — so you stop
-hand-rolling those as `run`/plist boilerplate:
+desktop-notify on drift, answer a tool's `sudo` prompt from the vault, and manage scheduled
+`boom` launchd timers (macOS) — so you stop hand-rolling those as `run`/plist boilerplate:
 
 ```toml
 [boom]
@@ -207,11 +208,26 @@ skill_on_sync   = true            # regenerate ~/.claude/skills/boom/SKILL.md ea
 upgrade_on_sync = "check"         # "check" warns on a newer release; "auto" self-upgrades
 fleet           = true            # record this machine's summary into the repo for `boom fleet`
 notify          = true            # desktop-notify when a scheduled `boom verify` finds drift
+sudo_askpass    = "op://Private/Mac/password"   # answer a tool's sudo prompt from the vault
 schedule = [
   { cmd = "verify",     every = "15m" },   # launchd timer: boom verify every 15m (macOS)
   { cmd = "code fetch", every = "15m" },   # keep every code repo's origin warm for agents
 ]
 ```
+
+`sudo_askpass` is about `boom source --update`, where Homebrew shells out to `sudo` for any cask
+with a `launchctl`/`pkgutil` stanza. **By default boom simply lets it ask you** — a step that can
+escalate runs under a persistent label rather than the animated spinner, because the spinner
+redrawing that line 11×/second was the one and only reason the prompt ever went missing (sudo
+writes it to `/dev/tty`, which silencing stdout does not touch). Answer it and the sync continues.
+
+Set `sudo_askpass` for the case where nobody is *there* to answer — an unattended sync from a
+launchd timer or CI, where a visible prompt is still an indefinite block. Point it at any secret
+reference (`op://…`, `env:VAR`, `pass:…` — the same vocabulary and backends as the `secret`
+resource) and boom hands spawned tools a `SUDO_ASKPASS` helper that resolves it on demand. The
+reference is what lands on disk; the password only ever exists in the pipe between the helper and
+`sudo`. Note that the `op` backend needs your unlocked 1Password session, so for a genuinely
+headless run use a backend that doesn't (`env:`).
 
 ## Code portals
 
