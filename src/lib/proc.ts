@@ -35,17 +35,48 @@ export interface RunOptions {
   // Wall-clock cap in ms; Bun.spawnSync kills the child (SIGTERM) when it's exceeded.
   // Omit / 0 for no limit.
   readonly timeoutMs?: number;
+  // Watch the child's stdout line by line while it runs, instead of discarding it. The one caller
+  // that needs this is a step that can trigger a `sudo` prompt: the tool's own progress output is
+  // the only thing that knows *what* is about to ask (Homebrew's "==> Upgrading cask tuple"), so
+  // boom relays a filtered version of it rather than leaving a bare "Password:" with no referent.
+  // Set alongside `silent` — stdout is piped and pumped here rather than ignored, and stderr keeps
+  // silent's capture-for-failures behavior. Lines arrive without their trailing newline.
+  //
+  // Piping stdout has a deliberate side effect: it costs the child its tty, so Homebrew drops its
+  // colors and download progress bars and emits clean, parseable lines. sudo's prompt is unaffected
+  // — it goes to /dev/tty, which is exactly why it survives every stdio discipline boom has.
+  readonly onStdoutLine?: (line: string) => void;
 }
 
 // fd 2 = the parent's stderr; Bun.spawn routes a child stream to a parent fd by number.
 const childStdout = (opts?: RunOptions): "inherit" | 2 => (opts?.quietStdout ? 2 : "inherit");
 
-// The stdio pair for a child, resolving the three output disciplines: silent (discard stdout,
-// capture stderr so a failure can still be explained), quietStdout (stdout→fd2, keep JSON clean),
-// or inherit (stream straight to the terminal — verbose / default).
-type Stdio = { stdout: "inherit" | "ignore" | 2; stderr: "inherit" | "pipe" };
-const stdioFor = (opts?: RunOptions): Stdio =>
-  opts?.silent ? { stdout: "ignore", stderr: "pipe" } : { stdout: childStdout(opts), stderr: "inherit" };
+// The stdio pair for a child, resolving the output disciplines: a watched stdout (piped, pumped to
+// onStdoutLine), silent (discard stdout, capture stderr so a failure can still be explained),
+// quietStdout (stdout→fd2, keep JSON clean), or inherit (stream straight to the terminal).
+type Stdio = { stdout: "inherit" | "ignore" | "pipe" | 2; stderr: "inherit" | "pipe" };
+const stdioFor = (opts?: RunOptions): Stdio => {
+  if (opts?.onStdoutLine) return { stdout: "pipe", stderr: opts.silent ? "pipe" : "inherit" };
+  return opts?.silent
+    ? { stdout: "ignore", stderr: "pipe" }
+    : { stdout: childStdout(opts), stderr: "inherit" };
+};
+
+// Pump a piped stream to a per-line callback. Split on newlines across chunk boundaries (a chunk is
+// not a line), and flush any unterminated tail so a tool whose last line lacks a newline is still
+// seen. Must be consumed concurrently with the child's exit: an unread pipe fills and the child
+// blocks on write, which would deadlock the very step this exists to narrate.
+async function pumpLines(stream: ReadableStream, onLine: (line: string) => void): Promise<void> {
+  const decoder = new TextDecoder();
+  let buf = "";
+  for await (const chunk of stream as unknown as AsyncIterable<Uint8Array>) {
+    buf += decoder.decode(chunk, { stream: true });
+    const lines = buf.split("\n");
+    buf = lines.pop() ?? "";
+    for (const line of lines) onLine(line);
+  }
+  if (buf.length > 0) onLine(buf);
+}
 
 // A child killed by a signal (timeout, SIGKILL) yields exitCode null; map that onto a
 // non-zero code so `code === 0` is never a false success and the number type never lies.
@@ -113,6 +144,7 @@ export async function runShellAsync(cmd: string, env: Env, opts?: RunOptions): P
 export async function runArgvAsync(args: string[], env: Env, opts?: RunOptions): Promise<ShellResult> {
   const io = stdioFor(opts);
   const proc = Bun.spawn(args, { env: cleanEnv(env), cwd: opts?.cwd, ...io });
+  const watch = opts?.onStdoutLine ? pumpLines(proc.stdout as ReadableStream, opts.onStdoutLine) : undefined;
   // Same deadline discipline as runShellAsync. This used to ignore `timeoutMs` outright, which
   // made the documented cap a lie for every engine-owned argv invocation (brew/mise/apt) — the
   // exact callers most able to block forever. No caller passes one today; the point is that the
@@ -125,7 +157,13 @@ export async function runArgvAsync(args: string[], env: Env, opts?: RunOptions):
         proc.kill();
       }, timeout)
     : undefined;
-  const stderr = opts?.silent ? await new Response(proc.stderr as ReadableStream).text() : undefined;
+  // Drain stderr and the watched stdout concurrently, and only then await the exit. Reading one to
+  // completion first would stall on a full pipe for a chatty tool — the deadlock this narration
+  // exists to avoid, not cause.
+  const [stderr] = await Promise.all([
+    opts?.silent ? new Response(proc.stderr as ReadableStream).text() : undefined,
+    watch,
+  ]);
   await proc.exited;
   if (timer) clearTimeout(timer);
   return { code: exitOf(proc), timedOut, ...(opts?.silent ? { stderr: stderr?.trim() ?? "" } : {}) };

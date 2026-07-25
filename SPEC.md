@@ -206,6 +206,16 @@ verb-aware (sync installs/refreshes, verify reports drift, uninstall tears the t
   step therefore runs under a persistent label instead of an animation, and the prompt survives.
   That needs no configuration.
 
+  A prompt you can see is still worth nothing if it doesn't say **what** wants the password, so a
+  step that can escalate also names its asker two ways. `SUDO_PROMPT` relabels the prompt itself
+  (`[boom] brew bundle needs administrator rights — password for jarvis:`), which sudo honors from
+  the invoking environment and Homebrew forwards untouched. And because sudoers' escapes (`%p`,
+  `%u`, `%H`) have nothing for the *command*, the specific culprit comes from the tool's own
+  output: boom pipes the step's stdout and relays only Homebrew's `==>` headlines as live lines, so
+  `▸ Upgrading cask tuple` sits directly above the prompt while the byte counts stay hidden under
+  the band. Piping also costs the tool its tty, which conveniently drops its colors and progress
+  bars; the prompt is unaffected, since `/dev/tty` is not stdout.
+
   This key is for when there is **nobody to ask** — an unattended sync (launchd timer, CI, remote
   session), where a visible prompt is still an indefinite block. Set it and a mutating sync
   exports `SUDO_ASKPASS` (sudo's own hook, and a documented Homebrew variable: it appends `-A`
