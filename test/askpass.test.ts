@@ -13,7 +13,7 @@
 // one thing these tests can't reach — whether real sudo accepts the shim — checked by hand
 // against `sudo -A` with a deliberately wrong password: three rejections, no prompt, no hang.
 import { expect, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { chmod as chmodFs, mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BoomContext } from "../src/context.ts";
@@ -35,7 +35,8 @@ test("askpassScript pins PATH and HOME, so the shim doesn't depend on what sudoe
   expect(s.startsWith("#!/bin/sh\n")).toBe(true);
   expect(s).toContain("PATH='/opt/homebrew/bin:/usr/bin'");
   expect(s).toContain("HOME='/Users/x'");
-  expect(s).toContain("export PATH HOME");
+  expect(s).toContain("export PATH");
+  expect(s).toContain("export HOME");
   // `exec` so sudo's child *is* boom — no wrapper shell left holding the password channel.
   expect(s).toContain("exec '/usr/local/bin/boom' askpass 'op://v/i/f'");
 });
@@ -130,7 +131,7 @@ async function sandbox(boomfile: string, extraEnv: Record<string, string> = {}):
 async function fakeBin(dir: string, name: string, script: string): Promise<void> {
   await mkdir(dir, { recursive: true });
   await writeFile(join(dir, name), `#!/bin/sh\n${script}`);
-  await chmod(join(dir, name), 0o755);
+  await chmodFs(join(dir, name), 0o755);
 }
 
 // A `run` step is the cheapest observer of the environment reconcile hands its children — the same
@@ -185,4 +186,30 @@ test("pkg apt: sudo gets -A when an askpass shim is configured, and not otherwis
     const argv = (await readFile(log, "utf8")).trim();
     expect(argv.startsWith(withRef ? "-A apt-get" : "apt-get")).toBe(true);
   }
+});
+
+// ---------------------------------------------------------------- review findings (self-review)
+
+test("askpassScript omits HOME entirely when unknown — an empty HOME breaks op rather than freeing it", () => {
+  const s = askpassScript("op://v/i/f", "/bin/boom", { PATH: "/usr/bin" });
+  // `HOME=''` would point op at /.config/op and guarantee failure; absent means "inherit".
+  expect(s).not.toContain("HOME=");
+  expect(s).toContain("export PATH");
+  expect(s).not.toContain("export HOME");
+});
+
+test("askpassScript pins HOME when it is known", () => {
+  const s = askpassScript("op://v/i/f", "/bin/boom", { PATH: "/usr/bin", HOME: "/Users/x" });
+  expect(s).toContain("HOME='/Users/x'");
+  expect(s).toContain("export HOME");
+});
+
+test("installAskpass never leaves the shim at umask permissions, even mid-write", async () => {
+  // Created with the mode rather than chmod-ed after, so there's no window at 0644. Re-installing
+  // over a deliberately loosened file must tighten it back.
+  const env = { XDG_STATE_HOME: await base(), PATH: "/usr/bin" };
+  const p = await installAskpass("env:PW", "/bin/boom", env);
+  await chmodFs(p, 0o666);
+  await installAskpass("env:PW", "/bin/boom", env);
+  expect(((await stat(p)).mode & 0o777).toString(8)).toBe("700");
 });

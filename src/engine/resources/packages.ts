@@ -27,6 +27,20 @@ export async function reconcilePkg(entry: Pkg, ctx: ReconcileCtx): Promise<void>
   }
 }
 
+// Can this Brewfile pull `sudo` into a Bundle run? Only a cask can: its `launchctl`/`pkgutil`
+// stanzas escalate, and cask installation is what creates the Caskroom. A formula-only Brewfile
+// never prompts, so it keeps the animated spinner rather than permanently wearing a "may ask for
+// your password" line that will never come true — a warning that cries wolf on every sync teaches
+// people to ignore it. An unreadable Brewfile assumes it *can* escalate: guessing wrong in that
+// direction costs a persistent line, guessing wrong the other way restores the invisible hang.
+async function declaresCask(brewfile: string): Promise<boolean> {
+  try {
+    return /^\s*cask\s/m.test(await Bun.file(brewfile).text());
+  } catch {
+    return true;
+  }
+}
+
 async function reconcileBrew(file: string, ctx: ReconcileCtx): Promise<void> {
   const { report } = ctx;
   if (!hasCommand("brew", ctx.env)) {
@@ -55,10 +69,11 @@ async function reconcileBrew(file: string, ctx: ReconcileCtx): Promise<void> {
         return;
       }
       {
-        // Bundle can escalate (a cask's launchctl/pkgutil stanza), so it may want the terminal for
-        // a password — unless an askpass shim is answering for it, in which case nothing will
-        // prompt and the animated spinner is safe. `ctx.env.SUDO_ASKPASS` is the same seam
-        // reconcile used to install it, so the presentation follows the mechanism automatically.
+        // Bundle may want the terminal for a password when a cask is in play — unless an askpass
+        // shim is answering for it, in which case nothing will prompt and the animated spinner is
+        // safe. `ctx.env.SUDO_ASKPASS` is the same seam reconcile used to install it, so the
+        // presentation follows the mechanism automatically.
+        const mayPrompt = !ctx.env.SUDO_ASKPASS && (await declaresCask(path));
         const r = await report.spin(
           "brew bundle",
           () =>
@@ -67,7 +82,7 @@ async function reconcileBrew(file: string, ctx: ReconcileCtx): Promise<void> {
               ctx.env,
               toolIo(ctx.json, ctx.verbose),
             ),
-          { mayPrompt: !ctx.env.SUDO_ASKPASS },
+          { mayPrompt },
         );
         if (r.code === 0) report.skip("brew bundle satisfied");
         else report.fail(`brew bundle failed${lastLine(r.stderr) ? `: ${lastLine(r.stderr)}` : ""}`);
