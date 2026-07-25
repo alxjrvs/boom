@@ -220,6 +220,13 @@ export const BoomSettingsSchema = v.strictObject({
   // Linux notify-send) instead of letting the 0/2/1 exit code die in a timer log. Opt-in;
   // a no-op on a machine with no notifier.
   notify: v.optional(v.boolean()),
+  // Answer a spawned tool's `sudo` password prompt from the vault instead of the terminal.
+  // The value is a secret *reference* in the `secret` resource's vocabulary
+  // (`op://vault/item/field`, `env:VAR`, `pass:path`) — resolved by the same backends, so
+  // this adds a consumer, not a mechanism. Unlike the rest of this table it isn't a work
+  // item: it's a run-scoped input that puts `SUDO_ASKPASS` in every spawned tool's
+  // environment (see engine/secrets/askpass.ts for why that's the only workable seam).
+  sudo_askpass: v.optional(v.string()),
 });
 
 // A reusable config module: another boom config repo (`owner/repo[@ref]`, a git URL, or a

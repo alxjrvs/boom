@@ -14,6 +14,7 @@ import { acquireLock } from "../lib/lock.ts";
 import { REPORT_SCHEMA_VERSION, Reporter } from "../lib/reporter.ts";
 import { displace, Journal, newRunId, pruneRuns, readRun } from "./journal.ts";
 import { finalizeResources, reconcileSection } from "./registry.ts";
+import { installAskpass } from "./secrets/askpass.ts";
 import { applyBoomSettings } from "./settings.ts";
 import { backupsDir, type ManifestEntry, readManifest, writeManifest } from "./state.ts";
 import { syncConfigRepo } from "./sync.ts";
@@ -211,6 +212,19 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
     }
     const priorManifest = await readManifest(ctx.env);
 
+    // `[boom].sudo_askpass` — put the vault-backed askpass shim in every spawned tool's
+    // environment, so a tool that shells out to `sudo` on its own (Homebrew does, for any cask
+    // with a launchctl/pkgutil stanza) resolves the password from the vault instead of parking on
+    // a terminal prompt this run's spinner would erase. The environment is the only seam: boom
+    // doesn't build that sudo argv, the tool does. See engine/secrets/askpass.ts.
+    // Mutating runs only — nothing a `verify` spawns escalates, and a dry run writes nothing.
+    let childEnv = ctx.env;
+    const askpassRef = config.boom?.sudo_askpass;
+    if (askpassRef && mutating) {
+      const shim = await installAskpass(askpassRef, process.execPath, ctx.env);
+      childEnv = { ...ctx.env, SUDO_ASKPASS: shim };
+    }
+
     const rctx: ReconcileCtx = {
       repo,
       verb,
@@ -221,7 +235,7 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
       linkMode: opts.linkMode ?? "skip",
       update: opts.update ?? false,
       verbose,
-      env: ctx.env,
+      env: childEnv,
       vars: config.vars ?? {},
       report,
       declared: [],

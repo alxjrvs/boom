@@ -5,7 +5,7 @@
 import { join } from "node:path";
 import { detectOs } from "../../config/profile.ts";
 import type { Pkg } from "../../config/schema.ts";
-import { captureArgv, hasCommand, lastLine, runArgvAsync, toolIo } from "../../lib/proc.ts";
+import { captureArgv, type Env, hasCommand, lastLine, runArgvAsync, toolIo } from "../../lib/proc.ts";
 import type { ReconcileCtx } from "../types.ts";
 
 export async function reconcilePkg(entry: Pkg, ctx: ReconcileCtx): Promise<void> {
@@ -38,8 +38,15 @@ async function reconcileBrew(file: string, ctx: ReconcileCtx): Promise<void> {
   const path = join(ctx.repo, file);
   // Homebrew Bundle upgrades outdated formulae by default — `sync` should only reconcile
   // declared state, not silently upgrade packages as a side effect, so it opts out unless the
-  // caller asked for it (`boom source --update`). Casks are unaffected by this flag: Bundle
-  // only upgrades a cask when its Brewfile entry sets `greedy: true`, update or not.
+  // caller asked for it (`boom source --update`).
+  //
+  // This flag governs *casks* too, which is worth knowing because that's the expensive half:
+  // observed on Homebrew 6.0.12, dropping `--no-upgrade` had Bundle run `brew upgrade --cask` on
+  // an outdated cask that set no `greedy: true` in the Brewfile and is `auto_updates: true` — so
+  // don't read `greedy` as a guarantee that `--update` leaves casks alone (this comment used to
+  // claim exactly that, and it cost a ten-minute mystery hang). A cask upgrade is also what
+  // reaches for `sudo`, via any `launchctl`/`pkgutil` stanza in the cask — see
+  // engine/secrets/askpass.ts for how a password gets answered when it does.
   const noUpgrade = ctx.update ? [] : ["--no-upgrade"];
   switch (ctx.verb) {
     case "sync": {
@@ -128,6 +135,15 @@ const LINUX_MGR = {
   dnf: { cli: "dnf", install: ["sudo", "dnf", "install", "-y"], query: (p: string) => ["rpm", "-q", p] },
 } as const;
 
+// boom builds this sudo argv itself, so it has to opt into the askpass shim the way Homebrew does
+// for its own (`-A` when SUDO_ASKPASS is set — Library/Homebrew/system_command.rb). Without this a
+// Linux sync parks on the same invisible password prompt the shim exists to answer. A no-op when
+// no `[boom].sudo_askpass` is configured, so the default path stays a plain interactive `sudo`.
+function withAskpass(argv: readonly string[], env: Env): string[] {
+  if (!env.SUDO_ASKPASS || argv[0] !== "sudo") return [...argv];
+  return ["sudo", "-A", ...argv.slice(1)];
+}
+
 // Parse a newline-separated package list: one name per line, `#` comments and blank lines
 // dropped. The declarative form of `xargs apt-get install < packages.txt`.
 async function readPackages(file: string, ctx: ReconcileCtx): Promise<string[]> {
@@ -181,7 +197,11 @@ async function reconcileLinuxPkgs(
       }
       {
         const r = await report.spin(`${mgr} install`, () =>
-          runArgvAsync([...install, ...packages], ctx.env, toolIo(ctx.json, ctx.verbose)),
+          runArgvAsync(
+            [...withAskpass(install, ctx.env), ...packages],
+            ctx.env,
+            toolIo(ctx.json, ctx.verbose),
+          ),
         );
         if (r.code === 0) report.skip(`${mgr}: ${packages.length} package(s) satisfied`);
         else report.fail(`${mgr} install failed${lastLine(r.stderr) ? `: ${lastLine(r.stderr)}` : ""}`);

@@ -15,9 +15,8 @@ export interface ReconcileCtx {
   readonly json: boolean;
   readonly linkMode: LinkMode;
   // Gates brewfile's `--no-upgrade`: sync reconciles declared state only,
-  // `boom source --update` opts into upgrading outdated formulae too. Casks are unaffected
-  // either way — Homebrew Bundle only upgrades a cask when its Brewfile entry sets
-  // `greedy: true`, regardless of this flag.
+  // `boom source --update` opts into upgrading outdated formulae too — and outdated *casks*,
+  // `greedy` or not (see resources/packages.ts; a cask upgrade is the arm that needs sudo).
   readonly update: boolean;
   // Verbose run: a spawned tool's chatter streams straight to the terminal. Quiet (the default)
   // silences it under the section band, so noisy resources (brew/mise, `run` steps) branch on it.

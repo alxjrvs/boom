@@ -119,6 +119,7 @@ boom fleet              # every machine's last-sync summary; fleet drift | diff 
 boom module             # list `use` modules; module search <term> | add <name> for the registry
 boom where config|code|engine   # resolve where boom keeps things
 boom upgrade            # upgrade the boom binary itself
+boom askpass <ref>      # resolve a secret ref to stdout (the SUDO_ASKPASS helper; see [boom])
 boom completions bash|zsh|fish  # shell completions
 boom man                # the man page
 boom skill              # emit a Claude Code SKILL.md (--install writes it to ~/.claude)
@@ -198,8 +199,8 @@ express. Multi-machine setups gate sections with `when`, layer overlay files
 
 A top-level `[boom]` table folds boom's own self-wiring into the reconcile — refresh the
 Claude skill, nudge/auto-upgrade when a newer boom ships, record a fleet summary,
-desktop-notify on drift, and manage scheduled `boom` launchd timers (macOS) — so you stop
-hand-rolling those as `run`/plist boilerplate:
+desktop-notify on drift, answer a tool's `sudo` prompt from the vault, and manage scheduled
+`boom` launchd timers (macOS) — so you stop hand-rolling those as `run`/plist boilerplate:
 
 ```toml
 [boom]
@@ -207,11 +208,20 @@ skill_on_sync   = true            # regenerate ~/.claude/skills/boom/SKILL.md ea
 upgrade_on_sync = "check"         # "check" warns on a newer release; "auto" self-upgrades
 fleet           = true            # record this machine's summary into the repo for `boom fleet`
 notify          = true            # desktop-notify when a scheduled `boom verify` finds drift
+sudo_askpass    = "op://Private/Mac/password"   # answer a tool's sudo prompt from the vault
 schedule = [
   { cmd = "verify",     every = "15m" },   # launchd timer: boom verify every 15m (macOS)
   { cmd = "code fetch", every = "15m" },   # keep every code repo's origin warm for agents
 ]
 ```
+
+`sudo_askpass` earns its keep on `boom source --update`. Homebrew shells out to `sudo` for any
+cask with a `launchctl`/`pkgutil` stanza, and under boom's quiet section bands that prompt is
+printed to the terminal and then erased by the next spinner frame — the run looks hung when it's
+really waiting, indefinitely, for a password nobody can see. Point this at any secret reference
+(`op://…`, `env:VAR`, `pass:…` — the same vocabulary and backends as the `secret` resource) and
+boom hands spawned tools a `SUDO_ASKPASS` helper that resolves it on demand. The reference is what
+lands on disk; the password itself only ever exists in the pipe between the helper and `sudo`.
 
 ## Code portals
 

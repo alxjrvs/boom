@@ -194,6 +194,22 @@ verb-aware (sync installs/refreshes, verify reports drift, uninstall tears the t
 - `notify = true` — when a (typically scheduled) `boom verify` finds drift, raise a desktop
   notification (macOS `osascript` / Linux `notify-send`) so the signal doesn't die in a timer
   log. Best-effort; a platform with no notifier is a silent no-op.
+- `sudo_askpass = "<ref>"` — answer a *spawned tool's* `sudo` password prompt from the vault.
+  The one field here that isn't a work item: it's a run-scoped input, resolved through the same
+  backends as the `secret` resource (`op://…`, `env:VAR`, `pass:…`).
+
+  It exists because a tool boom spawns can escalate on its own — Homebrew runs `sudo` for any
+  cask carrying a `launchctl`/`pkgutil` stanza, which `boom source --update` reaches whenever an
+  outdated cask is declared. boom silences that tool's stdout under a section band and animates a
+  spinner on the same terminal line, so sudo's `/dev/tty` prompt is printed and then *erased by
+  the next frame*: an indefinite, invisible wait that reads as a hang. Set this and a mutating
+  sync exports `SUDO_ASKPASS` (sudo's own hook — Homebrew appends `-A` when it sees it; boom does
+  the same for the `sudo` argv it builds itself for apt/dnf), pointing at a generated 0700 shim
+  under the state dir that execs `boom askpass <ref>`. An executable is required because sudo
+  takes a program path, not a command line — hence the shim rather than a plain env var. Only the
+  *reference* is written to disk; the plaintext exists solely in the pipe between the helper and
+  sudo, the same discipline `secret` applies by refusing to journal one. Absent this key nothing
+  changes: sudo stays interactive.
 
 ### Hooks = the resource-type extension contract
 
@@ -265,6 +281,7 @@ src/
     registry.ts            data-driven resource table (phase order) + finalize hooks
     resources/             link · copy · tmpl · secret · dir · pkg · osx · launchd · systemd · run · check · hook
     secrets/backends.ts    pluggable secret backends (op · env · pass · age · sops)
+    secrets/askpass.ts     SUDO_ASKPASS shim: answer a spawned tool's sudo prompt from the vault
     db.ts journal.ts state.ts   bun:sqlite store: transaction journal + manifest
     rollback.ts code.ts discovery.ts
   config/  schema.ts load.ts remote.ts profile.ts modules.ts registry.ts (curated module packs)

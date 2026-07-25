@@ -18,6 +18,15 @@ export type SecretResult =
   | { readonly ok: true; readonly value: string }
   | { readonly ok: false; readonly err: string };
 
+// What a backend actually reads off an entry, and off the run. Narrower than `Secret` /
+// `ReconcileCtx` on purpose: resolving a reference needs the ref itself plus somewhere to
+// anchor a repo-relative encrypted file — nothing about a destination, a mode, or a verb.
+// A full `Secret`/`ReconcileCtx` still satisfies both structurally, so the `secret` resource
+// passes its own values through unchanged; the narrowing is what lets a non-resource caller
+// (askpass) resolve a bare ref without fabricating a fake destination.
+export type SecretSource = Pick<Secret, "ref" | "template" | "backend">;
+export type SecretCtx = Pick<ReconcileCtx, "env" | "repo">;
+
 export interface SecretBackend {
   // Short id (op/env/pass/age/sops) — used in spinner + freshness messages.
   readonly name: string;
@@ -28,13 +37,13 @@ export interface SecretBackend {
   // does — that's the CI / airgapped / no-vault path.)
   available(env: Env): boolean;
   // Resolve the secret's plaintext. Never logs or returns anything but the value on success.
-  read(entry: Secret, ctx: ReconcileCtx): Promise<SecretResult>;
+  read(entry: SecretSource, ctx: SecretCtx): Promise<SecretResult>;
 }
 
 // The file a file-based backend (age/sops) decrypts: a `template` is repo-relative (like the op
 // backend's `op inject -i`); a `ref` may be absolute or repo-relative. Resolved against the
 // config repo so an encrypted secret committed beside the boomfile is addressed by its repo path.
-function filePath(entry: Secret, ctx: ReconcileCtx): string {
+function filePath(entry: SecretSource, ctx: SecretCtx): string {
   const p = entry.template ?? entry.ref ?? "";
   return isAbsolute(p) ? p : join(ctx.repo, p);
 }
@@ -127,7 +136,7 @@ const BACKENDS: Record<Secret["backend"] & string, SecretBackend> = { op, env, p
 // Infer the backend from the ref scheme / file extension when a boomfile doesn't state one, so
 // `op://…` (and a committed `.age`/`.sops.yaml`) route themselves and existing configs need no
 // `backend =` key. Kept in one place so the seam is a single, testable decision.
-function pickBackend(entry: Secret): SecretBackend {
+function pickBackend(entry: SecretSource): SecretBackend {
   const src = entry.ref ?? entry.template ?? "";
   if (src.startsWith("op://")) return op;
   if (src.startsWith("env:")) return env;
@@ -138,6 +147,17 @@ function pickBackend(entry: Secret): SecretBackend {
 }
 
 // The backend for an entry: an explicit `backend =` wins, else inferred from the ref/template.
-export function getBackend(entry: Secret): SecretBackend {
+export function getBackend(entry: SecretSource): SecretBackend {
   return entry.backend ? BACKENDS[entry.backend] : pickBackend(entry);
+}
+
+// Resolve one bare reference to its plaintext — the whole backend seam minus the `secret`
+// resource's file-rendering half. For callers that need a value *in the process* rather than on
+// disk (the askpass helper answering a sudo prompt), where writing it to a file would be exactly
+// the wrong move. Missing tool is reported as a failure rather than throwing, matching read().
+export async function resolveRef(ref: string, ctx: SecretCtx): Promise<SecretResult> {
+  const entry: SecretSource = { ref };
+  const backend = getBackend(entry);
+  if (!backend.available(ctx.env)) return { ok: false, err: `${backend.tool} not installed` };
+  return backend.read(entry, ctx);
 }
