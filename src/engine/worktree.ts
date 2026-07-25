@@ -90,6 +90,11 @@ export interface Judgement {
   readonly verdict: Verdict;
   // Human-readable justification, shown per-worktree in the report.
   readonly why: string;
+  // A "keep" that exists solely because the work lives nowhere but this machine — the tree
+  // is clean and nothing is in flight, the commits just aren't on a remote. Publishing the
+  // branch resolves it into a "reap", which is what `--push` does. Never set on a verdict
+  // held back for any other reason (dirty, locked, unreadable): those must not be pushed.
+  readonly pushable?: boolean;
 }
 
 // Resolve the default branch the way the repo itself records it, falling back to the
@@ -150,11 +155,26 @@ export async function judge(entry: WorktreeEntry, target: string | undefined, en
   });
   if (unpushed.code !== 0) return { entry, verdict: "skip", why: "unreadable (git rev-list failed)" };
   if (unpushed.stdout === "0") return { entry, verdict: "reap", why: "every commit is on a remote" };
+  // A detached HEAD has no branch to publish, so it is never pushable — its commits can only
+  // be preserved by naming them, which is a decision for a human, not a sweep.
+  const pushable = entry.branch !== undefined;
   if (!target)
-    return { entry, verdict: "keep", why: "unpushed commits, no remote default branch to compare" };
+    return { entry, verdict: "keep", why: "unpushed commits, no remote default branch to compare", pushable };
   if (await isSquashMerged(wt, target, env))
     return { entry, verdict: "reap", why: `content already in ${target} (squash-merged)` };
-  return { entry, verdict: "keep", why: `${unpushed.stdout} commit(s) not on any remote` };
+  return { entry, verdict: "keep", why: `${unpushed.stdout} commit(s) not on any remote`, pushable };
+}
+
+// Publish a pushable worktree's branch so its commits stop existing only on this machine.
+// `-u` sets upstream so the branch reads as tracked afterwards; no force, ever — if the
+// remote already has a diverged branch of that name, the push fails and the worktree is
+// kept, which is the correct outcome for a sweep that must never destroy anything.
+export async function pushBranch(wt: string, branch: string, env: Env): Promise<boolean> {
+  const { code } = await runArgvAsync(["git", "push", "--quiet", "-u", "origin", branch], env, {
+    cwd: wt,
+    silent: true,
+  });
+  return code === 0;
 }
 
 // Remove the worktree directory, leaving the branch ref untouched. `--force` covers the

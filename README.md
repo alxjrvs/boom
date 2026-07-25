@@ -239,6 +239,17 @@ and removes a worktree only when it is clean, unlocked (or locked by a dead proc
 and either fully pushed or already merged. It deletes the directory and never the
 branch ref, so nothing it does can lose a commit.
 
+Its default answer is *keep* — anything it cannot prove safe stays exactly where it
+is, and a removal failure is a warning rather than an error, so a scheduled sweep
+can never wedge. `--dry-run` classifies without touching anything.
+
+`--push` closes the remaining gap. A clean worktree held back only because its
+commits exist nowhere but this machine is *published* first (`git push -u origin
+<branch>`, never forced), which makes the work verifiably safe and lets it reap on
+the same rule as everything else. It applies only to that one case — never to a
+dirty tree, a live session, or a detached HEAD, which has no branch to publish. If
+the push fails for any reason, the worktree is kept.
+
 ## Security model
 
 boom reconciles from a git remote **you** point it at, and a boomfile's `run` steps and

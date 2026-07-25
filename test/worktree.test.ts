@@ -14,6 +14,8 @@ import {
   lockPid,
   parseWorktreeList,
   pidAlive,
+  pushBranch,
+  type WorktreeEntry,
 } from "../src/engine/worktree.ts";
 
 const ENV: Record<string, string | undefined> = {
@@ -184,6 +186,51 @@ test("judge: a lock whose holder is dead falls through to the normal rules", asy
   const verdict = await judge(entries[0] as NonNullable<(typeof entries)[0]>, "origin/main", ENV);
   expect(verdict.verdict).toBe("reap");
   expect(verdict.why).toContain("squash-merged");
+});
+
+test("judge: unmerged work is flagged pushable — the only keep --push is allowed to act on", async () => {
+  const { repo, wt } = await repoWithSquashMergedWorktree();
+  await Bun.write(join(wt, "feature.txt"), "one\ntwo\nthree\n");
+  git(wt, "add", "-A");
+  git(wt, "commit", "-qm", "feature part 3 — never merged");
+
+  const entries = await linkedWorktrees(repo, ENV);
+  const verdict = await judge(entries[0] as NonNullable<(typeof entries)[0]>, "origin/main", ENV);
+  expect(verdict.verdict).toBe("keep");
+  expect(verdict.pushable).toBe(true);
+});
+
+test("judge: a dirty tree is never pushable, so --push can't publish work-in-progress", async () => {
+  const { repo, wt } = await repoWithSquashMergedWorktree();
+  await Bun.write(join(wt, "scratch.txt"), "unsaved work\n");
+
+  const entries = await linkedWorktrees(repo, ENV);
+  const verdict = await judge(entries[0] as NonNullable<(typeof entries)[0]>, "origin/main", ENV);
+  expect(verdict.verdict).toBe("keep");
+  expect(verdict.pushable).toBeUndefined();
+});
+
+test("pushBranch: publishing unmerged work turns a keep into a reap", async () => {
+  const { repo, wt } = await repoWithSquashMergedWorktree();
+  await Bun.write(join(wt, "feature.txt"), "one\ntwo\nthree\n");
+  git(wt, "add", "-A");
+  git(wt, "commit", "-qm", "feature part 3 — never merged");
+
+  const before = await judge((await linkedWorktrees(repo, ENV))[0] as WorktreeEntry, "origin/main", ENV);
+  expect(before.verdict).toBe("keep");
+
+  expect(await pushBranch(wt, "feature", ENV)).toBe(true);
+
+  // Same worktree, same commits — but they now exist somewhere other than this machine.
+  const after = await judge((await linkedWorktrees(repo, ENV))[0] as WorktreeEntry, "origin/main", ENV);
+  expect(after.verdict).toBe("reap");
+  expect(after.why).toBe("every commit is on a remote");
+});
+
+test("pushBranch: reports failure (rather than throwing) when there is no such remote", async () => {
+  const { repo, wt } = await repoWithSquashMergedWorktree();
+  git(repo, "remote", "remove", "origin");
+  expect(await pushBranch(wt, "feature", ENV)).toBe(false);
 });
 
 test("judge: with no remote default branch, unpushed commits are always kept", async () => {

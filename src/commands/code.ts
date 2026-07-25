@@ -17,7 +17,7 @@ import {
   pruneFarmProject,
   resolveCodeDir,
 } from "../engine/code.ts";
-import { defaultRemoteRef, judge, linkedWorktrees, removeWorktree } from "../engine/worktree.ts";
+import { defaultRemoteRef, judge, linkedWorktrees, pushBranch, removeWorktree } from "../engine/worktree.ts";
 import { cleanEnv, hasCommand, runArgvAsync } from "../lib/proc.ts";
 import { bandsReporter } from "../lib/reporter.ts";
 import { str } from "./flags.ts";
@@ -183,10 +183,17 @@ const fetchCommand = buildCommand<{ dryRun?: boolean }, [], BoomContext>({
 // no remote *by SHA*, which a squash-merge always violates even though the content
 // landed — so they pile up and sessions can't be closed. This re-asks the question by
 // content (patch-id) and removes only the directory, never the branch ref.
-const reapCommand = buildCommand<{ dryRun?: boolean }, [], BoomContext>({
+const reapCommand = buildCommand<{ dryRun?: boolean; push?: boolean }, [], BoomContext>({
   docs: { brief: "Remove agent worktrees whose work is merged or pushed (keeps branches)" },
   parameters: {
-    flags: { dryRun: { kind: "boolean", optional: true, brief: "Classify only; remove nothing" } },
+    flags: {
+      dryRun: { kind: "boolean", optional: true, brief: "Classify only; remove nothing" },
+      push: {
+        kind: "boolean",
+        optional: true,
+        brief: "Publish branches whose commits exist nowhere else, then reap them too",
+      },
+    },
   },
   async func(flags) {
     const root = await resolveCodeDir(this.env);
@@ -208,12 +215,41 @@ const reapCommand = buildCommand<{ dryRun?: boolean }, [], BoomContext>({
       const target = await defaultRemoteRef(repo, this.env);
       for (const entry of entries) {
         const name = `${rel(root, repo)}/${basename(entry.path)}`;
-        const { verdict, why } = await report.spin(name, () => judge(entry, target, this.env));
+        let { verdict, why, pushable } = await report.spin(name, () => judge(entry, target, this.env));
+        // --push closes the last gap between this sweep and "a session can always be closed":
+        // a clean worktree held back only because its commits live nowhere else. Publishing
+        // the branch makes that false, so it reaps on the same "work exists elsewhere" rule
+        // everything else does. Only ever applied to a `pushable` keep — never to a dirty
+        // tree, a live session, or anything the judgement couldn't read.
+        const willPush =
+          verdict === "keep" && pushable === true && flags.push === true && entry.branch !== undefined;
+        if (willPush && flags.dryRun) {
+          reaped++;
+          report.plan(`${name} → push ${entry.branch} to origin, then remove (${why})`);
+          continue;
+        }
+        if (willPush) {
+          if (
+            await report.spin(`${name} (push)`, () =>
+              pushBranch(entry.path, entry.branch as string, this.env),
+            )
+          ) {
+            verdict = "reap";
+            why = `pushed ${entry.branch} to origin`;
+          } else {
+            // A push can fail for reasons a sweep must not paper over (no remote, auth, a
+            // diverged branch of the same name). Keeping is always the safe answer.
+            report.warn(`${name} kept — ${why}; push failed`);
+            kept++;
+            continue;
+          }
+        }
         if (verdict !== "reap") {
           kept++;
           // "keep" is the guard working as intended (real unmerged work); "skip" is a live
           // session or an unreadable tree. Neither is a problem, so neither is a warning.
-          report.ok(`${name} kept — ${why}`);
+          const hint = pushable && !flags.push ? " (--push would publish and reap it)" : "";
+          report.ok(`${name} kept — ${why}${hint}`);
           continue;
         }
         if (flags.dryRun) {
