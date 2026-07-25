@@ -12,8 +12,15 @@ import {
   sha256,
   stageBinary,
   swapInto,
+  versionSpan,
 } from "../src/commands/upgrade.ts";
 import { pathExists } from "../src/lib/fs.ts";
+
+test("versionSpan names both versions with a v prefix", () => {
+  // The banner printed before the download and the closing verdict share this one rendering, so
+  // "which version am I upgrading to" reads identically in both places.
+  expect(versionSpan("0.19.0", "0.20.0")).toBe("v0.19.0 → v0.20.0");
+});
 
 test("releaseTargetFor maps the four supported platforms and nothing else", () => {
   expect(releaseTargetFor("darwin", "arm64")).toBe("bun-darwin-arm64");
