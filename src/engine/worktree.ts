@@ -165,16 +165,81 @@ export async function judge(entry: WorktreeEntry, target: string | undefined, en
   return { entry, verdict: "keep", why: `${unpushed.stdout} commit(s) not on any remote`, pushable };
 }
 
+// A push that failed because the remote already holds a *diverged* branch of the same
+// name — the agent rebased locally, or its PR was closed and the remote moved on. git
+// words this as a `[rejected]` line plus a parenthesised reason; the three reasons below
+// all mean "your ref is not a fast-forward of theirs". Matched on git's own text because
+// the exit code is a flat 1 for every push failure, and the difference matters: a
+// diverged name is recoverable under another name, whereas a missing remote or an auth
+// failure is not, and must not be retried.
+export function isDivergedRejection(stderr: string): boolean {
+  if (!/!\s+\[rejected]/.test(stderr)) return false;
+  return /\((?:non-fast-forward|fetch first|stale info)\)/.test(stderr);
+}
+
+// Where diverged commits get parked. A ref nobody owns, namespaced under `boom/archive/`
+// so it is obvious what wrote it and trivial to sweep later. The short SHA makes the name
+// a function of the content: re-running the sweep pushes the same commit to the same ref
+// and git answers "up to date" (exit 0), so the fallback is idempotent rather than
+// accumulating a new ref per run.
+export function archiveRef(branch: string, head: string): string {
+  return `boom/archive/${branch}-${head.slice(0, 7)}`;
+}
+
+// The outcome of publishing a branch. `ref` is the remote branch that now holds the
+// commits — normally the branch's own name, or the archive ref when it had to be parked.
+export type Push =
+  | { readonly ok: true; readonly ref: string; readonly archived: boolean }
+  | { readonly ok: false; readonly error: string };
+
 // Publish a pushable worktree's branch so its commits stop existing only on this machine.
-// `-u` sets upstream so the branch reads as tracked afterwards; no force, ever — if the
-// remote already has a diverged branch of that name, the push fails and the worktree is
-// kept, which is the correct outcome for a sweep that must never destroy anything.
-export async function pushBranch(wt: string, branch: string, env: Env): Promise<boolean> {
-  const { code } = await runArgvAsync(["git", "push", "--quiet", "-u", "origin", branch], env, {
+// `-u` sets upstream so the branch reads as tracked afterwards; no force, ever.
+//
+// When the branch name is already taken on the remote by diverged history, that non-forced
+// push can never succeed — so "keep" is not a resting state: every later run re-attempts
+// the same doomed push, and neither this sweep nor Claude Code's own guard will ever let
+// the worktree go. That is a permanent dead end, which is precisely what this module
+// exists to remove. The fallback pushes the same commits to an unclaimed archive ref
+// instead: nothing is overwritten, no existing branch or PR is touched, no history is
+// rewritten, and the commits are now on a remote — which is all either guard was asking.
+// The local branch keeps its own upstream (no `-u` on the fallback), so the only trace is
+// one new remote ref.
+export async function pushBranch(wt: string, branch: string, env: Env, head?: string): Promise<Push> {
+  const direct = await runArgvAsync(["git", "push", "--quiet", "-u", "origin", branch], env, {
     cwd: wt,
     silent: true,
   });
-  return code === 0;
+  if (direct.code === 0) return { ok: true, ref: branch, archived: false };
+  const why = firstLine(direct.stderr, `git push exited ${direct.code}`);
+  if (!isDivergedRejection(direct.stderr ?? "")) return { ok: false, error: why };
+
+  // The entry's recorded HEAD is passed in by the sweep; resolving it here keeps the
+  // function usable on its own (and correct if the worktree moved on since it was listed).
+  let sha = head;
+  if (!sha) {
+    const rev = await captureArgvAsync(["git", "rev-parse", "HEAD"], env, { cwd: wt });
+    if (rev.code !== 0 || !rev.stdout) return { ok: false, error: why };
+    sha = rev.stdout;
+  }
+  const ref = archiveRef(branch, sha);
+  const parked = await runArgvAsync(["git", "push", "--quiet", "origin", `HEAD:refs/heads/${ref}`], env, {
+    cwd: wt,
+    silent: true,
+  });
+  if (parked.code === 0) return { ok: true, ref, archived: true };
+  return { ok: false, error: firstLine(parked.stderr, `git push exited ${parked.code}`) };
+}
+
+// git's own words are far more useful than "it failed" — a diverged ref, a missing remote
+// and an auth failure all read differently and lead to different fixes. The leading
+// `To <url>` line git echoes on every push is dropped: it names the remote, never the
+// problem, and it is the one line guaranteed to be present when the push failed.
+function firstLine(stderr: string | undefined, fallback: string): string {
+  const lines = (stderr ?? "")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l !== "" && !l.startsWith("To "));
+  return lines[0] ?? fallback;
 }
 
 export type Removal = { readonly ok: true } | { readonly ok: false; readonly error: string };
