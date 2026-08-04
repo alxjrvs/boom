@@ -8,8 +8,10 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  archiveRef,
   defaultRemoteRef,
   deleteBranch,
+  isDivergedRejection,
   judge,
   linkedWorktrees,
   lockPid,
@@ -221,7 +223,8 @@ test("pushBranch: publishing unmerged work turns a keep into a reap", async () =
   const before = await judge((await linkedWorktrees(repo, ENV))[0] as WorktreeEntry, "origin/main", ENV);
   expect(before.verdict).toBe("keep");
 
-  expect(await pushBranch(wt, "feature", ENV)).toBe(true);
+  const pushed = await pushBranch(wt, "feature", ENV);
+  expect(pushed).toMatchObject({ ok: true, ref: "feature", archived: false });
 
   // Same worktree, same commits — but they now exist somewhere other than this machine.
   const after = await judge((await linkedWorktrees(repo, ENV))[0] as WorktreeEntry, "origin/main", ENV);
@@ -232,7 +235,91 @@ test("pushBranch: publishing unmerged work turns a keep into a reap", async () =
 test("pushBranch: reports failure (rather than throwing) when there is no such remote", async () => {
   const { repo, wt } = await repoWithSquashMergedWorktree();
   git(repo, "remote", "remove", "origin");
-  expect(await pushBranch(wt, "feature", ENV)).toBe(false);
+  const pushed = await pushBranch(wt, "feature", ENV);
+  expect(pushed.ok).toBe(false);
+  // git's own words, not a bare "it failed" — and never the `To <url>` line, which names
+  // the remote rather than the problem.
+  if (!pushed.ok) expect(pushed.error).toMatch(/origin/);
+});
+
+// The dead end this fallback exists for: the remote holds a branch of the same name whose
+// history has diverged (the agent rebased, or its PR was closed and the remote moved on).
+// A non-forced push is then rejected forever, so before the fallback every later sweep
+// re-ran the same doomed push and neither guard would ever release the worktree.
+function divergeFromRemote(wt: string): void {
+  git(wt, "push", "-q", "-u", "origin", "feature");
+  // Amending after the push leaves local and remote each holding a commit the other lacks —
+  // the remote's tip is no longer an ancestor of HEAD, which is exactly non-fast-forward.
+  Bun.write(join(wt, "feature.txt"), "one\ntwo\nrewritten\n");
+  git(wt, "add", "-A");
+  git(wt, "commit", "-q", "--amend", "-m", "rewritten after the remote moved on");
+}
+
+test("isDivergedRejection: only a rejected push with a not-a-fast-forward reason qualifies", () => {
+  const rejected = [
+    "To https://github.com/o/r.git",
+    " ! [rejected]        feature -> feature (non-fast-forward)",
+    "error: failed to push some refs",
+  ].join("\n");
+  expect(isDivergedRejection(rejected)).toBe(true);
+  expect(isDivergedRejection(rejected.replace("non-fast-forward", "fetch first"))).toBe(true);
+  expect(isDivergedRejection(rejected.replace("non-fast-forward", "stale info"))).toBe(true);
+  // A rejection for a reason another name cannot fix must NOT divert to the archive ref.
+  expect(isDivergedRejection(rejected.replace("non-fast-forward", "protected branch hook declined"))).toBe(
+    false,
+  );
+  expect(isDivergedRejection("fatal: 'origin' does not appear to be a git repository")).toBe(false);
+  expect(isDivergedRejection("")).toBe(false);
+});
+
+test("pushBranch: a diverged remote branch parks the commits at an archive ref, and that reaps", async () => {
+  const { repo, wt } = await repoWithSquashMergedWorktree();
+  divergeFromRemote(wt);
+
+  // Precondition: the branch's own name is unpushable, which is the permanent dead end.
+  const held = await judge((await linkedWorktrees(repo, ENV))[0] as WorktreeEntry, "origin/main", ENV);
+  expect(held.verdict).toBe("keep");
+  expect(held.pushable).toBe(true);
+
+  const head = git(wt, "rev-parse", "HEAD");
+  const pushed = await pushBranch(wt, "feature", ENV, head);
+  expect(pushed).toMatchObject({ ok: true, archived: true, ref: archiveRef("feature", head) });
+
+  // The existing remote branch is untouched — nothing was overwritten to achieve this.
+  expect(git(repo, "rev-parse", "origin/feature")).not.toBe(head);
+  // And the local branch keeps tracking its own upstream, not the archive ref.
+  expect(git(wt, "rev-parse", "--abbrev-ref", "feature@{upstream}")).toBe("origin/feature");
+
+  const after = await judge((await linkedWorktrees(repo, ENV))[0] as WorktreeEntry, "origin/main", ENV);
+  expect(after.verdict).toBe("reap");
+  expect(after.why).toBe("every commit is on a remote");
+});
+
+test("pushBranch: parking the same commits twice is a no-op, not a second ref", async () => {
+  const { repo, wt } = await repoWithSquashMergedWorktree();
+  divergeFromRemote(wt);
+  const head = git(wt, "rev-parse", "HEAD");
+
+  expect((await pushBranch(wt, "feature", ENV, head)).ok).toBe(true);
+  // Idempotent because the ref name is a function of the commit: git answers "up to date".
+  expect(await pushBranch(wt, "feature", ENV, head)).toMatchObject({ ok: true, archived: true });
+  const archived = git(repo, "for-each-ref", "--format=%(refname)", "refs/remotes/origin/boom/");
+  expect(archived.split("\n").filter((l) => l !== "")).toEqual([
+    `refs/remotes/origin/${archiveRef("feature", head)}`,
+  ]);
+});
+
+test("pushBranch: a failing fallback is reported, never silently treated as parked", async () => {
+  const { wt } = await repoWithSquashMergedWorktree();
+  divergeFromRemote(wt);
+  const head = git(wt, "rev-parse", "HEAD");
+  // Occupy the archive ref itself with unrelated history, so the fallback push is rejected
+  // too. Contrived on purpose: the point is that a sweep reports the truth instead of
+  // reaping a worktree whose commits it never actually managed to publish.
+  git(wt, "push", "-q", "origin", `origin/main:refs/heads/${archiveRef("feature", head)}`);
+
+  const pushed = await pushBranch(wt, "feature", ENV, head);
+  expect(pushed.ok).toBe(false);
 });
 
 // The only destructive path in the module, reachable solely from an explicit "delete"

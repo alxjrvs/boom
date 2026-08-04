@@ -281,8 +281,20 @@ strictly alone. Removal failures report git's own reason rather than a generic e
 commits exist nowhere but this machine is *published* first (`git push -u origin
 <branch>`, never forced), which makes the work verifiably safe and lets it reap on
 the same rule as everything else. It applies only to that one case — never to a
-dirty tree, a live session, or a detached HEAD, which has no branch to publish. If
-the push fails for any reason, the worktree is kept.
+dirty tree, a live session, or a detached HEAD, which has no branch to publish.
+
+When the remote already holds a **diverged** branch of that name — the agent rebased
+locally, or its PR was closed and the remote moved on — that non-forced push can never
+succeed, and "keep" is not a resting state: every later sweep re-runs the same doomed
+push, so the worktree is stuck forever and no session holding it can ever be closed.
+The commits are therefore parked on an unclaimed ref instead,
+`boom/archive/<branch>-<short-sha>`. Nothing is overwritten, no existing branch or PR is
+touched, no history is rewritten, and the local branch keeps its own upstream — the only
+trace is one new remote ref, and the commits are now on a remote, which is all either
+guard was ever asking. Naming the ref after the commit makes it idempotent: a second
+sweep pushes the same SHA to the same ref and git answers *up to date*. A push that fails
+for a reason another name cannot fix (no remote, auth) keeps the worktree and reports
+git's own words.
 
 `--interactive` / `-i` works the kept pile by hand. After the sweep has proved it
 can't clear a worktree, it asks — one at a time, naming the reason and the branch:

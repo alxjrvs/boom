@@ -251,17 +251,22 @@ const reapCommand = buildCommand<
           continue;
         }
         if (willPush) {
-          if (
-            await report.spin(`${name} (push)`, () =>
-              pushBranch(entry.path, entry.branch as string, this.env),
-            )
-          ) {
+          const pushed = await report.spin(`${name} (push)`, () =>
+            pushBranch(entry.path, entry.branch as string, this.env, entry.head),
+          );
+          if (pushed.ok) {
             verdict = "reap";
-            why = `pushed ${entry.branch} to origin`;
+            // An archived push says so: the branch's own name was taken by diverged history,
+            // so the commits live under a ref the sweep invented, and that is worth reading
+            // in the log rather than inferring later from a stray remote branch.
+            why = pushed.archived
+              ? `${entry.branch} diverged from origin — commits parked at origin/${pushed.ref}`
+              : `pushed ${entry.branch} to origin`;
           } else {
-            // A push can fail for reasons a sweep must not paper over (no remote, auth, a
-            // diverged branch of the same name). Keeping is always the safe answer.
-            report.warn(`${name} kept — ${why}; push failed`);
+            // What is left is a push that could not be rescued under any name (no remote,
+            // auth). Keeping is the safe answer — but say why, or the next run's identical
+            // failure is indistinguishable from the last one's.
+            report.warn(`${name} kept — ${why}; push failed: ${pushed.error}`);
             kept++;
             continue;
           }
@@ -287,15 +292,19 @@ const reapCommand = buildCommand<
 
             if (pick === "quit") stopAsking = true;
             else if (pick === "push" && entry.branch) {
-              if (await pushBranch(entry.path, entry.branch, this.env)) {
+              const pushed = await pushBranch(entry.path, entry.branch, this.env, entry.head);
+              if (pushed.ok) {
                 const gone = await removeWorktree(repo, entry.path, this.env, entry.lock !== undefined);
                 if (gone.ok) {
                   reaped++;
-                  report.ok(`${name} reaped — pushed ${entry.branch} to origin; branch kept`);
+                  const where = pushed.archived
+                    ? `${entry.branch} diverged from origin — commits parked at origin/${pushed.ref}`
+                    : `pushed ${entry.branch} to origin`;
+                  report.ok(`${name} reaped — ${where}; branch kept`);
                   continue;
                 }
                 report.warn(`${name} pushed, but not removed — ${gone.error}`);
-              } else report.warn(`${name} kept — ${why}; push failed`);
+              } else report.warn(`${name} kept — ${why}; push failed: ${pushed.error}`);
               kept++;
               continue;
             } else if (pick === "delete") {
