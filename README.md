@@ -281,7 +281,20 @@ every line of them is merged. Worktrees therefore pile up and sessions can't be
 closed. `reap` re-asks the question by **content**, using git's patch-id equivalence,
 and removes a worktree only when it is clean, unlocked (or locked by a dead process),
 and either fully pushed or already merged. It deletes the directory and never the
-branch ref, so nothing it does can lose a commit.
+branch ref, so nothing it does can lose a *commit* — the one thing removal does discard
+is the worktree's stacked-PR topology (below), which `gh stack checkout <n>` re-attaches.
+
+`reap` is **stack-aware**. `gh stack` records its state per worktree, in that worktree's
+own admin dir, and a stack's layers land as *N separate* squash commits — which the
+whole-tree content test can never match, so a fully-merged stack used to be kept forever.
+When a worktree's checked-out branch is a member of its recorded stack, `reap` judges it
+**layer by layer**: removed only when every layer's content is provably in the default
+branch, otherwise skipped with the count of layers still open (the answer to a half-landed
+stack is `gh stack merge`, not a per-worktree question). A worktree that holds stack state
+whose branch is *not* a member — an admin dir left over from earlier work — is judged as an
+ordinary single branch, unpushed-commits gate and all. Either way, `--push` never publishes
+a worktree holding stack state: a stack is published by `gh stack submit`, so pushing one
+layer is at best a no-op and at worst re-creates a branch the merge deliberately deleted.
 
 Its default answer is *keep* — anything it cannot prove safe stays exactly where it
 is, and a removal failure is a warning rather than an error, so a scheduled sweep
@@ -296,8 +309,8 @@ strictly alone. Removal failures report git's own reason rather than a generic e
 commits exist nowhere but this machine is *published* first (`git push -u origin
 <branch>`, never forced), which makes the work verifiably safe and lets it reap on
 the same rule as everything else. It applies only to that one case — never to a
-dirty tree, a live session, or a detached HEAD, which has no branch to publish. If
-the push fails for any reason, the worktree is kept.
+dirty tree, a live session, a detached HEAD (which has no branch to publish), or a
+worktree holding stack state. If the push fails for any reason, the worktree is kept.
 
 `--interactive` / `-i` works the kept pile by hand. After the sweep has proved it
 can't clear a worktree, it asks — one at a time, naming the reason and the branch:
@@ -305,6 +318,11 @@ can't clear a worktree, it asks — one at a time, naming the reason and the bra
 ```
 SU-SRD/rail-top-right — 2 commit(s) not on any remote
   p=push & remove  d=DELETE worktree + branch rail-top-right — loses these commits
+  s=skip (keep it)  q=stop asking
+  choice
+
+boom/audit-remediation — uncommitted changes [stack #112: never-destroy #108 → journal-lock #109 → config-compose #110]
+  d=DELETE worktree + branch config-compose — orphans 2 other stack branch(es) (#108, #109); loses these commits
   s=skip (keep it)  q=stop asking
   choice
 ```
@@ -316,6 +334,12 @@ keeps. `q` stops the questions without stopping the safe cleanup. Only worktrees
 sweep *kept* are ever offered — a live session or an unreadable repo is skipped
 silently, because there the right answer is never a question. A non-TTY is never
 prompted and takes the do-nothing answer, so `-i` is harmless in a launchd timer.
+
+A stacked worktree names its layers in the prompt, and `d` says what it really costs:
+`git branch -D` still drops only the checked-out branch, but once the directory is gone
+the siblings have no worktree, so the sweep can never surface them again. Only a *dirty*
+stacked worktree ever reaches this prompt — a clean one resolves to reap or skip, and
+neither is asked about.
 
 ## Security model
 

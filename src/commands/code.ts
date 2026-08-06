@@ -24,6 +24,8 @@ import {
   linkedWorktrees,
   pushBranch,
   removeWorktree,
+  type StackBranch,
+  type StackState,
 } from "../engine/worktree.ts";
 import { type Choice, choose } from "../lib/confirm.ts";
 import { cleanEnv, hasCommand, runArgvAsync } from "../lib/proc.ts";
@@ -186,6 +188,18 @@ const fetchCommand = buildCommand<{ dryRun?: boolean }, [], BoomContext>({
   },
 });
 
+// A stack that has never been submitted has no number, so it cannot be named by one.
+const stackLabel = (s: StackState): string =>
+  s.number === undefined ? "unsubmitted stack" : `stack #${s.number}`;
+// PR number where there is one, branch name where there isn't — the reader needs whichever
+// handle actually identifies the layer.
+const layerLabel = (b: StackBranch): string => (b.pullRequest ? `#${b.pullRequest.number}` : b.branch);
+// judge()'s stack verdicts already open with the label, so repeating it there is noise. On
+// the non-member path they don't, and naming it is the *only* clue about why --push left a
+// clean, unpushed worktree alone.
+const stackHint = (s: StackState, why: string): string =>
+  ` (${why.startsWith(stackLabel(s)) ? "" : `${stackLabel(s)} — `}publish with \`gh stack submit\`, not --push)`;
+
 // `boom code reap` — remove agent worktrees whose work is already safe, across every
 // repo under the code dir. Claude Code keeps a worktree whenever a HEAD commit exists on
 // no remote *by SHA*, which a squash-merge always violates even though the content
@@ -274,16 +288,31 @@ const reapCommand = buildCommand<
           if (flags.interactive && !flags.dryRun && verdict === "keep" && !stopAsking) {
             const choices: Choice<"push" | "delete" | "skip" | "quit">[] = [];
             if (pushable && entry.branch) choices.push({ key: "p", label: "push & remove", value: "push" });
+            // The stakes of "delete" are larger inside a stack, and the label has to say so.
+            // Deliberate non-change: deleteBranch still drops ONLY entry.branch — widening the
+            // one destructive path to N branches is not this command's call. But once the
+            // worktree is gone the siblings have no checkout, so linkedWorktrees can never
+            // surface them again; the prompt is the only place a human learns that.
+            // This path is now reachable only for a *dirty* stacked worktree: every clean
+            // member resolves to reap or skip, and neither is ever prompted.
+            const siblings = entry.stack?.branches.filter((b) => b.branch !== entry.branch) ?? [];
             choices.push({
               key: "d",
               label: entry.branch
-                ? `DELETE worktree + branch ${entry.branch} — loses these commits`
+                ? siblings.length > 0
+                  ? `DELETE worktree + branch ${entry.branch} — orphans ${siblings.length} other stack branch(es) (${siblings.map(layerLabel).join(", ")}); loses these commits`
+                  : `DELETE worktree + branch ${entry.branch} — loses these commits`
                 : "DELETE worktree — loses these commits",
               value: "delete",
             });
             choices.push({ key: "s", label: "skip (keep it)", value: "skip" });
             choices.push({ key: "q", label: "stop asking", value: "quit" });
-            const pick = choose(`${name} — ${why}`, choices, "skip");
+            const roster = entry.stack
+              ? ` [${stackLabel(entry.stack)}: ${entry.stack.branches
+                  .map((b) => (b.pullRequest ? `${b.branch} #${b.pullRequest.number}` : b.branch))
+                  .join(" → ")}]`
+              : "";
+            const pick = choose(`${name} — ${why}${roster}`, choices, "skip");
 
             if (pick === "quit") stopAsking = true;
             else if (pick === "push" && entry.branch) {
@@ -318,7 +347,14 @@ const reapCommand = buildCommand<
           kept++;
           // "keep" is the guard working as intended (real unmerged work); "skip" is a live
           // session or an unreadable tree. Neither is a problem, so neither is a warning.
-          const hint = pushable && !flags.push ? " (--push would publish and reap it)" : "";
+          // The stack case comes first: `pushable` is now false for anything holding stack
+          // state, so without this the old hint would simply vanish and the user would be
+          // told nothing about why --push declined a clean, unpushed worktree.
+          const hint = entry.stack
+            ? stackHint(entry.stack, why)
+            : pushable && !flags.push
+              ? " (--push would publish and reap it)"
+              : "";
           report.ok(`${name} kept — ${why}${hint}`);
           continue;
         }
@@ -332,7 +368,14 @@ const reapCommand = buildCommand<
           reaped++;
           const ref = entry.branch ? `branch ${entry.branch} kept` : "detached HEAD, commits kept";
           const stale = entry.lock !== undefined ? " (stale lock cleared)" : "";
-          report.ok(`${name} reaped — ${why}${stale}; ${ref}`);
+          // The gh-stack file lives in the worktree's admin dir, so removal takes the branch
+          // chain and its PR numbers with it. That is the one thing reap does which local
+          // state cannot undo — say so, and say what restores it.
+          const topology =
+            entry.stack?.number !== undefined
+              ? `; stack #${entry.stack.number} topology dropped with the directory (gh stack checkout ${entry.stack.number} re-attaches)`
+              : "";
+          report.ok(`${name} reaped — ${why}${stale}; ${ref}${topology}`);
         } else {
           kept++;
           report.warn(`${name} not removed — ${removed.error}`);

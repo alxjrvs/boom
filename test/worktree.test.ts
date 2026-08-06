@@ -3,20 +3,25 @@
 // point of the module is a claim about git's patch-id behaviour under squash-merge —
 // a mocked git would assert nothing.
 import { expect, test } from "bun:test";
-import { realpathSync } from "node:fs";
+import { existsSync, realpathSync, writeFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   defaultRemoteRef,
   deleteBranch,
+  isSquashMerged,
   judge,
+  layersLanded,
   linkedWorktrees,
   lockPid,
+  parseStackState,
   parseWorktreeList,
   pidAlive,
   pushBranch,
+  readStackState,
   removeWorktree,
+  type StackState,
   type WorktreeEntry,
 } from "../src/engine/worktree.ts";
 
@@ -295,4 +300,330 @@ test("judge: with no remote default branch, unpushed commits are always kept", a
   const verdict = await judge(entries[0] as NonNullable<(typeof entries)[0]>, undefined, ENV);
   expect(verdict.verdict).toBe("keep");
   expect(verdict.why).toContain("no remote default branch");
+});
+
+// ---------------------------------------------------------------------------------------
+// Stacked PRs. A `gh stack` worktree holds one layer of an N-PR chain, and every rule above
+// misjudges it: the whole-tree probe can never match an N-way squash (false negative → the
+// worktree is kept forever and `--push` re-publishes branches `delete_branch_on_merge`
+// deleted), while a per-layer probe against a non-ancestor base emits several `-` lines, so
+// a sloppy match turns that into a false positive that reaps live work.
+// ---------------------------------------------------------------------------------------
+
+// The verified real-world shape of a submitted stack (`.git/worktrees/<name>/gh-stack`),
+// trimmed to the fields the parser reads. Four layers chained base → previous head, PRs
+// 108-111, all merged.
+const REAL_STACK_JSON = JSON.stringify({
+  schemaVersion: 1,
+  repository: "github.com:alxjrvs/dotFiles",
+  stacks: [
+    {
+      id: "186114",
+      number: 112,
+      trunk: { branch: "main", head: "04a1ce7f2125bb41cf5ab0f035413722bf9e3167" },
+      branches: [
+        {
+          branch: "op-deny-hardening",
+          head: "de3849bfaf9ac151edc44d08e3df5d3f3b69dc97",
+          base: "04a1ce7f2125bb41cf5ab0f035413722bf9e3167",
+          pullRequest: { number: 108, url: "https://github.com/alxjrvs/dotFiles/pull/108", merged: true },
+        },
+        {
+          branch: "op-pr-review-allowlist",
+          head: "8dea33c2eb7952a8395457c2fdfe2b9cdfd1240d",
+          base: "de3849bfaf9ac151edc44d08e3df5d3f3b69dc97",
+          pullRequest: { number: 109, url: "https://github.com/alxjrvs/dotFiles/pull/109", merged: true },
+        },
+        {
+          branch: "op-sa-expiry",
+          head: "0f4d93bae3f85952ac82804190b5b2708a6ef6b8",
+          base: "8dea33c2eb7952a8395457c2fdfe2b9cdfd1240d",
+          pullRequest: { number: 110, url: "https://github.com/alxjrvs/dotFiles/pull/110", merged: true },
+        },
+        {
+          branch: "op-docs-drift",
+          head: "73fb8d9a6c60264a871f86f44d6c30e956c6e7ae",
+          base: "0f4d93bae3f85952ac82804190b5b2708a6ef6b8",
+          pullRequest: { number: 111, url: "https://github.com/alxjrvs/dotFiles/pull/111", merged: true },
+        },
+      ],
+    },
+  ],
+});
+
+test("parseStackState: reads the real gh-stack shape — number, layer chain, PR numbers", () => {
+  const s = parseStackState(REAL_STACK_JSON, "op-sa-expiry");
+  expect(s?.number).toBe(112);
+  expect(s?.branches).toHaveLength(4);
+  // The chain is what makes a per-layer probe possible: each layer's base is the one below.
+  expect(s?.branches[1]?.base).toBe(s?.branches[0]?.head as string);
+  expect(s?.branches[3]?.pullRequest?.number).toBe(111);
+});
+
+// A stack that has never been submitted carries neither a number nor per-branch heads —
+// verified against a real local-only stack file. Requiring `head` would drop every layer,
+// leaving an empty roster that reads as "all layers landed".
+test("parseStackState: an un-submitted stack (no number, no heads) still parses as a stack", () => {
+  const s = parseStackState(
+    JSON.stringify({
+      schemaVersion: 1,
+      stacks: [{ trunk: { branch: "main", head: "aaa" }, branches: [{ branch: "one", base: "aaa" }] }],
+    }),
+    "one",
+  );
+  expect(s?.number).toBeUndefined();
+  expect(s?.branches).toHaveLength(1);
+  expect(s?.branches[0]?.head).toBeUndefined();
+});
+
+test("parseStackState: degrades to undefined rather than half a stack", () => {
+  expect(parseStackState("not json")).toBeUndefined();
+  expect(parseStackState('{"stacks":[]}')).toBeUndefined();
+  // A schemaVersion bump that retypes a field must not yield a short roster — a stack whose
+  // surviving layers all happen to be landed would read as fully landed.
+  expect(parseStackState('{"stacks":[{"number":1,"branches":[{"branch":7}]}]}')).toBeUndefined();
+});
+
+test("parseStackState: picks the stack naming the branch; falls back only when there is exactly one", () => {
+  const two = JSON.stringify({
+    stacks: [
+      { number: 1, branches: [{ branch: "a1", base: "x" }] },
+      { number: 2, branches: [{ branch: "b1", base: "y" }] },
+    ],
+  });
+  expect(parseStackState(two, "b1")?.number).toBe(2);
+  expect(parseStackState(two, "unrelated")).toBeUndefined();
+  // One stack in the file: hand it back even for a stranger. That is push suppression only —
+  // judge() refuses to draw a verdict from a stack the branch is not a member of.
+  expect(parseStackState(REAL_STACK_JSON, "unrelated")?.number).toBe(112);
+  expect(parseStackState(REAL_STACK_JSON, undefined)?.number).toBe(112);
+});
+
+// gh-stack state lives at $GIT_DIR/gh-stack, which for a LINKED worktree is the per-worktree
+// admin dir — not the repo-wide `.git/gh-stack` it is widely assumed to be. The existence
+// assertion is the point: if git ever relocates the admin dir, these tests must fail loudly
+// rather than plant a file nothing reads.
+function plantStack(repo: string, worktreeName: string, doc: unknown): void {
+  const admin = join(repo, ".git", "worktrees", worktreeName);
+  expect(existsSync(admin)).toBe(true);
+  writeFileSync(join(admin, "gh-stack"), JSON.stringify(doc, null, 2));
+}
+
+test("readStackState: reads the per-worktree admin dir, and is undefined where there is no file", async () => {
+  const { repo, wt } = await repoWithSquashMergedWorktree();
+  expect(await readStackState(wt, "feature", ENV)).toBeUndefined();
+  plantStack(repo, "feature", {
+    schemaVersion: 1,
+    stacks: [{ number: 7, branches: [{ branch: "feature", base: "x" }] }],
+  });
+  expect((await readStackState(wt, "feature", ENV))?.number).toBe(7);
+  // The primary checkout has its own $GIT_DIR and no gh-stack file of its own.
+  expect(await readStackState(repo, "main", ENV)).toBeUndefined();
+});
+
+test("linkedWorktrees: surfaces the stack state on the entry, for every consumer at once", async () => {
+  const { repo } = await repoWithSquashMergedWorktree();
+  expect((await linkedWorktrees(repo, ENV))[0]?.stack).toBeUndefined();
+  plantStack(repo, "feature", {
+    schemaVersion: 1,
+    stacks: [{ number: 9, branches: [{ branch: "feature", base: "x" }] }],
+  });
+  expect((await linkedWorktrees(repo, ENV))[0]?.stack?.number).toBe(9);
+});
+
+// A four-layer stack in a linked worktree checked out on the TOP layer, with the bottom
+// `landedLayers` layers squash-merged into main as N SEPARATE commits — exactly how
+// `gh stack merge --squash` lands one. Each layer touches its own file so the successive
+// squash merges never conflict.
+async function repoWithMergedStackWorktree(landedLayers: number): Promise<{
+  repo: string;
+  wt: string;
+  layers: string[];
+  heads: Record<string, string>;
+  seed: string;
+  stackDoc: (branches?: string[]) => unknown;
+}> {
+  const base = await mkdtemp(join(tmpdir(), "boom-stack-"));
+  const origin = join(base, "origin.git");
+  const repo = join(base, "repo");
+  git(base, "init", "--bare", "--initial-branch=main", origin);
+  git(base, "clone", "--quiet", origin, repo);
+
+  await Bun.write(join(repo, "seed.txt"), "seed\n");
+  git(repo, "add", "-A");
+  git(repo, "commit", "-qm", "seed");
+  git(repo, "push", "-q", "-u", "origin", "main");
+  const seed = git(repo, "rev-parse", "HEAD");
+
+  const layers = ["l1", "l2", "l3", "l4"];
+  for (const l of layers) {
+    git(repo, "checkout", "-q", "-b", l);
+    await Bun.write(join(repo, `${l}.txt`), `${l}\n`);
+    git(repo, "add", "-A");
+    git(repo, "commit", "-qm", `${l} work`);
+  }
+  git(repo, "checkout", "-q", "main");
+  const heads: Record<string, string> = {};
+  for (const l of layers) heads[l] = git(repo, "rev-parse", l);
+
+  const wt = join(repo, ".claude", "worktrees", "l4");
+  git(repo, "worktree", "add", "-q", wt, "l4");
+
+  for (let i = 0; i < landedLayers; i++) {
+    git(repo, "merge", "--squash", layers[i] as string);
+    git(repo, "commit", "-qm", `${layers[i]} (#${101 + i})`);
+  }
+  git(repo, "push", "-q", "origin", "main");
+  git(repo, "fetch", "-q", "origin");
+
+  const stackDoc = (branches: string[] = layers): unknown => ({
+    schemaVersion: 1,
+    repository: "github.com:test/test",
+    stacks: [
+      {
+        id: "1",
+        number: 112,
+        trunk: { branch: "main", head: seed },
+        branches: branches.map((l, i) => ({
+          branch: l,
+          head: heads[l],
+          base: i === 0 ? seed : (heads[branches[i - 1] as string] as string),
+          pullRequest: {
+            number: 101 + i,
+            url: `https://example.invalid/pull/${101 + i}`,
+            merged: i < landedLayers,
+          },
+        })),
+      },
+    ],
+  });
+
+  return { repo: realpathSync(repo), wt: realpathSync(wt), layers, heads, seed, stackDoc };
+}
+
+const only = async (repo: string): Promise<WorktreeEntry> =>
+  (await linkedWorktrees(repo, ENV))[0] as WorktreeEntry;
+
+test("layersLanded: an N-way squash is invisible to the whole-tree probe but visible layer by layer", async () => {
+  const f = await repoWithMergedStackWorktree(4);
+  plantStack(f.repo, "l4", f.stackDoc());
+
+  // The false NEGATIVE this layer fixes: every line of every layer is on main, yet HEAD's
+  // whole tree matches no single squash commit's patch-id, so the old rule kept it forever —
+  // and `--push` then re-published branches the merge had deliberately deleted.
+  expect(await isSquashMerged(f.wt, "origin/main", ENV)).toBe(false);
+
+  const stack = parseStackState(JSON.stringify(f.stackDoc()), "l4") as StackState;
+  expect(await layersLanded(f.wt, stack, "origin/main", ENV)).toEqual({ landed: 4, total: 4 });
+
+  const v = await judge(await only(f.repo), "origin/main", ENV);
+  expect(v.verdict).toBe("reap");
+  expect(v.why).toContain("stack");
+  expect(v.why).toContain("4 layer");
+});
+
+// ⚠️ The false POSITIVE guard. `git cherry <upstream> <head>` lists every commit in
+// merge-base(upstream,head)..head. A per-layer probe parents on a sibling layer's head, which
+// is NOT an ancestor of the target, so the range also contains every already-landed layer
+// beneath it — each printed as `-`. `.some(l => l.startsWith("-"))` would call the unmerged
+// top layer merged and reap live work.
+test("layersLanded: matches the probe's own cherry line, not any line", async () => {
+  const f = await repoWithMergedStackWorktree(2);
+  const stack = parseStackState(JSON.stringify(f.stackDoc(["l1", "l2", "l3"])), "l3") as StackState;
+  expect(await layersLanded(f.wt, stack, "origin/main", ENV)).toEqual({ landed: 2, total: 3 });
+
+  // Pin the mechanism: build l3's probe exactly as layersLanded does and show the output the
+  // old predicate would have matched.
+  const probe = git(
+    f.wt,
+    "commit-tree",
+    git(f.wt, "rev-parse", "l3^{tree}"),
+    "-p",
+    f.heads.l2 as string,
+    "-m",
+    "boom-reap-probe",
+  );
+  const cherry = git(f.wt, "cherry", "origin/main", probe).split("\n");
+  expect(cherry.length).toBeGreaterThan(1);
+  expect(cherry.some((l) => l.startsWith("-"))).toBe(true);
+  // …and none of those `-` lines is the probe: l3 is genuinely unmerged.
+  expect(cherry.some((l) => l.startsWith("- ") && l.slice(2).trim() === probe)).toBe(false);
+});
+
+// The live outward-facing bug: `code reap --push` runs on a daily launchd timer, and a stack
+// whose PRs are still open used to read as an ordinary keep with `pushable === true`.
+test("judge: a stacked worktree is never pushable — --push must not publish a stack layer", async () => {
+  const f = await repoWithMergedStackWorktree(3);
+  plantStack(f.repo, "l4", f.stackDoc());
+
+  const v = await judge(await only(f.repo), "origin/main", ENV);
+  expect(v.verdict).toBe("skip");
+  expect(v.why).toMatch(/stack #\d+ — 1 of 4 layers open/);
+  // Never set on the stack arm: `code reap --push` reads `pushable === true`.
+  expect(v.pushable).toBeUndefined();
+});
+
+// Ordering regression. The stack arm sits ABOVE the `rev-list --count HEAD --not --remotes`
+// gate on purpose: a stack whose every branch is pushed would otherwise reap on "every commit
+// is on a remote" while all four PRs are still open — and removal takes the gh-stack file too.
+test("judge: a fully pushed but unmerged stack is skipped, not reaped", async () => {
+  const f = await repoWithMergedStackWorktree(0);
+  for (const l of f.layers) git(f.repo, "push", "-q", "-u", "origin", l);
+  plantStack(f.repo, "l4", f.stackDoc());
+  expect(git(f.wt, "rev-list", "--count", "HEAD", "--not", "--remotes")).toBe("0");
+
+  const v = await judge(await only(f.repo), "origin/main", ENV);
+  expect(v.verdict).toBe("skip");
+  expect(v.why).toMatch(/4 of 4 layers open/);
+});
+
+// The bottom layer takes its parent from the live merge-base, not the recorded base: a
+// cascading `gh stack sync` rebase supersedes the recorded value the moment trunk moves.
+test("layersLanded: the bottom layer survives a stale recorded base", async () => {
+  const f = await repoWithMergedStackWorktree(4);
+  const doc = f.stackDoc() as { stacks: { branches: { base: string }[] }[] };
+  (doc.stacks[0]?.branches[0] as { base: string }).base = "0".repeat(40);
+  const stack = parseStackState(JSON.stringify(doc), "l4") as StackState;
+  expect(await layersLanded(f.wt, stack, "origin/main", ENV)).toEqual({ landed: 4, total: 4 });
+});
+
+test("judge: a stack with no remote default branch to compare is skipped, never reaped", async () => {
+  const f = await repoWithMergedStackWorktree(4);
+  plantStack(f.repo, "l4", f.stackDoc());
+  const v = await judge(await only(f.repo), undefined, ENV);
+  expect(v.verdict).toBe("skip");
+  expect(v.why).toContain("no remote default branch");
+  expect(v.pushable).toBeUndefined();
+});
+
+// ⚠️ The membership gate. parseStackState's single-stack fallback hands back a stack recorded
+// by EARLIER work in this admin dir even when HEAD has moved to an unrelated branch. Judging
+// that entry by layersLanded() would never look at HEAD at all — and because the stack arm
+// sits above the rev-list gate it would bypass the unpushed-commits protection, reaping a
+// clean worktree whose commits exist only on this machine, unattended, on the daily timer.
+test("judge: an unrelated branch with local-only commits is not reaped because a planted stack landed", async () => {
+  const f = await repoWithMergedStackWorktree(4);
+  plantStack(f.repo, "l4", f.stackDoc());
+  git(f.wt, "checkout", "-q", "-b", "unrelated");
+  await Bun.write(join(f.wt, "only-here.txt"), "exists nowhere else\n");
+  git(f.wt, "add", "-A");
+  git(f.wt, "commit", "-qm", "work that exists on no remote");
+
+  const v = await judge(await only(f.repo), "origin/main", ENV);
+  expect(v.verdict).toBe("keep");
+  expect(v.why).toMatch(/commit\(s\) not on any remote/);
+  // The fallthrough return carries the field, and it is false — the stack still suppresses
+  // auto-push. `not.toBe(true)` is the exact predicate `code reap --push` applies.
+  expect(v.pushable).not.toBe(true);
+});
+
+test("judge: a detached HEAD in a stack-bearing worktree is kept, not reaped", async () => {
+  const f = await repoWithMergedStackWorktree(4);
+  plantStack(f.repo, "l4", f.stackDoc());
+  git(f.wt, "checkout", "-q", "--detach");
+
+  const v = await judge(await only(f.repo), "origin/main", ENV);
+  expect(v.verdict).toBe("keep");
+  expect(v.why).toMatch(/commit\(s\) not on any remote/);
+  expect(v.pushable).not.toBe(true);
 });
