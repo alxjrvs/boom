@@ -9,12 +9,18 @@ import { backupTo } from "../lib/fs.ts";
 import { openDb, withDb } from "./db.ts";
 import { backupsDir, type Env } from "./state.ts";
 
-// How to reverse one mutation: remove what we created, restore a backed-up file, or — for the
-// one non-file effect — re-apply a macOS default's prior value (`prior: null` means the key
-// was unset, so rollback deletes it). Timer plists roll back as ordinary file writes (the
-// next reconcile re-settles their launchctl state), so they need no dedicated kind.
+// How to reverse one mutation: remove what we created, rmdir a directory we created, restore a
+// backed-up file, or — for the one non-file effect — re-apply a macOS default's prior value
+// (`prior: null` means the key was unset, so rollback deletes it). Timer plists roll back as
+// ordinary file writes (the next reconcile re-settles their launchctl state), so they need no
+// dedicated kind.
+//
+// `rmdir` exists because reversing a `mkdir` with `rm -rf` is the one undo that can destroy data
+// boom never touched: by rollback time the user may have filled the directory boom created.
+// rmdir(2) refuses a non-empty directory, so the failure mode is a report, not a deletion.
 export type UndoToken =
   | { kind: "remove" }
+  | { kind: "rmdir" }
   | { kind: "restore"; from: string }
   | { kind: "osx"; domain: string; key: string; type: string; prior: string | null };
 
@@ -145,9 +151,77 @@ export async function pruneRuns(env: Env, keep = 10): Promise<void> {
       delSides.run(id);
       delRun.run(id);
     }
+    // Record how far history was destroyed, in the same callback that destroys it. Deleting the
+    // rows erases the only evidence they existed, so `rollback --to` could not otherwise tell
+    // "there was never a run after this checkpoint" from "the runs after it are unreversible".
+    // The conditional upsert keeps the horizon monotonic (run ids sort chronologically), so a
+    // later prune of *older* rows can never walk it backwards.
+    const newest = drop.at(-1);
+    if (newest !== undefined)
+      db.run(
+        "INSERT INTO meta (key, value) VALUES ('prune_horizon', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value WHERE excluded.value > meta.value",
+        [newest],
+      );
     return drop;
   });
   for (const id of stale) await rm(`${backupsDir(env)}/${id}`, { recursive: true, force: true });
+}
+
+// The newest run id `pruneRuns` has ever deleted, or undefined if nothing was ever pruned.
+// `rollback --to <checkpoint>` reads it to distinguish absent history from destroyed history:
+// a checkpoint older than the horizon can only be rewound partially, and saying so is the
+// difference between a best-effort rewind and a silent one.
+export async function pruneHorizon(env: Env): Promise<string | undefined> {
+  return withDb(env, (db) => {
+    const row = db.query("SELECT value FROM meta WHERE key = 'prune_horizon'").get() as
+      | { value: string }
+      | undefined;
+    return row?.value;
+  });
+}
+
+// The `meta` key under which a macOS default's true pre-boom prior is stashed. The composite
+// `"<domain> <key>"` mirrors the `disp` string osx.ts journals as `ops.dst`, so both lookups
+// key the same way — change that display format and BOTH break together, not silently apart.
+const osxPriorKey = (domain: string, key: string): string => `osx:${domain} ${key}`;
+
+// Stash the pre-boom prior for a macOS default, once and only once. Insert-if-absent is the
+// whole point: the second time boom rewrites the same key, `undo.prior` is boom's OWN previous
+// value, and overwriting the stash with it would make uninstall "restore" a value the user
+// never set. Unlike an `ops` row this survives pruning, which is what makes uninstall correct
+// on a machine that has synced more than `keep` times since the key was first written.
+export async function stashOsxPrior(env: Env, undo: Extract<UndoToken, { kind: "osx" }>): Promise<void> {
+  withDb(env, (db) =>
+    db.run("INSERT OR IGNORE INTO meta (key, value) VALUES (?, ?)", [
+      osxPriorKey(undo.domain, undo.key),
+      JSON.stringify(undo),
+    ]),
+  );
+}
+
+// What the machine had for `<domain> <key>` before boom ever wrote it, for `boom uninstall`.
+// The durable `meta` stash answers first; the `ops` scan is the fallback for keys first written
+// by a boom older than the stash. That fallback takes the EARLIEST row (`ops.id` is a global
+// AUTOINCREMENT, so `ORDER BY id` is chronological across runs) — the latest row's `prior` is
+// merely boom's own previous value. Both can legitimately come back empty (pruning kept 10
+// runs and the stash postdates the write), and the caller must skip rather than guess.
+export async function firstOsxUndo(
+  env: Env,
+  domain: string,
+  key: string,
+): Promise<Extract<UndoToken, { kind: "osx" }> | undefined> {
+  return withDb(env, (db) => {
+    const stashed = db.query("SELECT value FROM meta WHERE key = ?").get(osxPriorKey(domain, key)) as
+      | { value: string }
+      | undefined;
+    if (stashed) return JSON.parse(stashed.value) as Extract<UndoToken, { kind: "osx" }>;
+    const row = db
+      .query("SELECT undo FROM ops WHERE t = 'done' AND op = 'osx' AND dst = ? ORDER BY id LIMIT 1")
+      .get(`${domain} ${key}`) as { undo: string } | undefined;
+    if (!row) return undefined;
+    const undo = JSON.parse(row.undo) as UndoToken;
+    return undo.kind === "osx" ? undo : undefined;
+  });
 }
 
 // Read a run's `done` + `side` records (the most recent run if `runId` is omitted). done

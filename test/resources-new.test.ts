@@ -8,8 +8,10 @@ import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/pr
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BoomContext } from "../src/context.ts";
+import { pruneRuns } from "../src/engine/journal.ts";
 import { reconcile } from "../src/engine/reconcile.ts";
 import { rollback } from "../src/engine/rollback.ts";
+import type { Env } from "../src/engine/state.ts";
 import { pathExists } from "../src/lib/fs.ts";
 
 // Write an executable fake binary into `dir` and return nothing — the caller prepends `dir`
@@ -78,6 +80,36 @@ test("dir: an un-owned dir is left on uninstall; a non-empty remove_on_uninstall
   expect(await reconcile("uninstall", sb.ctx, {})).toBe(0);
   expect(await pathExists(dir)).toBe(true); // not empty → kept
   expect(sb.out()).toContain("not removed — not empty"); // shows under its band in the dense default
+});
+
+// The mkdir undo is `rmdir`, not `rm -rf` — reversing a directory boom created must never take
+// data boom never touched with it. These three pin the arm's whole ladder: kept, removed, gone.
+
+test("dir: rollback leaves a directory the user has since filled", async () => {
+  const sb = await sandbox(`[[section]]\nname = "d"\ndir = [{ path = "~/Screenshots" }]\n`);
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  const dir = join(sb.home, "Screenshots");
+  await writeFile(join(dir, "shot.png"), "user data\n");
+  expect(await rollback(sb.ctx)).toBe(0);
+  expect(await pathExists(dir)).toBe(true);
+  expect(await readFile(join(dir, "shot.png"), "utf8")).toBe("user data\n"); // an rm -rf would have eaten this
+  expect(sb.out()).toContain("left in place — not empty");
+});
+
+test("dir: rollback removes a directory that is still empty", async () => {
+  const sb = await sandbox(`[[section]]\nname = "d"\ndir = [{ path = "~/Screenshots" }]\n`);
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  expect(await rollback(sb.ctx)).toBe(0);
+  expect(await pathExists(join(sb.home, "Screenshots"))).toBe(false);
+});
+
+test("dir: rollback tolerates a directory the user already deleted", async () => {
+  const sb = await sandbox(`[[section]]\nname = "d"\ndir = [{ path = "~/Screenshots" }]\n`);
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  await rm(join(sb.home, "Screenshots"), { recursive: true, force: true }); // tidied up by hand
+  // Already in the post-rollback state → reversed, not failed. A bare ENOENT rethrow would exit 1.
+  expect(await rollback(sb.ctx)).toBe(0);
+  expect(sb.out()).toContain("already gone");
 });
 
 test("dir: verify fails when the directory is missing", async () => {
@@ -502,11 +534,14 @@ test("osx_default: sync journals the prior value (type inferred) and rollback re
   await fakeBin(
     bin,
     "defaults",
+    // `delete` of an absent key exits 1, faithfully: real `defaults` prints "Domain (…) not
+    // found. / Defaults have not been changed." and exits 1, and a fake that exits 0 there
+    // hides every already-reversed/already-torn-down path from these tests.
     `STORE="${store}"; LOG="${writeLog}"; touch "$STORE"
 case "$1" in
   read) line=$(grep "^$2|$3=" "$STORE" | tail -1); [ -n "$line" ] || exit 1; echo "\${line#*=}";;
   write) echo "$@" >> "$LOG"; grep -v "^$2|$3=" "$STORE" > "$STORE.tmp" 2>/dev/null; mv "$STORE.tmp" "$STORE"; echo "$2|$3=$5" >> "$STORE";;
-  delete) grep -v "^$2|$3=" "$STORE" > "$STORE.tmp" 2>/dev/null; mv "$STORE.tmp" "$STORE";;
+  delete) grep -q "^$2|$3=" "$STORE" || exit 1; grep -v "^$2|$3=" "$STORE" > "$STORE.tmp" 2>/dev/null; mv "$STORE.tmp" "$STORE";;
 esac
 exit 0
 `,
@@ -523,6 +558,172 @@ exit 0
   // rollback re-applies the prior value from the journaled undo token.
   expect(await rollback(sb.ctx)).toBe(0);
   expect(await readFile(store, "utf8")).toContain("tilesize=64");
+});
+
+// ----------------------------------------------------------------- osx_default uninstall
+
+// The stateful fake `defaults` the uninstall tests drive, plus a `killall` stub so finalizeOsx
+// can't touch the runner's real Dock/Finder. `argvLog` records EVERY invocation (not just
+// writes), which is what lets the off-platform test assert the resource never shelled out.
+interface OsxRig {
+  readonly sb: Sandbox;
+  readonly store: string;
+  readonly argvLog: string;
+  /** The stored value for a key, or "" when unset. */
+  value(domain: string, key: string): Promise<string>;
+  /** Every `defaults …` argv line recorded so far. */
+  calls(): Promise<string>;
+}
+
+async function osxRig(boomfile: string, extraEnv: Record<string, string> = {}): Promise<OsxRig> {
+  const sb = await sandbox(boomfile, { BOOM_OS: "darwin", ...extraEnv });
+  const bin = join(sb.repo, ".fakebin");
+  const store = join(sb.repo, "defaults.store");
+  const argvLog = join(sb.repo, "defaults-argv.log");
+  await writeFile(store, "");
+  await fakeBin(
+    bin,
+    "defaults",
+    // See the fake above: `delete` of an absent key exits 1, as the real tool does.
+    `STORE="${store}"; LOG="${argvLog}"; touch "$STORE"; echo "$@" >> "$LOG"
+case "$1" in
+  read) line=$(grep "^$2|$3=" "$STORE" | tail -1); [ -n "$line" ] || exit 1; echo "\${line#*=}";;
+  write) grep -v "^$2|$3=" "$STORE" > "$STORE.tmp" 2>/dev/null; mv "$STORE.tmp" "$STORE"; echo "$2|$3=$5" >> "$STORE";;
+  delete) grep -q "^$2|$3=" "$STORE" || exit 1; grep -v "^$2|$3=" "$STORE" > "$STORE.tmp" 2>/dev/null; mv "$STORE.tmp" "$STORE";;
+esac
+exit 0
+`,
+  );
+  await fakeBin(bin, "killall", "exit 0\n");
+  const env = sb.ctx.env as Record<string, string | undefined>;
+  env.PATH = `${bin}:${process.env.PATH ?? ""}`;
+  const value = async (domain: string, key: string): Promise<string> => {
+    const line = (await readFile(store, "utf8"))
+      .split("\n")
+      .filter((l) => l.startsWith(`${domain}|${key}=`))
+      .at(-1);
+    return line ? (line.split("=")[1] ?? "") : "";
+  };
+  const calls = async (): Promise<string> => ((await pathExists(argvLog)) ? readFile(argvLog, "utf8") : "");
+  return { sb, store, argvLog, value, calls };
+}
+
+const DOCK_TWO =
+  `[[section]]\nname = "O"\nosx_default = [` +
+  `{ domain = "com.test.dock", key = "tilesize", value = 48 },` +
+  `{ domain = "com.test.finder", key = "ShowPathbar", value = 1 }]\n`;
+
+test("osx_default: uninstall restores the prior value and deletes a key boom introduced", async () => {
+  const rig = await osxRig(DOCK_TWO);
+  await writeFile(rig.store, "com.test.dock|tilesize=64\n"); // tilesize pre-existed; ShowPathbar did not
+
+  expect(await reconcile("sync", rig.sb.ctx, {})).toBe(0);
+  expect(await rig.value("com.test.dock", "tilesize")).toBe("48");
+  expect(await rig.value("com.test.finder", "ShowPathbar")).toBe("1");
+
+  // Uninstall must leave macOS as it found it: the user's 64 back, and the key boom introduced gone.
+  expect(await reconcile("uninstall", rig.sb.ctx, {})).toBe(0);
+  expect(await rig.value("com.test.dock", "tilesize")).toBe("64");
+  expect(await rig.value("com.test.finder", "ShowPathbar")).toBe("");
+  expect(await rig.calls()).toContain("delete com.test.finder ShowPathbar");
+});
+
+test("osx_default: uninstall restores the FIRST prior, not boom's own last value", async () => {
+  const rig = await osxRig(
+    `[[section]]\nname = "O"\nosx_default = [{ domain = "com.test.dock", key = "tilesize", value = 48 }]\n`,
+  );
+  await writeFile(rig.store, "com.test.dock|tilesize=64\n");
+  expect(await reconcile("sync", rig.sb.ctx, {})).toBe(0);
+  // The declared value changes: run 2's journaled `prior` is 48 — boom's OWN v1, not the user's 64.
+  await writeFile(
+    join(rig.sb.repo, "boomfile.toml"),
+    `[[section]]\nname = "O"\nosx_default = [{ domain = "com.test.dock", key = "tilesize", value = 36 }]\n`,
+  );
+  expect(await reconcile("sync", rig.sb.ctx, {})).toBe(0);
+  expect(await rig.value("com.test.dock", "tilesize")).toBe("36");
+
+  expect(await reconcile("uninstall", rig.sb.ctx, {})).toBe(0);
+  expect(await rig.value("com.test.dock", "tilesize")).toBe("64"); // 48 would mean the latest row won
+});
+
+test("osx_default: uninstall restores the true prior even after the first run was pruned", async () => {
+  const rig = await osxRig(
+    `[[section]]\nname = "O"\nosx_default = [{ domain = "com.test.dock", key = "tilesize", value = 48 }]\n`,
+  );
+  await writeFile(rig.store, "com.test.dock|tilesize=64\n");
+  expect(await reconcile("sync", rig.sb.ctx, {})).toBe(0);
+  await writeFile(
+    join(rig.sb.repo, "boomfile.toml"),
+    `[[section]]\nname = "O"\nosx_default = [{ domain = "com.test.dock", key = "tilesize", value = 36 }]\n`,
+  );
+  expect(await reconcile("sync", rig.sb.ctx, {})).toBe(0);
+
+  // Drop everything but the newest run: the only surviving `ops` row carries prior=48 (boom's
+  // own v1). Only the durable `meta` stash still knows the machine's pre-boom 64.
+  await pruneRuns(rig.sb.ctx.env as Env, 1);
+  expect(await reconcile("uninstall", rig.sb.ctx, {})).toBe(0);
+  expect(await rig.value("com.test.dock", "tilesize")).toBe("64");
+});
+
+// The stash that makes `firstOsxUndo` durable is never invalidated by an uninstall, so the
+// delete is re-attempted on every later run — and real `defaults delete` exits 1 on a key that
+// is already gone. Teardown is idempotent everywhere else in the engine; it has to be here too,
+// or the ordinary `uninstall` → `uninstall` (and `rollback` → `uninstall`) sequence exits 1.
+test("osx_default: uninstall is idempotent — a re-deleted key is already-unset, not a failure", async () => {
+  const rig = await osxRig(DOCK_TWO);
+  await writeFile(rig.store, "com.test.dock|tilesize=64\n"); // ShowPathbar is boom's own
+
+  expect(await reconcile("sync", rig.sb.ctx, {})).toBe(0);
+  expect(await reconcile("uninstall", rig.sb.ctx, {})).toBe(0);
+  expect(await rig.value("com.test.finder", "ShowPathbar")).toBe("");
+
+  expect(await reconcile("uninstall", rig.sb.ctx, { verbose: true })).toBe(0);
+  expect(rig.sb.out()).toContain("com.test.finder ShowPathbar already unset");
+  expect(await rig.value("com.test.dock", "tilesize")).toBe("64"); // and the restore still holds
+});
+
+// Same hazard on the rollback path: reversing a run that introduced a key must stay green when
+// the key is already gone (rolled back twice, or the user tidied it away first).
+test("osx_default: rollback of a key boom introduced is clean when the key is already gone", async () => {
+  const rig = await osxRig(
+    `[[section]]\nname = "O"\nosx_default = [{ domain = "com.test.finder", key = "ShowPathbar", value = 1 }]\n`,
+  );
+  expect(await reconcile("sync", rig.sb.ctx, {})).toBe(0);
+  expect(await rig.value("com.test.finder", "ShowPathbar")).toBe("1");
+
+  await writeFile(rig.store, ""); // cleared behind boom's back
+  expect(await rollback(rig.sb.ctx)).toBe(0);
+  expect(rig.sb.out()).toContain("com.test.finder ShowPathbar already gone");
+});
+
+test("osx_default: uninstall with no journal record leaves the key alone", async () => {
+  const rig = await osxRig(
+    `[[section]]\nname = "O"\nosx_default = [{ domain = "com.test.dock", key = "tilesize", value = 48 }]\n`,
+  );
+  await writeFile(rig.store, "com.test.dock|tilesize=64\n"); // never synced → boom has no record
+
+  expect(await reconcile("uninstall", rig.sb.ctx, { verbose: true })).toBe(0);
+  expect(rig.sb.out()).toContain("no journaled prior");
+  expect(await rig.value("com.test.dock", "tilesize")).toBe("64"); // untouched, not deleted
+  expect(await rig.calls()).toBe(""); // and boom never shelled out at all
+});
+
+test("osx_default: uninstall --dry-run changes nothing and says what it would do", async () => {
+  const rig = await osxRig(DOCK_TWO);
+  await writeFile(rig.store, "com.test.dock|tilesize=64\n");
+  expect(await reconcile("sync", rig.sb.ctx, {})).toBe(0);
+  const before = await readFile(rig.store, "utf8");
+
+  expect(await reconcile("uninstall", rig.sb.ctx, { dryRun: true })).toBe(0);
+  expect(await readFile(rig.store, "utf8")).toBe(before);
+  expect(rig.sb.out()).toContain("would restore com.test.dock tilesize");
+  expect(rig.sb.out()).toContain("would delete com.test.finder ShowPathbar");
+});
+
+test("osx_default: uninstall is a no-op off darwin", async () => {
+  const rig = await osxRig(DOCK_TWO, { BOOM_OS: "linux" });
+  expect(await reconcile("uninstall", rig.sb.ctx, { verbose: true })).toBe(0);
+  expect(await rig.calls()).toBe(""); // OS gate short-circuits before any `defaults` invocation
 });
 
 // ------------------------------------------------------------------------- tmpl ([vars])

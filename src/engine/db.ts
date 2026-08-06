@@ -35,6 +35,11 @@ export function openDb(env: Env): Database {
   db.run(
     "CREATE TABLE IF NOT EXISTS sides (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, op TEXT NOT NULL, label TEXT NOT NULL)",
   );
+  // Facts about history that must outlive the rows they describe: how far pruning has destroyed
+  // (`prune_horizon`) and each macOS default's true pre-boom prior (`osx:<domain> <key>`). Both
+  // answer questions a caller asks precisely *because* the `ops` rows are gone, so they can't
+  // live in `ops`. Run-scoped data does not belong here — that's what `ops`/`sides` are for.
+  db.run("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
   return db;
 }
 

@@ -142,7 +142,9 @@ Resources:
 - `osx_default = [{ domain, key, value, type? }]` — a `defaults write`; `type` is inferred
   from the TOML value (`bool`/`int`/`float`/`string`) and only stated to override an edge
   case. The prior value is journaled, so `boom rollback` restores it (or deletes a key boom
-  introduced)
+  introduced). `boom uninstall` does the same from the recorded *first* prior — the value the
+  machine had before boom ever wrote the key — and skips the key untouched when no record
+  survives retention, since deleting a default boom may not have introduced is unrecoverable
 - `launchd = [{ src, dst? }]` — link a macOS LaunchAgent plist into
   `~/Library/LaunchAgents` and own its launchctl lifecycle (`load -w` on sync, `unload` on
   uninstall); darwin-only, `dst` defaults to `~/Library/LaunchAgents/<basename(src)>`
@@ -260,7 +262,11 @@ tree) rather than opening a new one. Mutating runs also
 **back up** any displaced file under `…/backups/<run-id>/`. `boom rollback` replays a run's
 `done` rows in reverse (remove created links, restore backups, re-apply a macOS default's
 prior value) — like a Mother Box, it remembers everything and can put it back; `--dry-run`
-previews the replay. The manifest
+previews the replay. It never claims an undo it did not perform: a directory boom created is
+reversed with `rmdir` (one the user has since filled is left in place and reported, never
+recursively deleted), and a `defaults` restore that exits nonzero is a reported failure, not
+a green line. `boom rollback --to <checkpoint>` exits 2 with a warning when the journal was
+pruned past the checkpoint, so a partial rewind is never mistaken for a complete one. The manifest
 drives orphan reaping (verify warns; sync reaps), and a legacy TSV manifest is
 imported once on upgrade. Breadcrumbs (`config`, `code`) record the config repo (path +
 remote) and code dir.
