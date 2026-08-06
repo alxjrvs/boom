@@ -175,13 +175,19 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
     return finish();
   }
 
+  // `mutating` is narrower than "changes the machine": it also gates the journal, the backup
+  // tree and the askpass shim, none of which any verb but sync opens. The LOCK is a different
+  // question — who writes — so it gets its own predicate. An unlocked `uninstall` racing a
+  // scheduled sync removes destinations that sync is re-creating, and both call `writeManifest`,
+  // which is a full DELETE+reinsert: exactly the ownership-losing race lib/lock.ts's header
+  // describes, reachable today by a launchd sync overlapping a manual teardown.
   const mutating = verb === "sync" && !dryRun;
+  const writes = !dryRun && verb !== "verify";
 
-  // A mutating run holds an exclusive lock: two concurrent sync runs would race on
-  // the same destinations and clobber each other's manifest. A live holder is a clean
-  // failure; a stale lock from a crashed run is reclaimed (see lib/lock.ts).
+  // A live holder is a clean failure; a stale lock from a crashed run is reclaimed
+  // (see lib/lock.ts).
   let releaseLock: (() => void) | undefined;
-  if (mutating) {
+  if (writes) {
     try {
       releaseLock = acquireLock(ctx.env);
     } catch (e) {
@@ -293,10 +299,6 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
     }
 
     if (mutating) {
-      // Mark committed only when the run actually succeeded (zero failures). A run that
-      // reached the end with failed items stays committed=0 so `rollback --list` flags it
-      // as needing attention rather than mislabelling a half-applied run as clean.
-      if (report.failures === 0) journal?.markCommitted();
       await pruneRuns(ctx.env);
       // A scoped run only knows about the sections it ran, so merge into the prior
       // manifest rather than replacing it (which would drop — and later reap — the rest).
@@ -322,6 +324,13 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
     // accumulated state — e.g. osx restarts Dock/Finder/SystemUIServer once, iff a default
     // actually changed — instead of the core loop reaching into a resource-specific flag.
     await finalizeResources(rctx);
+
+    // Mark committed only when the run actually succeeded (zero failures) — and only HERE, past
+    // the last phase that can still report one. `applyBoomSettings` and `finalizeResources` both
+    // can; deciding above them journals a run whose self-wiring failed as clean, which is the
+    // precise mislabelling `committed` exists to prevent, and it is also what `rollback --list`
+    // and `--resume` read to find an interrupted run.
+    if (mutating && report.failures === 0) journal?.markCommitted();
 
     return finish();
   } finally {

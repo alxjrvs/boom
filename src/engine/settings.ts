@@ -28,7 +28,7 @@ import { notify } from "../lib/notify.ts";
 import { runArgv } from "../lib/proc.ts";
 import { VERSION } from "../lib/version.ts";
 import { machineSummary, writeMachineSummary } from "./fleet.ts";
-import { displace, type UndoToken } from "./journal.ts";
+import { displace, journalWrite } from "./journal.ts";
 import { runWorkItems, type WorkItem } from "./registry.ts";
 import { boomStateDir } from "./state.ts";
 import type { ReconcileCtx } from "./types.ts";
@@ -141,14 +141,6 @@ export async function applyBoomSettings(
   await runWorkItems(boomWorkItems(settings), ctx);
 }
 
-// Record the undo for a to-be-written file (intent + displaced original) BEFORE the write, so
-// a crash mid-write is still reversible. Returns the token; the caller writes `done` after the
-// write succeeds — matching the filesystem resource's undo-before-create discipline.
-async function journalWrite(op: string, file: string, ctx: ReconcileCtx): Promise<UndoToken> {
-  await ctx.journal?.intent(op, file);
-  return (await pathExists(file)) ? await displace(file, ctx.backupRoot) : { kind: "remove" };
-}
-
 // #55 — (re)install the self-describing skill from the running binary, so it can't lag a
 // `boom upgrade`. Sync regenerates (journaled); verify reports staleness; uninstall leaves it
 // (it lives under the user's ~/.claude, not something boom should reclaim).
@@ -184,12 +176,13 @@ async function applySkill(ctx: ReconcileCtx): Promise<void> {
     report.skip(`skill current (v${VERSION})`);
     return;
   }
-  // Journal the write: displace a prior skill into the backup tree (rollback restores it), or
-  // record a plain remove for a fresh install.
-  const undo = await journalWrite("skill", file, ctx);
+  // Journal the write in full before touching disk: displace a prior skill into the backup tree
+  // (rollback restores it), or record a plain remove for a fresh install. The `done` row used to
+  // land after `Bun.write`, so a failure in between — the `mkdir` throwing ENOTDIR is enough —
+  // left the displaced original in the backup tree with nothing naming it.
+  await journalWrite("skill", file, ctx);
   await mkdir(join(file, ".."), { recursive: true });
   await Bun.write(file, doc);
-  await ctx.journal?.done("skill", file, undo);
   report.ok(`refreshed skill → ${disp} (v${VERSION})`);
 }
 
@@ -245,10 +238,10 @@ async function applyTimer(ctx: ReconcileCtx, sched: Schedule): Promise<void> {
     else report.fail(`${what} timer present but launchctl load failed`);
     return;
   }
-  const undo = await journalWrite("timer", plistPath, ctx);
+  // Same undo-before-create discipline as the skill write above.
+  await journalWrite("timer", plistPath, ctx);
   await mkdir(logDir, { recursive: true });
   await Bun.write(plistPath, plist);
-  await ctx.journal?.done("timer", plistPath, undo);
   if (reloadAgent(plistPath, ctx.env)) report.ok(`scheduled ${what} every ${sched.every}`);
   else report.fail(`wrote ${what} plist but launchctl load failed`);
 }
