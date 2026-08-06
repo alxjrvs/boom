@@ -562,7 +562,7 @@
         </div>
         <div class="balloon">
           <h4>Can't say it declaratively? Write a hook.</h4>
-          <p>A <code>hooks/&lt;name&gt;.ts</code> exports <code>sync</code>/<code>verify</code>/<code>uninstall</code> on a typed HookApi — the exact contract the built-in resources run on. It's the escape hatch, and it plays by the same rules.</p>
+          <p>A <code>hooks/&lt;name&gt;.ts</code> exports <code>sync</code>/<code>verify</code>/<code>uninstall</code> on a typed HookApi — and it is a first-class resource, not a trapdoor. It sees the run (repo, vars, os, host, profiles, <code>--fix</code>), <code>declare()</code>s the destinations it places so they land in the manifest and get reaped when you drop them, and <code>journalWrite()</code>s before it writes so <code>boom rollback</code> can undo it. Quiet when converged, like everything else. Modules can ship one.</p>
         </div>
       </div>
     </div>

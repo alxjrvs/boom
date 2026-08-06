@@ -8,6 +8,7 @@ import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { profileContext } from "../src/config/profile.ts";
 import type { BoomContext } from "../src/context.ts";
 import { Journal, journalWrite, listRuns, readRun } from "../src/engine/journal.ts";
 import { reconcile } from "../src/engine/reconcile.ts";
@@ -69,8 +70,10 @@ function ctxFor(env: Env, over: Partial<ReconcileCtx> = {}): ReconcileCtx {
     verbose: false,
     env,
     vars: {},
+    profile: profileContext(env, []),
     report: new Reporter(sink, sink, false),
     declared: [],
+    ownershipIncomplete: false,
     dirty: new Set<string>(),
     ...over,
   };

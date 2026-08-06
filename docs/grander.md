@@ -34,10 +34,16 @@ manifest. (`src/engine/journal.ts`, `state.ts`, `rollback.ts`.)
 
 ### 3. Hook contract → the resource-type API → **M2**
 The hook is the public extension point: `hooks/<name>.ts` modules exporting
-`sync`/`verify`/`uninstall` that receive a typed `HookApi`. Built-in resources
-(link/copy/dir/pkg/run/check) implement the same verb contract in a registry
-(`src/engine/registry.ts`, `resources/`). No JSON-config manifest — the *config*
-is TOML data, but the *extension* contract is typed TypeScript.
+`sync`/`verify`/`uninstall` (plus an optional `declare`, run on every verb) that
+receive a typed `HookApi`. Built-in resources (link/copy/dir/pkg/run/check)
+implement the same verb contract in a registry (`src/engine/registry.ts`,
+`resources/`) — and the hook now runs on the same footing: it gets the run's
+context (repo/vars/os/host/profiles/linkMode), the same output tiers (so a
+converged hook is silent), `declare()` to claim a destination into the manifest
+(orphan reaping), and `journalWrite()` for undo that
+`boom rollback` replays. Adding a new resource *type* stays a core change —
+`SectionSchema` is a valibot `strictObject`. No JSON-config manifest — the
+*config* is TOML data, but the *extension* contract is typed TypeScript.
 
 ### 4. Host/OS profiles → **M4**
 Sections carry `when = { os, host, profile }`; overlay files
