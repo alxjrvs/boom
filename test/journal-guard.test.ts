@@ -12,9 +12,9 @@ import { profileContext } from "../src/config/profile.ts";
 import type { BoomContext } from "../src/context.ts";
 import { Journal, journalWrite, listRuns, readRun } from "../src/engine/journal.ts";
 import { reconcile } from "../src/engine/reconcile.ts";
-import type { Env } from "../src/engine/state.ts";
 import type { ReconcileCtx } from "../src/engine/types.ts";
 import { pathExists } from "../src/lib/fs.ts";
+import type { Env } from "../src/lib/paths.ts";
 import { Reporter } from "../src/lib/reporter.ts";
 
 async function stateEnv(): Promise<{ XDG_STATE_HOME: string }> {

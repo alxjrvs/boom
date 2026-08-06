@@ -6,7 +6,7 @@
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { type Env, stateHome } from "./state.ts";
+import { type Env, stateHome } from "../lib/paths.ts";
 
 export function dbPath(env: Env): string {
   return join(stateHome(env), "boom", "state.db");

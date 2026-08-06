@@ -9,9 +9,9 @@ import { app } from "../src/cli.ts";
 import { commandList, commandNames, subcommandGroups } from "../src/commands/catalog.ts";
 import { completionScript } from "../src/commands/completions.ts";
 import { manPage } from "../src/commands/man.ts";
-import { skillDoc } from "../src/commands/skill.ts";
 import type { BoomContext } from "../src/context.ts";
 import { doctor } from "../src/engine/doctor.ts";
+import { skillDoc } from "../src/engine/skill.ts";
 import { colorEnabled } from "../src/lib/color.ts";
 import { hasCommand } from "../src/lib/proc.ts";
 

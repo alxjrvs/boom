@@ -10,7 +10,8 @@ import { dirname, join } from "node:path";
 import { detectOs } from "../../config/profile.ts";
 import type { Systemd } from "../../config/schema.ts";
 import { displayPath, mkdir, pathExists } from "../../lib/fs.ts";
-import { captureArgv, type Env, hasCommand } from "../../lib/proc.ts";
+import type { Env } from "../../lib/paths.ts";
+import { captureArgv, hasCommand } from "../../lib/proc.ts";
 import { displace, journalWrite } from "../journal.ts";
 import type { ReconcileCtx } from "../types.ts";
 

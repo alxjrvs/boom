@@ -12,9 +12,9 @@ import { loadConfig, NO_CONFIG_REPO_MSG, resolveConfigDir } from "../config/load
 import { detectOs } from "../config/profile.ts";
 import type { BoomContext } from "../context.ts";
 import { pathExists } from "../lib/fs.ts";
+import type { Env } from "../lib/paths.ts";
 import { bandsReporter } from "../lib/reporter.ts";
 import { VERSION } from "../lib/version.ts";
-import type { Env } from "./state.ts";
 
 export interface MachineSummary {
   readonly host: string;

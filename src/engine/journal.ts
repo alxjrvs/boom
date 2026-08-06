@@ -6,8 +6,8 @@
 import type { Database } from "bun:sqlite";
 import { rm } from "node:fs/promises";
 import { backupTo, pathExists } from "../lib/fs.ts";
+import { backupsDir, type Env } from "../lib/paths.ts";
 import { openDb, withDb } from "./db.ts";
-import { backupsDir, type Env } from "./state.ts";
 import type { ReconcileCtx } from "./types.ts";
 
 // How to reverse one mutation: remove what we created, rmdir a directory we created, restore a

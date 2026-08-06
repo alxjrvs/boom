@@ -5,7 +5,8 @@
 import { join } from "node:path";
 import { detectOs } from "../../config/profile.ts";
 import type { Pkg } from "../../config/schema.ts";
-import { captureArgv, type Env, hasCommand, lastLine, runArgvAsync, toolIo } from "../../lib/proc.ts";
+import type { Env } from "../../lib/paths.ts";
+import { captureArgv, hasCommand, lastLine, runArgvAsync, toolIo } from "../../lib/proc.ts";
 import type { ReconcileCtx } from "../types.ts";
 
 export async function reconcilePkg(entry: Pkg, ctx: ReconcileCtx): Promise<void> {

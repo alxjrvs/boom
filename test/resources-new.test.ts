@@ -11,8 +11,8 @@ import type { BoomContext } from "../src/context.ts";
 import { pruneRuns } from "../src/engine/journal.ts";
 import { reconcile } from "../src/engine/reconcile.ts";
 import { rollback } from "../src/engine/rollback.ts";
-import type { Env } from "../src/engine/state.ts";
 import { pathExists } from "../src/lib/fs.ts";
+import type { Env } from "../src/lib/paths.ts";
 
 // Write an executable fake binary into `dir` and return nothing — the caller prepends `dir`
 // to PATH so the sandboxed reconcile shells out to these instead of the real tools.

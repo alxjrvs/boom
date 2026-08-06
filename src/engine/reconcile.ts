@@ -11,12 +11,13 @@ import type { BoomContext } from "../context.ts";
 import { colorEnabled } from "../lib/color.ts";
 import { displayPath, filesEqual, linkTarget, pathExists } from "../lib/fs.ts";
 import { acquireLock } from "../lib/lock.ts";
+import { backupsDir } from "../lib/paths.ts";
 import { REPORT_SCHEMA_VERSION, Reporter } from "../lib/reporter.ts";
 import { displace, Journal, newRunId, pruneRuns, readRun } from "./journal.ts";
 import { finalizeResources, reconcileSection } from "./registry.ts";
 import { installAskpass } from "./secrets/askpass.ts";
 import { applyBoomSettings } from "./settings.ts";
-import { backupsDir, type ManifestEntry, readManifest, writeManifest } from "./state.ts";
+import { type ManifestEntry, readManifest, writeManifest } from "./state.ts";
 import { syncConfigRepo } from "./sync.ts";
 import type { LinkMode, ReconcileCtx, Verb } from "./types.ts";
 

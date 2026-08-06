@@ -24,7 +24,8 @@
 //     it recreates a branch `delete_branch_on_merge` deliberately deleted.
 import { realpathSync } from "node:fs";
 import { join } from "node:path";
-import { captureArgvAsync, type Env, runArgvAsync } from "../lib/proc.ts";
+import type { Env } from "../lib/paths.ts";
+import { captureArgvAsync, runArgvAsync } from "../lib/proc.ts";
 
 export interface WorktreeEntry {
   readonly path: string;

@@ -11,7 +11,8 @@
 // untouched. See pickBackend().
 import { isAbsolute, join } from "node:path";
 import type { Secret } from "../../config/schema.ts";
-import { captureArgvAsync, type Env, hasCommand, lastLine } from "../../lib/proc.ts";
+import type { Env } from "../../lib/paths.ts";
+import { captureArgvAsync, hasCommand, lastLine } from "../../lib/proc.ts";
 import type { ReconcileCtx } from "../types.ts";
 
 export type SecretResult =

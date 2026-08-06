@@ -1,6 +1,9 @@
 // Process helpers. Bun.spawnSync (not Bun.$) so the engine controls exit codes
 // without throw semantics; `sh -c` so boomfile `run` strings expand ~ and globs.
-export type Env = Record<string, string | undefined>;
+// `Env` lives in ./paths.ts and is deliberately NOT re-exported here: with
+// `verbatimModuleSyntax` on, a re-export would let a consumer keep spelling the process
+// environment as a proc concern, which is how four duplicate local aliases grew.
+import type { Env } from "./paths.ts";
 
 export function cleanEnv(env: Env): Record<string, string> {
   const out: Record<string, string> = {};

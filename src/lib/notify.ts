@@ -3,7 +3,8 @@
 // osascript's `display notification`; Linux uses `notify-send`. Best-effort by design: no
 // notifier on PATH (or a headless session where osascript fails) is a silent no-op, never an error.
 import { detectOs, type OsKind } from "../config/profile.ts";
-import { cleanEnv, type Env, hasCommand } from "./proc.ts";
+import type { Env } from "./paths.ts";
+import { cleanEnv, hasCommand } from "./proc.ts";
 
 // AppleScript string literal: double-quoted with `\` and `"` escaped. boom's own copy is the only
 // input, but escaping keeps a hostname with a quote from breaking the -e expression regardless.

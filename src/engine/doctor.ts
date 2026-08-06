@@ -10,10 +10,11 @@ import { detectOs } from "../config/profile.ts";
 import type { BoomContext } from "../context.ts";
 import { pathExists } from "../lib/fs.ts";
 import { remoteReachableAsync } from "../lib/git.ts";
+import { boomStateDir } from "../lib/paths.ts";
 import { captureArgvAsync, hasCommand, lastLine } from "../lib/proc.ts";
 import { bandsReporter, type Reporter } from "../lib/reporter.ts";
 import { VERSION } from "../lib/version.ts";
-import { boomStateDir } from "./state.ts";
+import { skillDoc, skillInstallPath } from "./skill.ts";
 import { validateConfigFiles } from "./validate.ts";
 
 // The external tools boom's resources / commands shell out to, and what needs each.
@@ -34,12 +35,8 @@ const KEYCHAIN_ITEM = "op-claude-agent";
 // `configOnly` (the `--config` flag) is the folded-in `boom validate`: parse + schema-check
 // the boomfile and overlays alone, as a read-only CI gate — no tools/keychain/state checks,
 // pass/fail 0/1 (no warning tier), and a missing config repo is a *failure*, not a warning.
-// The boom Claude skill, checked and (under --fix) installed by doctor. Loaded lazily to sidestep
-// the commands/skill → catalog → cli → commands/doctor cycle (initialize cli.ts first, exactly as
-// engine/settings.ts documents), so reaching it from the engine can't read skillCommand in its TDZ.
+// The boom Claude skill, checked and (under --fix) installed by doctor.
 async function checkSkill(ctx: BoomContext, report: Reporter, fix: boolean): Promise<void> {
-  await import("../cli.ts");
-  const { skillDoc, skillInstallPath } = await import("../commands/skill.ts");
   const file = skillInstallPath(ctx.env);
   if (!file) {
     report.skip("can't resolve the Claude config dir (HOME unset)");

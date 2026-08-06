@@ -7,10 +7,6 @@
 //   uninstall → tear down what boom installed (unload + remove every timer; the skill is left)
 // Each field is opt-in; an absent/empty `[boom]` table emits nothing. Skill + timer writes are
 // journaled like any file mutation, so `boom rollback` reverses them.
-// `skillDoc`/`skillInstallPath`/`fetchLatestVersion` live in `commands/*`, which transitively
-// import the `cli.ts` route map — a static import here would form an engine→commands→cli
-// cycle and read those exports in their temporal dead zone (same hazard catalog.ts documents).
-// They're pulled in via a call-time dynamic import inside the handlers below, past the cycle.
 import { readdir } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { detectOs } from "../config/profile.ts";
@@ -25,12 +21,14 @@ import {
   unloadAgent,
 } from "../lib/launchd.ts";
 import { notify } from "../lib/notify.ts";
+import { boomStateDir } from "../lib/paths.ts";
 import { runArgv } from "../lib/proc.ts";
+import { fetchLatestVersion } from "../lib/release.ts";
 import { VERSION } from "../lib/version.ts";
 import { machineSummary, writeMachineSummary } from "./fleet.ts";
 import { displace, journalWrite } from "./journal.ts";
 import { runWorkItems, type WorkItem } from "./registry.ts";
-import { boomStateDir } from "./state.ts";
+import { skillDoc, skillInstallPath } from "./skill.ts";
 import type { ReconcileCtx } from "./types.ts";
 
 // Every boom-owned timer plist is labelled `com.boomtube.<cmd-slug>` — the shared prefix lets
@@ -147,12 +145,6 @@ export async function applyBoomSettings(
 async function applySkill(ctx: ReconcileCtx): Promise<void> {
   if (ctx.verb === "uninstall") return;
   const { report } = ctx;
-  // commands/skill → catalog → cli → commands/skill is a load cycle that only resolves when
-  // `cli.ts` is the entry (as in production via index.ts). Reached from the engine, skill.ts
-  // can become the entry and read `skillCommand` in its TDZ — so initialize cli.ts first, then
-  // the fully-loaded skill module is safe to pull. (catalog reads `routes` lazily by design.)
-  await import("../cli.ts");
-  const { skillDoc, skillInstallPath } = await import("../commands/skill.ts");
   const file = skillInstallPath(ctx.env);
   if (!file) {
     report.skip("skill_on_sync — can't resolve the Claude config dir (HOME unset)");
@@ -292,7 +284,6 @@ async function applyUpgrade(settings: BoomSettings, ctx: ReconcileCtx): Promise<
     report.plan("would check for a newer boom release");
     return;
   }
-  const { fetchLatestVersion } = await import("../commands/upgrade.ts");
   const latest = await fetchLatestVersion();
   if (!latest) {
     report.skip("upgrade check skipped (couldn't reach GitHub)");

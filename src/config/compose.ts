@@ -9,9 +9,9 @@
 // the same one every sibling in this directory takes today (load.ts, modules.ts, profile.ts,
 // remote.ts); it moves to `src/lib/paths.ts` when that module exists.
 import { basename, join } from "node:path";
-import type { Env } from "../engine/state.ts";
 import { displayPath, expandTilde, isGlobPattern } from "../lib/fs.ts";
 import { launchAgentsDir } from "../lib/launchd.ts";
+import type { Env } from "../lib/paths.ts";
 import { BoomConfigError, CONFIG_FILE, loadOverlayFile } from "./load.ts";
 import { resolveModules } from "./modules.ts";
 import { overlayFiles, type ProfileContext, sectionApplies } from "./profile.ts";

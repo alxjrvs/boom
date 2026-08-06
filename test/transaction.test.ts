@@ -18,8 +18,9 @@ import type { BoomContext } from "../src/context.ts";
 import { Journal, listRuns, newRunId } from "../src/engine/journal.ts";
 import { reconcile } from "../src/engine/reconcile.ts";
 import { listRollbacks, rollback } from "../src/engine/rollback.ts";
-import { backupsDir, readManifest } from "../src/engine/state.ts";
+import { readManifest } from "../src/engine/state.ts";
 import { linkTarget, pathExists, stat } from "../src/lib/fs.ts";
+import { backupsDir } from "../src/lib/paths.ts";
 
 interface Sandbox {
   readonly home: string;

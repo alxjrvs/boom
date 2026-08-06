@@ -13,9 +13,9 @@
 // build on packs. A resolution-stack guard makes that finite — a ref already on the current
 // resolve path (a cycle) is warned and skipped instead of looping forever.
 import { isAbsolute, join } from "node:path";
-import { type Env, stateHome } from "../engine/state.ts";
 import { expandTilde, mkdir, rm } from "../lib/fs.ts";
 import { checkoutRef, cloneRepo } from "../lib/git.ts";
+import { type Env, stateHome } from "../lib/paths.ts";
 import type { ComposedSection } from "./compose.ts";
 import { hasBoomfile, loadConfig } from "./load.ts";
 import { parseRemoteRef } from "./remote.ts";

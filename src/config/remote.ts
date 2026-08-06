@@ -5,9 +5,9 @@
 // this file owns only the initial (re-)clone.
 import { mkdir, rename, rm } from "node:fs/promises";
 import { dirname, isAbsolute } from "node:path";
-import type { Env } from "../engine/state.ts";
 import { pathExists } from "../lib/fs.ts";
 import { checkoutRef, cloneRepo, hasUnpushedCommits, isClean } from "../lib/git.ts";
+import type { Env } from "../lib/paths.ts";
 import {
   BoomConfigError,
   CONFIG_FILE,
