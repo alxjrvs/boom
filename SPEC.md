@@ -113,7 +113,10 @@ Resources:
 
 - `link` / `copy` `= [{ src, dst, mode?, expand? }]` — place a repo file at `dst` (symlink vs
   byte-copy). `src` may be a **glob** (then `dst` is a directory and each match is placed
-  under it, structure preserved below the pattern's static prefix). `expand` (copy only)
+  under it, structure preserved below the pattern's static prefix); when a pattern matches both
+  a directory and its descendants (`**`), the directory match is dropped in favour of the
+  descendants, and a placement whose destination resolves inside the config repo is refused —
+  boom never links the repo into itself. `expand` (copy only)
   substitutes `${env:VAR}`/`${host}`/`${os}` in the content — per-machine files without a hook
 - `tmpl = [{ src, dst, mode? }]` — render `src` to `dst`, interpolating `${NAME}` from the
   top-level `[vars]` table (plus the same `${env:VAR}`/`${host}`/`${os}` vocab as `expand`). A
@@ -122,9 +125,12 @@ Resources:
 - `secret = [{ dst, ref? | template?, mode?, backend? }]` — render a secret to a file at sync
   time; `mode` defaults to `0600`. The `backend` is inferred from the ref scheme (`op://`→op,
   `env:`→env, `pass:`→pass, `*.age`→age, `*.sops`→sops) or set explicitly — 1Password
-  (`op read`/`op inject`), a plain env var, `pass`, or an age/sops-encrypted file. The
-  plaintext is **never journaled or backed up** (undo is a plain remove), and secrets stay out
-  of the owned-destinations manifest, so orphan reaping never auto-deletes one
+  (`op read`/`op inject`), a plain env var, `pass`, or an age/sops-encrypted file. Secrets stay
+  out of the owned-destinations manifest, so orphan reaping never auto-deletes one. boom never
+  journals or backs up the plaintext **it** renders (a fresh render's undo is a plain remove); a
+  pre-existing file at `dst` is the user's, so it is **left alone** — replacing it takes
+  `boom source --fix`, which displaces it into the run's backup tree first so `boom rollback`
+  can put it back
 - `dir = [{ path, mode?, remove_on_uninstall? }]` — ensure a standalone directory exists
   (declarative `mkdir -p`/`chmod`); `remove_on_uninstall = true` removes it on uninstall *only
   if empty*

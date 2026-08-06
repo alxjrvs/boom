@@ -2,6 +2,7 @@
 // vs byte-copy). `src` may be a single repo path or a glob pattern — a glob expands to one
 // placement per match, `dst` treated as a directory, structure preserved below the pattern's
 // static prefix. `copy` additionally supports `expand` (render ${env:VAR}/${host}/${os}).
+import { realpath } from "node:fs/promises";
 import { hostname } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { detectOs } from "../../config/profile.ts";
@@ -63,10 +64,41 @@ async function placements(entry: File, kind: string, ctx: ReconcileCtx): Promise
     const sub = rel.startsWith(base) ? rel.slice(base.length) : basename(rel);
     out.push({ src: join(ctx.repo, rel), dst: join(into, sub), srcRel: rel });
   }
-  if (out.length === 0 && ctx.verb !== "uninstall") {
+  // Drop any match that is an ancestor directory of another match in the same expansion.
+  // The hazard is `**`, which returns a directory AND its descendants: boom would symlink the
+  // directory itself into `dst`, and the very next placement's `dst` then resolves THROUGH that
+  // fresh symlink back into the repo — so under `--fix` the repo's own sources get displaced
+  // into the backup tree and replaced with self-referential links. `onlyFiles: true` is NOT the
+  // fix: globbing a directory to link it whole (`skills/*` matching `skills/pack`) is a
+  // supported case, and it survives here because no descendant of it is also a match.
+  const parents = new Set<string>();
+  for (const p of out) {
+    for (let d = dirname(p.srcRel); d !== "." && d !== "/"; d = dirname(d)) parents.add(d);
+  }
+  const kept = out.filter((p) => !parents.has(p.srcRel));
+  if (kept.length === 0 && ctx.verb !== "uninstall") {
     ctx.report.warn(`${kind} ${entry.src} — glob matched no files`);
   }
-  return out;
+  return kept;
+}
+
+// Would placing a link at `dst` write inside the config repo? Then the placement is broken —
+// boom would be linking the repo into itself and (under overwrite) displacing its own sources.
+// Two gotchas: `dst` usually does not exist yet, so the question has to be asked of its nearest
+// EXISTING ancestor, which is also what catches a dst that reaches the repo through a
+// pre-existing symlink; and `repo` must be realpath'ed too, because on macOS `$TMPDIR`/`/var`
+// resolve through `/private` — a raw string compare would silently never match, and every
+// sandboxed test would pass vacuously.
+async function landsInRepo(dst: string, repo: string): Promise<boolean> {
+  const root = await realpath(repo).catch(() => repo);
+  let dir = dirname(dst);
+  for (;;) {
+    const real = await realpath(dir).catch(() => undefined);
+    if (real !== undefined) return real === root || real.startsWith(`${root}/`);
+    const up = dirname(dir);
+    if (up === dir) return false; // walked to the filesystem root without finding anything
+    dir = up;
+  }
 }
 
 // mkdir(dir, {recursive:true}) only no-ops when `dir` already exists AND is a real
@@ -100,6 +132,14 @@ export async function applyLink(
   ctx: ReconcileCtx,
 ): Promise<void> {
   const { report } = ctx;
+  // Ahead of the already-linked skip and the dry-run branch, both deliberately. An existing
+  // self-referential link IS the damaged state this refusal exists to prevent, so reporting it
+  // as "already linked" would launder the damage; and running in dry-run means `--fix --dry-run`
+  // surfaces a broken glob before anyone applies it.
+  if (await landsInRepo(dst, ctx.repo)) {
+    report.fail(`${disp} resolves inside the config repo — refusing to link the repo into itself`);
+    return;
+  }
   if ((await linkTarget(dst)) === src) {
     report.skip(`${disp} already linked`);
     return;
@@ -120,7 +160,10 @@ export async function applyLink(
   // means a crash mid-create is still reversible: for a fresh link the undo is a plain
   // remove (a no-op if the link was never created); for an overwrite the displaced original
   // is already in the backup tree with a `done` row that restores it. `report.ok` still
-  // fires only after the create succeeds.
+  // fires only after the create succeeds. That invariant is worthless if `dst` is itself a
+  // repo source — "restore the displaced original" would mean restoring boom's own INPUT, and
+  // the run would have moved the repo into the backup tree to make room for links pointing at
+  // it. Hence the landsInRepo refusal above: this discipline assumes dst is outside the repo.
   if (!conflict) {
     await ctx.journal?.intent("link", dst);
     await ctx.journal?.done("link", dst, { kind: "remove" });
