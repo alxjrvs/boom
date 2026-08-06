@@ -2,6 +2,9 @@
 // section sets — instead of authoring every section by hand. A module ref is a local path
 // (relative to this repo, or absolute/`~`) or a git remote (`owner/repo[@ref]`, a URL); its
 // sections are merged in *before* this repo's own, so your repo can still override a module.
+// Each resolved section carries the directory its repo-relative `src` paths resolve against
+// (`origin`) — which is what makes a module able to *ship* the files it declares, the promise
+// `config/registry.ts` has always advertised and could not deliver.
 //
 // Resolution runs during reconcile (not at every config load — `where`/`doctor` shouldn't clone).
 // Remotes clone once into a modules cache and are reused; a clone that fails (offline, typo)
@@ -13,9 +16,9 @@ import { isAbsolute, join } from "node:path";
 import { type Env, stateHome } from "../engine/state.ts";
 import { expandTilde, mkdir, rm } from "../lib/fs.ts";
 import { checkoutRef, cloneRepo } from "../lib/git.ts";
+import type { ComposedSection } from "./compose.ts";
 import { hasBoomfile, loadConfig } from "./load.ts";
 import { parseRemoteRef } from "./remote.ts";
-import type { Section } from "./schema.ts";
 
 export function modulesCacheDir(env: Env): string {
   return join(stateHome(env), "boom", "modules");
@@ -75,23 +78,28 @@ export async function resolveModule(
   return { ref, dir, cloned: true };
 }
 
-// Resolve every `use` module to its sections, in order, for reconcile to compose before the base
-// repo's own. A module that fails to resolve (or whose config is invalid) is reported via
-// `onError` and skipped — one bad module never sinks the whole reconcile. Composition is
-// recursive: a resolved module's own `use` is followed (relative to that module's dir), and its
+// Resolve every `use` module to its sections + `[vars]`, in order, for `composeConfig` to place
+// before the base repo's own. A module that fails to resolve (or whose config is invalid) is
+// reported via `onError` and skipped — one bad module never sinks the whole reconcile. Composition
+// is recursive: a resolved module's own `use` is followed (relative to that module's dir), and its
 // nested modules' sections are composed *before* its own — so the same "modules compose first"
 // ordering holds at every depth. `stack` is the set of module dirs currently on the resolve path;
 // a ref that resolves back onto it is a cycle — warned via `onError` and skipped, so a cyclic
 // `use` terminates instead of recursing forever. (A dir that already resolved on a *sibling* path
 // is not a cycle and is composed again — diamonds duplicate, sections just merge, which is fine.)
-export async function resolveModuleSections(
+//
+// `vars` accumulate in the same order the sections do, so the last module named in `use` wins a
+// collision and a nested module is weaker than the parent that pulled it in — leaving the whole
+// module layer weaker than the base repo's own `[vars]`, which composeConfig spreads over it.
+export async function resolveModules(
   env: Env,
   repo: string,
   uses: readonly string[],
   onError: (ref: string, why: string) => void,
   stack: Set<string> = new Set(),
-): Promise<Section[]> {
-  const out: Section[] = [];
+): Promise<{ sections: ComposedSection[]; vars: Record<string, string> }> {
+  const out: ComposedSection[] = [];
+  let vars: Record<string, string> = {};
   for (const ref of uses) {
     try {
       // resolveModule can itself throw on a genuine filesystem error (e.g. the modules cache dir
@@ -112,13 +120,18 @@ export async function resolveModuleSections(
       // dir around the recursion so it guards only the current path (a stack, not a global seen-set).
       if (cfg.use && cfg.use.length > 0) {
         stack.add(m.dir);
-        out.push(...(await resolveModuleSections(env, m.dir, cfg.use, onError, stack)));
+        const nested = await resolveModules(env, m.dir, cfg.use, onError, stack);
         stack.delete(m.dir);
+        // Not re-stamped: the recursive call already stamped those sections with the NESTED
+        // module's dir, which is where their files actually live.
+        out.push(...nested.sections);
+        vars = { ...vars, ...nested.vars };
       }
-      out.push(...cfg.section);
+      out.push(...cfg.section.map((s) => ({ ...s, origin: m.dir, source: ref })));
+      vars = { ...vars, ...(cfg.vars ?? {}) };
     } catch (e) {
       onError(ref, (e as Error).message);
     }
   }
-  return out;
+  return { sections: out, vars };
 }

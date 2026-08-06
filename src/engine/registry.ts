@@ -7,6 +7,7 @@
 // error boundary can name what failed) and, optionally, a `finalize` hook that runs once at
 // end-of-run — the seam that lets osx own its own "restart the UI" side effect instead of
 // the core loop reaching into an osx-specific ctx flag.
+import type { ComposedSection } from "../config/compose.ts";
 import type { Section } from "../config/schema.ts";
 import { reconcileCheck } from "./resources/check.ts";
 import { reconcileDir } from "./resources/dir.ts";
@@ -117,12 +118,28 @@ const RESOURCES: readonly ResourceType[] = [
   },
 ];
 
-export async function reconcileSection(section: Section, ctx: ReconcileCtx): Promise<void> {
+// One seam replaces touching eleven path-bearing handlers: every resource that resolves a
+// repo-relative path already joins against `ctx.repo` (filesystem, template, packages, launchd,
+// hook, run, check, the secret backends), so swapping `repo` for the section's origin here is
+// what lets a MODULE ship the files its own sections declare.
+//
+// The spread is shallow deliberately: `declared`, `dirty`, `journal`, `backupRoot` and `report`
+// stay the same object references, so a module section's declarations and journal rows land in
+// the one run-level set rather than a private copy. The identity branch keeps the common
+// (no-module) path allocation-free.
+//
+// GOTCHA — the swap narrows the repo-self-link guard: `applyLink` refuses a `dst` that resolves
+// inside `ctx.repo`, so for a module section that check is now against the MODULE's directory.
+// That is the intended semantics (a module must not link its own sources into itself either),
+// but a module section whose `dst` resolves into the *base* repo is no longer caught. Widening
+// the guard to the set of all origins would need an origin registry; deliberately a follow-up.
+export async function reconcileSection(section: ComposedSection, ctx: ReconcileCtx): Promise<void> {
+  const sctx = section.origin && section.origin !== ctx.repo ? { ...ctx, repo: section.origin } : ctx;
   for (const res of RESOURCES) {
     // Stamp the category before running the resource's items so every line they emit is grouped
     // under the right band in the dense default (a no-op on the classic/verbose surfaces).
     ctx.report.category = res.category;
-    await runWorkItems(res.items(section), ctx);
+    await runWorkItems(res.items(section), sctx);
   }
 }
 

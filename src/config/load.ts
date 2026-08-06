@@ -11,7 +11,7 @@ import { parse as parseToml } from "smol-toml";
 import * as v from "valibot";
 import type { BoomContext } from "../context.ts";
 import { type Env, stateHome } from "../engine/state.ts";
-import { type Boomfile, BoomfileSchema } from "./schema.ts";
+import { type Boomfile, BoomfileSchema, type Overlay, OverlaySchema } from "./schema.ts";
 
 export const CONFIG_FILE = "boomfile.toml";
 
@@ -91,8 +91,15 @@ export async function resolveConfigDir(env: Env, cwd: string): Promise<string | 
   return undefined;
 }
 
-function validate(file: string, raw: unknown): Boomfile {
-  const result = v.safeParse(BoomfileSchema, raw);
+// The schema is a parameter because the base boomfile and an overlay are validated by DIFFERENT
+// schemas (see schema.ts): only an overlay may omit `[[section]]`. Everything else — the TOML
+// read, the parse, the issue formatting — is shared.
+function validate<S extends typeof BoomfileSchema | typeof OverlaySchema>(
+  schema: S,
+  file: string,
+  raw: unknown,
+): v.InferOutput<S> {
+  const result = v.safeParse(schema, raw);
   if (!result.success) {
     // Field path + message, plus the offending value where valibot reports one — so a
     // schema failure points at both *where* (`section.0.link.2.mode`) and *what*
@@ -107,31 +114,38 @@ function validate(file: string, raw: unknown): Boomfile {
   return result.output;
 }
 
-// Load + validate a specific boomfile.toml (base or overlay) by full path.
-export async function loadConfigFile(file: string): Promise<Boomfile> {
+async function readAndParse(file: string): Promise<unknown> {
   let text: string;
   try {
     text = await readFile(file, "utf8");
   } catch {
     throw new BoomConfigError(`no config file at ${file}`);
   }
-  let raw: unknown;
   try {
-    raw = parseToml(text);
+    return parseToml(text);
   } catch (e) {
     throw new BoomConfigError(`${file}: invalid TOML — ${(e as Error).message}`);
   }
-  return validate(file, raw);
 }
 
-// Like loadConfigFile, but returns undefined when the file is absent (for overlays).
-export async function loadOptionalConfigFile(file: string): Promise<Boomfile | undefined> {
+// Load + validate a BASE boomfile.toml (the config repo's own, or a module's) by full path.
+// Strict: `[[section]]` is required, so an empty or truncated file fails here instead of
+// reaching reconcile as a config that declares nothing (see BoomfileSchema).
+export async function loadConfigFile(file: string): Promise<Boomfile> {
+  return validate(BoomfileSchema, file, await readAndParse(file));
+}
+
+// Load + validate an OVERLAY (`boomfile.<os|host|profile>.toml`); undefined when absent, since
+// most candidate overlay names never exist on a given machine. Validated with OverlaySchema —
+// the ONLY loader that accepts a sectionless file, because an overlay modifies an
+// already-validated base. Never point the base or a module at this.
+export async function loadOverlayFile(file: string): Promise<Overlay | undefined> {
   try {
     await stat(file);
   } catch {
     return undefined;
   }
-  return loadConfigFile(file);
+  return validate(OverlaySchema, file, await readAndParse(file));
 }
 
 export function loadConfig(dir: string): Promise<Boomfile> {

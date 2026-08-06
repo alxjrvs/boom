@@ -36,7 +36,7 @@ import { boomStatus } from "../src/engine/overview.ts";
 import { reconcile } from "../src/engine/reconcile.ts";
 import { checkpoint, rollback, rollbackTo } from "../src/engine/rollback.ts";
 import { backupsDir } from "../src/engine/state.ts";
-import { pathExists } from "../src/lib/fs.ts";
+import { linkTarget, pathExists } from "../src/lib/fs.ts";
 import { headSha } from "../src/lib/git.ts";
 import { acquireLock } from "../src/lib/lock.ts";
 import { notifyArgv } from "../src/lib/notify.ts";
@@ -348,6 +348,90 @@ test("modules: a cycle (A uses B, B uses A) terminates and warns instead of hang
   // If cycle detection failed this would recurse forever; a bounded resolve returns cleanly.
   expect(await reconcile("sync", sb.ctx, {})).toBe(0);
   expect(sb.out()).toContain("cycle detected");
+});
+
+// --- module-shipped files (section origin) ------------------------------------------------
+
+test("modules: a module ships a file beside its own boomfile", async () => {
+  // The audit's exact reproduction: before sections carried an origin, `src = "vimrc"` resolved
+  // against the BASE repo and the module's own file reported "source missing — not linked".
+  const sb = await sandbox('use = ["./mod"]\n[[section]]\nname = "local"\n');
+  const mod = join(sb.repo, "mod");
+  await mkdir(mod, { recursive: true });
+  await writeFile(join(mod, "vimrc"), 'set nocompatible"\n');
+  await writeFile(
+    join(mod, "boomfile.toml"),
+    '[[section]]\nname = "vim"\nlink = [{ src = "vimrc", dst = "~/.vimrc" }]\n',
+  );
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  expect(await linkTarget(join(sb.home, ".vimrc"))).toBe(join(mod, "vimrc"));
+});
+
+test("modules: a NESTED module's file resolves against the NESTED module's dir", async () => {
+  const sb = await sandbox('use = ["./mod-a"]\n[[section]]\nname = "local"\n');
+  const modA = join(sb.repo, "mod-a");
+  const modB = join(modA, "mod-b");
+  await mkdir(modB, { recursive: true });
+  await writeFile(join(modA, "boomfile.toml"), 'use = ["./mod-b"]\n[[section]]\nname = "a"\n');
+  await writeFile(join(modB, "gitconfig"), "[user]\n");
+  await writeFile(
+    join(modB, "boomfile.toml"),
+    '[[section]]\nname = "b"\nlink = [{ src = "gitconfig", dst = "~/.gitconfig" }]\n',
+  );
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  // Not mod-a: the recursion stamps each level with its OWN dir.
+  expect(await linkTarget(join(sb.home, ".gitconfig"))).toBe(join(modB, "gitconfig"));
+});
+
+test("modules: a module-shipped link is reaped once the module leaves `use`", async () => {
+  // The module lives OUTSIDE the config repo, so reaping cannot fall back on "the target starts
+  // with the repo path" — it has to match the src the manifest recorded.
+  const mod = await mkdtemp(join(tmpdir(), "boom-mod-"));
+  const sb = await sandbox(`use = ["${mod}"]\n[[section]]\nname = "local"\n`);
+  await writeFile(join(mod, "vimrc"), "set nocompatible\n");
+  await writeFile(
+    join(mod, "boomfile.toml"),
+    '[[section]]\nname = "vim"\nlink = [{ src = "vimrc", dst = "~/.vimrc" }]\n',
+  );
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  expect(await linkTarget(join(sb.home, ".vimrc"))).toBe(join(mod, "vimrc"));
+
+  await writeFile(join(sb.repo, "boomfile.toml"), '[[section]]\nname = "local"\n');
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  expect(await pathExists(join(sb.home, ".vimrc"))).toBe(false);
+  expect(sb.out()).toContain("reaped orphan");
+});
+
+test("modules: a module section whose dst resolves into the module dir is refused", async () => {
+  // Pins that Layer 1's repo-self-link guard follows the origin swap: `~/.config/nvim` is a
+  // symlink INTO the module, so the module's own link would land inside the module's sources.
+  const sb = await sandbox('use = ["./mod"]\n[[section]]\nname = "local"\n');
+  const mod = join(sb.repo, "mod");
+  await mkdir(join(mod, "nvim"), { recursive: true });
+  await writeFile(join(mod, "nvim", "init.lua"), "-- init\n");
+  await writeFile(
+    join(mod, "boomfile.toml"),
+    '[[section]]\nname = "nvim"\nlink = [{ src = "nvim/init.lua", dst = "~/.config/nvim/init.lua" }]\n',
+  );
+  await mkdir(join(sb.home, ".config"), { recursive: true });
+  await symlink(join(mod, "nvim"), join(sb.home, ".config", "nvim"));
+  expect(await reconcile("sync", sb.ctx, { linkMode: "overwrite" })).toBe(1);
+  expect(sb.out()).toContain("refusing to link the repo into itself");
+});
+
+// --- overlays carry vars + [boom], not just sections ---------------------------------------
+
+test("overlays: a vars-only overlay loads and its value wins over the base's", async () => {
+  const sb = await sandbox(
+    '[vars]\nEMAIL = "base"\n[[section]]\nname = "t"\ntmpl = [{ src = "gitconfig.tmpl", dst = "~/.gitconfig" }]\n',
+  );
+  // Built as a template literal so it reads as data, matching resources-new.test.ts's `ph`.
+  await writeFile(join(sb.repo, "gitconfig.tmpl"), `email = \${EMAIL}\n`);
+  // No [[section]] at all — a hard schema failure before `section` became optional, and its
+  // [vars] were dropped on the floor before overlays merged anything but sections.
+  await writeFile(join(sb.repo, "boomfile.testhost.toml"), '[vars]\nEMAIL = "host"\n');
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  expect(await readFile(join(sb.home, ".gitconfig"), "utf8")).toContain("email = host");
 });
 
 // --- module registry (search / add) -------------------------------------------------------

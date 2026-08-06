@@ -4,7 +4,7 @@
 // the check can't drift between the two paths.
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
-import { CONFIG_FILE, loadConfigFile } from "../config/load.ts";
+import { CONFIG_FILE, loadConfigFile, loadOverlayFile } from "../config/load.ts";
 import type { Reporter } from "../lib/reporter.ts";
 
 // Overlay files are boomfile.<os|host|profile>.toml beside the base boomfile.toml.
@@ -19,8 +19,15 @@ export async function validateConfigFiles(repo: string, report: Reporter): Promi
   const files = [CONFIG_FILE, ...entries.filter((f) => OVERLAY_RE.test(f)).sort()];
   for (const file of files) {
     try {
-      const config = await loadConfigFile(join(repo, file));
-      report.ok(`${file} — ${config.section.length} section(s)`);
+      // Each file is judged by the schema its role actually has: the base is strict (a
+      // sectionless boomfile.toml is a failure worth reporting here, before a sync acts on it),
+      // an overlay may be `[vars]`-only. `undefined` means the file vanished between the readdir
+      // and the load — nothing to validate, so it counts as zero sections rather than a failure.
+      const config =
+        file === CONFIG_FILE
+          ? await loadConfigFile(join(repo, file))
+          : await loadOverlayFile(join(repo, file));
+      report.ok(`${file} — ${config?.section.length ?? 0} section(s)`);
     } catch (e) {
       report.fail((e as Error).message);
     }

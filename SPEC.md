@@ -166,16 +166,27 @@ Resources:
 A section may carry `when = { os, host, profile }` to gate by machine; overlay
 files `boomfile.<os|host|profile>.toml` are merged onto the base. `--profile`
 (repeatable) activates named profiles; os/host auto-match (overridable via
-`BOOM_OS`/`BOOM_HOST`).
+`BOOM_OS`/`BOOM_HOST`). An overlay merges its `[vars]` and `[boom]` over the base's
+**last-wins per key** as well as appending its sections, `[[section]]` is optional **in an
+overlay only** (a vars-only overlay is legal; a base `boomfile.toml` with no sections is still
+a hard load error, so an empty or half-written one can never read as "declare nothing" and
+have every managed file reaped), and because `[boom].schedule` is an array a shallow last-wins
+merge **replaces** the base's timer list rather than appending to it. `use` in an overlay is a
+hard error — see below.
 
 A top-level `use = [<module>, …]` composes other boom config repos — a git remote
 (`owner/repo[@ref]`, a URL) or a path relative to this repo — whose sections are merged in
 **before** this repo's own (so the repo can override a module). Modules resolve during
 reconcile (remotes clone into a cache; a failed resolve warns and is skipped, never fatal);
 `boom module` lists them and `--update` re-fetches. A module may itself declare `use`, composed
-**recursively** (a resolution-stack guard breaks cycles). `boom module search <term>` / `add
-<name>` browse a curated registry of vetted packs and splice a ref into `use`. A top-level
-`[vars]` table (a name→string map) supplies the values `tmpl` resources interpolate.
+**recursively** (a resolution-stack guard breaks cycles). A module's sections resolve their
+repo-relative paths against the **module's own directory**, so a module ships the dotfiles it
+declares; its `[vars]` are the weakest layer (a nested module is weaker still, and the base
+repo always wins a collision). Because modules compose *before* the base and an overlay loads
+*last*, `use` in an overlay would invert that order — so it is rejected at load rather than
+silently dropped. `boom module search <term>` / `add <name>` browse a curated registry of vetted
+packs and splice a ref into `use`. A top-level `[vars]` table (a name→string map) supplies the
+values `tmpl` resources interpolate.
 
 ### `[boom]` — machine-global self-wiring
 

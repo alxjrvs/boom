@@ -416,6 +416,29 @@ test("orphan reaping removes a link dropped from the config", async () => {
   expect(await pathExists(join(sb.home, ".b"))).toBe(false); // reaped
 });
 
+test("a truncated base boomfile FAILS the sync — it never reaps every managed file", async () => {
+  // The regression guard for the whole base-vs-overlay split. A base boomfile with no
+  // `[[section]]` (zero-byte after an editor truncation, half-written when a scheduled sync
+  // fires, every section commented out) must not parse as "this machine declares nothing":
+  // that hands reconcile an empty `declared` set, and orphan reaping then deletes EVERY
+  // destination in the prior manifest while exiting 0. Loud failure, and the files survive.
+  const sb = await sandbox(
+    `[[section]]\nname = "S"\nlink = [{ src = ".a", dst = "~/.a" }, { src = ".b", dst = "~/.b" }]\n`,
+  );
+  await sb.write(".a", "a");
+  await sb.write(".b", "b");
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  expect(await pathExists(join(sb.home, ".a"))).toBe(true);
+
+  sb.clear();
+  await sb.write("boomfile.toml", "");
+  expect(await reconcile("sync", sb.ctx, {})).not.toBe(0);
+  expect(sb.out()).toContain("section");
+  expect(sb.out()).not.toContain("reaped orphan");
+  expect(await pathExists(join(sb.home, ".a"))).toBe(true);
+  expect(await pathExists(join(sb.home, ".b"))).toBe(true);
+});
+
 test("rollback restores a link orphaned (and reaped) by the same run", async () => {
   // A reap is a real mutation like any other in the run — it must go through the same
   // journal + backup transaction so `boom rollback` can undo it, not delete outside it.
