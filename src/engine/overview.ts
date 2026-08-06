@@ -13,6 +13,7 @@ import { loadConfig, NO_CONFIG_REPO_MSG, readConfigBreadcrumb, resolveConfigDir 
 import { detectOs } from "../config/profile.ts";
 import type { Boomfile } from "../config/schema.ts";
 import type { BoomContext } from "../context.ts";
+import { AGENT_KEYCHAIN_ITEM, agentTokenPresent } from "../lib/keychain.ts";
 import { hasCommand } from "../lib/proc.ts";
 import { bandsReporter } from "../lib/reporter.ts";
 import { VERSION } from "../lib/version.ts";
@@ -20,11 +21,6 @@ import { fleetHost, readMachines } from "./fleet.ts";
 import { listRuns } from "./journal.ts";
 import { readLock } from "./pinning.ts";
 import { reportRepoDrift } from "./status.ts";
-
-// The macOS keychain item the 1Password service-account path resolves secrets through — the same
-// one `boom doctor` checks. A missing token only bites a machine that actually declares secrets,
-// so status surfaces it as a note in the Secrets section rather than a standalone check.
-const KEYCHAIN_ITEM = "op-claude-agent";
 
 export async function boomStatus(ctx: BoomContext, json = false): Promise<number> {
   const report = bandsReporter(ctx.process, ctx.env, "status", { json, setup: "SURVEYING THE MACHINE…" });
@@ -117,13 +113,11 @@ export async function boomStatus(ctx: BoomContext, json = false): Promise<number
     if (hasCommand("op", ctx.env)) report.ok(`${secretCount} secret(s) declared · op (1Password) on PATH`);
     else report.warn(`${secretCount} secret(s) declared but op (1Password) not on PATH`);
     // The agent secret path (service-account token in the keychain) is macOS-only; a missing
-    // token is a note, not a warning — an interactive `op` session may still resolve refs.
-    if (detectOs(ctx.env) === "darwin") {
-      const p = Bun.spawnSync(["security", "find-generic-password", "-s", KEYCHAIN_ITEM, "-w"], {
-        stdout: "ignore",
-        stderr: "ignore",
-      });
-      if (p.exitCode !== 0) report.note(`${KEYCHAIN_ITEM} keychain token missing (agent secret path)`);
+    // token is a note, not a warning — an interactive `op` session may still resolve refs. The
+    // darwin gate stays here: this file composes what other modules own and introduces no state,
+    // so the probe is lib/keychain.ts's and the policy is status's.
+    if (detectOs(ctx.env) === "darwin" && !agentTokenPresent()) {
+      report.note(`${AGENT_KEYCHAIN_ITEM} keychain token missing (agent secret path)`);
     }
   }
 

@@ -8,10 +8,10 @@ import type { BoomContext } from "../context.ts";
 import { commandFlags, commandList, commandNames, type FlagInfo, subcommandGroups } from "./catalog.ts";
 import { str } from "./flags.ts";
 
-export const SHELLS = ["bash", "zsh", "fish"] as const;
+const SHELLS = ["bash", "zsh", "fish"] as const;
 export type Shell = (typeof SHELLS)[number];
 
-export function isShell(s: string): s is Shell {
+function isShell(s: string): s is Shell {
   return (SHELLS as readonly string[]).includes(s);
 }
 

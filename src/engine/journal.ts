@@ -63,7 +63,7 @@ export async function journalWrite(op: string, file: string, ctx: ReconcileCtx):
   await ctx.journal.done(op, file, undo);
 }
 
-export interface DoneRecord {
+interface DoneRecord {
   op: string;
   dst: string;
   undo: UndoToken;
@@ -71,7 +71,7 @@ export interface DoneRecord {
 
 // A non-reversible side effect (a `run` step or `hook`) — recorded so rollback can warn the
 // operator that replaying the run cannot undo it.
-export interface SideRecord {
+interface SideRecord {
   op: string;
   label: string;
 }
@@ -276,7 +276,7 @@ export async function readRun(
 // One-line summary of a recorded run, for `boom rollback --list`: how many reversible ops
 // it holds, how many non-reversible side effects, and whether it reached a clean committed
 // state (an uncommitted run was interrupted mid-sync).
-export interface RunSummary {
+interface RunSummary {
   readonly runId: string;
   readonly ops: number;
   readonly sides: number;

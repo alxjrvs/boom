@@ -15,7 +15,7 @@ import {
   materializeAgentsFarm,
   planAgentsFarm,
   pruneFarmProject,
-  resolveCodeDir,
+  requireCodeDir,
 } from "../engine/code.ts";
 import {
   defaultRemoteRef,
@@ -59,12 +59,8 @@ const claudeCommand = buildCommand<{ dryRun?: boolean }, [], BoomContext>({
     flags: { dryRun: { kind: "boolean", optional: true, brief: "Plan only; touch nothing, spawn nothing" } },
   },
   async func(flags) {
-    const root = await resolveCodeDir(this.env);
-    if (!root) {
-      this.process.stderr.write("boom code: no code dir — run: boom code init [DIR]\n");
-      this.process.exitCode = 1;
-      return;
-    }
+    const root = await requireCodeDir(this);
+    if (!root) return;
     const { links, collisions } = await planAgentsFarm(root);
     const farm = agentsFarmDir(this.env);
     const report = bandsReporter(this.process, this.env, "code", { setup: "OPENING THE PORTAL…" });
@@ -104,12 +100,8 @@ const cmuxCommand = buildCommand<{ dryRun?: boolean }, [], BoomContext>({
   docs: { brief: "One cmux workspace per repo" },
   parameters: { flags: { dryRun: { kind: "boolean", optional: true, brief: "Plan only; spawn nothing" } } },
   async func(flags) {
-    const root = await resolveCodeDir(this.env);
-    if (!root) {
-      this.process.stderr.write("boom code: no code dir — run: boom code init [DIR]\n");
-      this.process.exitCode = 1;
-      return;
-    }
+    const root = await requireCodeDir(this);
+    if (!root) return;
     const repos = await findRepos(root);
     // verbose (stream, no krackle): the loop spawns `cmux open` with inherited stdout while the
     // band is open, so a dense-mode krackle line would be corrupted by the child's output when
@@ -148,12 +140,8 @@ const fetchCommand = buildCommand<{ dryRun?: boolean }, [], BoomContext>({
     flags: { dryRun: { kind: "boolean", optional: true, brief: "List repos; fetch nothing" } },
   },
   async func(flags) {
-    const root = await resolveCodeDir(this.env);
-    if (!root) {
-      this.process.stderr.write("boom code: no code dir — run: boom code init [DIR]\n");
-      this.process.exitCode = 1;
-      return;
-    }
+    const root = await requireCodeDir(this);
+    if (!root) return;
     const repos = await findRepos(root);
     const report = bandsReporter(this.process, this.env, "code fetch", {
       setup: "FANNING OUT ACROSS THE CODE DIR…",
@@ -228,12 +216,8 @@ const reapCommand = buildCommand<
     aliases: { i: "interactive" },
   },
   async func(flags) {
-    const root = await resolveCodeDir(this.env);
-    if (!root) {
-      this.process.stderr.write("boom code: no code dir — run: boom code init [DIR]\n");
-      this.process.exitCode = 1;
-      return;
-    }
+    const root = await requireCodeDir(this);
+    if (!root) return;
     const repos = await findRepos(root);
     const report = bandsReporter(this.process, this.env, "code reap", {
       setup: "SWEEPING AGENT WORKTREES…",

@@ -16,7 +16,7 @@ import { captureArgvAsync, hasCommand } from "../lib/proc.ts";
 import { bandsReporter } from "../lib/reporter.ts";
 import { adopt } from "./adopt.ts";
 
-export interface InitOptions {
+interface InitOptions {
   readonly repo?: string; // owner/repo (or any git remote ref parseRemoteRef accepts)
   readonly dir?: string;
   readonly dryRun?: boolean;

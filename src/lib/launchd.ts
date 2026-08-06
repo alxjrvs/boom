@@ -35,7 +35,7 @@ function xml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-export interface AgentPlist {
+interface AgentPlist {
   readonly label: string;
   readonly programArgs: readonly string[];
   readonly startInterval: number;

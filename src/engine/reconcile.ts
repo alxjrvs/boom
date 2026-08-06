@@ -8,11 +8,10 @@ import { loadConfig, NO_CONFIG_REPO_MSG, resolveConfigDir } from "../config/load
 import { profileContext, sectionApplies } from "../config/profile.ts";
 import type { Boomfile } from "../config/schema.ts";
 import type { BoomContext } from "../context.ts";
-import { colorEnabled } from "../lib/color.ts";
 import { displayPath, filesEqual, linkTarget, pathExists } from "../lib/fs.ts";
 import { acquireLock } from "../lib/lock.ts";
 import { backupsDir } from "../lib/paths.ts";
-import { REPORT_SCHEMA_VERSION, Reporter } from "../lib/reporter.ts";
+import { bandsReporter, REPORT_SCHEMA_VERSION } from "../lib/reporter.ts";
 import { displace, Journal, newRunId, pruneRuns, readRun } from "./journal.ts";
 import { finalizeResources, reconcileSection } from "./registry.ts";
 import { installAskpass } from "./secrets/askpass.ts";
@@ -34,7 +33,7 @@ const SETUP_COPY: Record<Verb, string> = {
   uninstall: "UNMAKING WHAT WAS MADE…",
 };
 
-export interface ReconcileOptions {
+interface ReconcileOptions {
   readonly only?: string[];
   readonly dryRun?: boolean;
   readonly linkMode?: LinkMode;
@@ -124,25 +123,14 @@ async function reapOrphans(ctx: ReconcileCtx, prior: readonly ManifestEntry[]): 
 export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOptions): Promise<number> {
   const json = opts.json ?? false;
   const verbose = opts.verbose ?? false;
-  const color = colorEnabled(ctx.env);
-  // Interactive = a real TTY on stdout (and color on, and not JSON): the only case where quiet
-  // bands can draw a live krackle line and rewrite it in place. Piped/CI output prints only the
-  // resolved band. The cast is because the Stream contract is just { write }.
-  const interactive = !json && color && Boolean((ctx.process.stdout as { isTTY?: boolean }).isTTY);
-  // Human runs get the cosmic-bands surface; --json stays on the structured envelope (bands off).
-  // categoryMode groups the dense default by distinct category (DOTFILES/PACKAGES/…) instead of
-  // one band per section — it only diverges when quiet, so --verbose keeps the per-section firehose.
-  const report = new Reporter(
-    ctx.process.stdout,
-    ctx.process.stderr,
-    color,
+  // Human runs get the cosmic-bands surface; --json stays on the structured envelope. `category`
+  // groups the dense default by distinct category (DOTFILES/PACKAGES/…) instead of one band per
+  // section — it only diverges when quiet, so --verbose keeps the per-section firehose.
+  const report = bandsReporter(ctx.process, ctx.env, opts.command ?? verb, {
     json,
     verbose,
-    !json,
-    interactive,
-    true,
-  );
-  report.command = opts.command ?? verb;
+    surface: "category",
+  });
   // Every line until a section resource (or a later phase) sets its own category lands under
   // CONFIG — including the config-repo sync below and any early bail-out failure.
   report.category = "CONFIG";

@@ -71,7 +71,7 @@ function ctxFor(env: Env, over: Partial<ReconcileCtx> = {}): ReconcileCtx {
     env,
     vars: {},
     profile: profileContext(env, []),
-    report: new Reporter(sink, sink, false),
+    report: new Reporter({ out: sink, err: sink }, { color: false }),
     declared: [],
     ownershipIncomplete: false,
     dirty: new Set<string>(),

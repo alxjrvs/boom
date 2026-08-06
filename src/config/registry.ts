@@ -7,7 +7,7 @@
 // Each entry's `ref` is exactly what would go in `use = [...]` — a `github:owner/repo` ref the
 // existing module resolver (config/modules.ts) already understands.
 
-export interface RegistryPack {
+interface RegistryPack {
   readonly name: string;
   readonly ref: string;
   readonly description: string;

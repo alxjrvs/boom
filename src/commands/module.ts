@@ -12,6 +12,7 @@ import { resolveModule } from "../config/modules.ts";
 import { findPack, insertUseRef, searchRegistry } from "../config/registry.ts";
 import type { BoomContext } from "../context.ts";
 import { bandsReporter, type Reporter } from "../lib/reporter.ts";
+import { jsonFlag, str } from "./flags.ts";
 
 // `boom module list` (default) — the original behavior: list the boomfile's `use` modules and
 // whether each resolves. `--update` re-fetches remote modules into the cache.
@@ -20,7 +21,7 @@ const listCommand = buildCommand<{ update?: boolean; json?: boolean }, [], BoomC
   parameters: {
     flags: {
       update: { kind: "boolean", optional: true, brief: "Re-fetch remote modules into the cache" },
-      json: { kind: "boolean", optional: true, brief: "Emit a structured JSON report" },
+      json: jsonFlag,
     },
   },
   async func(flags) {
@@ -70,7 +71,7 @@ const listCommand = buildCommand<{ update?: boolean; json?: boolean }, [], BoomC
 
 // `boom module search [term]` — filter the curated registry by name/description/tags. Testable
 // core split out so a sandbox can drive it without going through the Stricli command shell.
-export function runModuleSearch(ctx: BoomContext, term: string, json?: boolean): number {
+function runModuleSearch(ctx: BoomContext, term: string, json?: boolean): number {
   const report = bandsReporter(ctx.process, ctx.env, "module", { json, setup: "SEARCHING THE REGISTRY…" });
   const matches = searchRegistry(term);
   if (matches.length === 0) {
@@ -93,10 +94,10 @@ export function runModuleSearch(ctx: BoomContext, term: string, json?: boolean):
 const searchCommand = buildCommand<{ json?: boolean }, [string?], BoomContext>({
   docs: { brief: "Search the curated module registry by name, description, or tag" },
   parameters: {
-    flags: { json: { kind: "boolean", optional: true, brief: "Emit a structured JSON report" } },
+    flags: { json: jsonFlag },
     positional: {
       kind: "tuple",
-      parameters: [{ parse: (s) => s, placeholder: "term", brief: "substring to match", optional: true }],
+      parameters: [{ parse: str, placeholder: "term", brief: "substring to match", optional: true }],
     },
   },
   func(flags, term) {
@@ -107,7 +108,7 @@ const searchCommand = buildCommand<{ json?: boolean }, [string?], BoomContext>({
 // `boom module add <name>` — resolve <name> in the registry and splice its ref into the
 // boomfile's top-level `use`. Idempotent (an already-present ref is a skip, not a duplicate).
 // Testable core, like runModuleSearch.
-export async function runModuleAdd(ctx: BoomContext, name: string, json?: boolean): Promise<number> {
+async function runModuleAdd(ctx: BoomContext, name: string, json?: boolean): Promise<number> {
   const report = bandsReporter(ctx.process, ctx.env, "module", { json, setup: "ADDING MODULE…" });
   const finish = (msgs: Parameters<Reporter["finish"]>[0]): number =>
     json ? report.finishJson(ctx.process.stdout, false) : report.finish(msgs);
@@ -154,12 +155,10 @@ export async function runModuleAdd(ctx: BoomContext, name: string, json?: boolea
 const addCommand = buildCommand<{ json?: boolean }, [string], BoomContext>({
   docs: { brief: "Add a registry pack's ref to your boomfile's `use` (then `boom source` to apply)" },
   parameters: {
-    flags: { json: { kind: "boolean", optional: true, brief: "Emit a structured JSON report" } },
+    flags: { json: jsonFlag },
     positional: {
       kind: "tuple",
-      parameters: [
-        { parse: (s) => s, placeholder: "name", brief: "registry pack name (see `module search`)" },
-      ],
+      parameters: [{ parse: str, placeholder: "name", brief: "registry pack name (see `module search`)" }],
     },
   },
   async func(flags, name) {

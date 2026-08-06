@@ -311,6 +311,59 @@ function renderBoomfile(a: Adopted, host: string, stamp: string): string {
   return `${lines.join("\n")}\n`;
 }
 
+// adopt's epilogue, spelled once. Five exits used to repeat the same `fail` formatter beside a
+// varying `ok` string — and the failure wording is the part that must never diverge.
+function finishAdopt(report: Reporter, ok: string): number {
+  return report.finish({ ok, fail: (f) => `adopt: ${f} failure(s)` });
+}
+
+// `--from <manager>`: import a competing dotfile manager's layout instead of sweeping the live
+// machine. An unknown name fails loudly with the supported set; a missing source dir warns and
+// still writes an (empty) proposal, so the user has a file to start from either way. Hoisted out
+// of adopt() so that function reads as guard → import → machine sweep.
+async function adoptFromImporter(
+  ctx: BoomContext,
+  out: string,
+  from: string,
+  report: Reporter,
+): Promise<number> {
+  const importer = findImporter(from);
+  if (!importer) {
+    report.fail(`unknown --from "${from}" — supported: ${importerNames()}`);
+    return finishAdopt(report, "adopt done");
+  }
+  await mkdir(out, { recursive: true });
+  report.header("Importing");
+  const host = ctx.env.BOOM_HOST ?? "this machine";
+  const stamp = new Date().toISOString().slice(0, 10);
+  const sourceDir = await importer.detect(ctx.env);
+
+  const imported: NonNullable<Adopted["imported"]> = { manager: importer.name, entries: [], notes: [] };
+  if (sourceDir === undefined) {
+    report.warn(`no ${importer.name} config found — nothing to import`);
+  } else {
+    const { entries, notes } = await report.spin(`reading ${importer.name}`, () =>
+      importer.collect(sourceDir, ctx.env),
+    );
+    imported.entries = entries;
+    imported.notes = notes;
+    report.ok(`imported ${entries.length} entr${entries.length === 1 ? "y" : "ies"} from ${importer.name}`);
+    for (const n of notes) report.note(n);
+  }
+  await Bun.write(
+    join(out, "boomfile.toml"),
+    renderBoomfile({ brewCount: 0, miseTools: {}, dotfiles: [], others: [], imported }, host, stamp),
+  );
+  if (sourceDir === undefined) {
+    report.ok(`empty proposal → ${out}`);
+    return finishAdopt(report, "adopt: nothing imported");
+  }
+  report.header("Proposal written");
+  report.ok(`boom config proposal → ${out}`);
+  report.note("review it, then: cd into it, git init, and `boom source set <owner/repo>`");
+  return finishAdopt(report, "adopt: config proposed");
+}
+
 export async function adopt(
   ctx: BoomContext,
   opts: { out?: string; force?: boolean; from?: string },
@@ -320,65 +373,10 @@ export async function adopt(
 
   if ((await pathExists(join(out, "boomfile.toml"))) && !opts.force) {
     report.fail(`${out}/boomfile.toml already exists — pass --force to overwrite, or choose --out`);
-    return report.finish({ ok: "adopt done", fail: (f) => `adopt: ${f} failure(s)` });
+    return finishAdopt(report, "adopt done");
   }
 
-  // `--from <manager>`: import a competing dotfile manager's layout instead of sweeping the live
-  // machine. An unknown name fails loudly with the supported set; a missing source dir warns.
-  if (opts.from !== undefined) {
-    const importer = findImporter(opts.from);
-    if (!importer) {
-      report.fail(`unknown --from "${opts.from}" — supported: ${importerNames()}`);
-      return report.finish({ ok: "adopt done", fail: (f) => `adopt: ${f} failure(s)` });
-    }
-    await mkdir(out, { recursive: true });
-    report.header("Importing");
-    const host = ctx.env.BOOM_HOST ?? "this machine";
-    const stamp = new Date().toISOString().slice(0, 10);
-    const sourceDir = await importer.detect(ctx.env);
-    if (sourceDir === undefined) {
-      report.warn(`no ${importer.name} config found — nothing to import`);
-      await Bun.write(
-        join(out, "boomfile.toml"),
-        renderBoomfile(
-          {
-            brewCount: 0,
-            miseTools: {},
-            dotfiles: [],
-            others: [],
-            imported: { manager: importer.name, entries: [], notes: [] },
-          },
-          host,
-          stamp,
-        ),
-      );
-      report.ok(`empty proposal → ${out}`);
-      return report.finish({ ok: "adopt: nothing imported", fail: (f) => `adopt: ${f} failure(s)` });
-    }
-    const { entries, notes } = await report.spin(`reading ${importer.name}`, () =>
-      importer.collect(sourceDir, ctx.env),
-    );
-    report.ok(`imported ${entries.length} entr${entries.length === 1 ? "y" : "ies"} from ${importer.name}`);
-    for (const n of notes) report.note(n);
-    await Bun.write(
-      join(out, "boomfile.toml"),
-      renderBoomfile(
-        {
-          brewCount: 0,
-          miseTools: {},
-          dotfiles: [],
-          others: [],
-          imported: { manager: importer.name, entries, notes },
-        },
-        host,
-        stamp,
-      ),
-    );
-    report.header("Proposal written");
-    report.ok(`boom config proposal → ${out}`);
-    report.note("review it, then: cd into it, git init, and `boom source set <owner/repo>`");
-    return report.finish({ ok: "adopt: config proposed", fail: (f) => `adopt: ${f} failure(s)` });
-  }
+  if (opts.from !== undefined) return adoptFromImporter(ctx, out, opts.from, report);
 
   await mkdir(out, { recursive: true });
 
@@ -406,5 +404,5 @@ export async function adopt(
   report.header("Proposal written");
   report.ok(`boom config proposal → ${out}`);
   report.note("review it, then: cd into it, git init, and `boom source set <owner/repo>`");
-  return report.finish({ ok: "adopt: config proposed", fail: (f) => `adopt: ${f} failure(s)` });
+  return finishAdopt(report, "adopt: config proposed");
 }

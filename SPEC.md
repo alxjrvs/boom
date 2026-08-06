@@ -42,9 +42,15 @@ A `boom` invocation does one of two things:
    config-repo changes and pushes them (`src/engine/commit.ts`), sharing its commit logic with
    `source --commit` so the default message/behavior can't drift between the two.
 
-2. **Discovered subcommands** — built-ins are the `@stricli` route map (`source`,
-   `status`, `init`, `code`, `mcp`, `where`, `rollback`, `upgrade`, `doctor`, `fleet`,
-   `module`, `adopt`, `completions`, `man`, `skill`); `fleet` and `module` are themselves
+2. **Discovered subcommands** — built-ins are the `@stricli` route map, in `src/cli.ts` order:
+   <!-- commands:begin -->
+   `verify`, `status`, `plan`, `uninstall`, `source`, `where`, `edit`, `rollback`,
+   `checkpoint`, `upgrade`, `doctor`, `lock`, `adopt`, `init`, `fleet`, `module`, `code`,
+   `mcp`, `askpass`, `completions`, `man`, `skill`.
+   <!-- commands:end -->
+   That list is asserted **equal** to `commandNames()` by `test/docs-hygiene.test.ts`, so adding
+   a route without naming it here (or naming one that no longer routes) fails CI. `source`,
+   `fleet`, `module`, `code` and `mcp` are themselves
    nested route maps (`fleet drift|diff`, `module search|add`). `boom init` is the greenfield
    cold-start (adopt → `git init` + commit → create remote → push → breadcrumb). User commands
    resolve at runtime from `<config>/commands/<name>.ts`.
@@ -356,6 +362,32 @@ pruned past the checkpoint, so a partial rewind is never mistaken for a complete
 drives orphan reaping (verify warns; sync reaps), and a legacy TSV manifest is
 imported once on upgrade. Breadcrumbs (`config`, `code`) record the config repo (path +
 remote) and code dir.
+
+### `boom.lock` — version pinning
+
+A boomfile declares *what* to install, not *which version*, so two machines syncing the same
+config a week apart can land on different packages. `boom lock` (`src/engine/pinning.ts`) closes
+that gap without changing the model: it resolves every declared package to the version actually
+installed and writes them to `boom.lock` in the config repo — a committed, reviewable artifact,
+not machine state (which is why it lives beside the boomfile and not under the state dir).
+`boom lock --check` compares the machine against that file and exits on the usual warning-tier
+ladder (0 clean / 2 drift / 1 failure), so it works as a CI gate. Distinct from `src/lib/lock.ts`,
+which is the run mutex above — same word, unrelated concept.
+
+### `boom code` — portals to the code dir
+
+`boom code` crawls the code dir (`BOOM_CODE` → breadcrumb → `~/Code`) by the leaf rule: a git
+repo is a leaf, never descended into. Two subcommands ride that crawl:
+
+- **`boom code fetch`** — fan out `git fetch` across every repo, so `origin/HEAD` is warm when an
+  agent cuts a worktree from it. Cheap and idempotent; the canonical `[boom] schedule` entry.
+- **`boom code reap`** — sweep spent agent worktrees. It re-decides by *content* (git patch-id),
+  not SHA identity, because a squash-merge rewrites history and leaves a fully-merged branch's
+  commits existing nowhere by SHA. It removes only a worktree that is clean, unlocked (or locked
+  by a dead pid), and either fully pushed or already merged; it deletes the directory, never the
+  branch ref, so it cannot lose a commit. Default answer is *keep*; `--dry-run` classifies without
+  touching anything, `--push` publishes a clean-but-unpushed worktree first, and `-i` decides per
+  worktree.
 
 ## Stack
 

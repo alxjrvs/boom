@@ -1,8 +1,8 @@
 // Pure builders behind the launchd resource + the `[boom]` schedulers: interval parsing,
-// deterministic plist rendering, Label extraction, and the upgrade-newer compare. No
-// launchctl (the effectful helpers are darwin-only and exercised via the resource tests).
+// deterministic plist rendering, and Label extraction. No launchctl (the effectful helpers are
+// darwin-only and exercised via the resource tests). The upgrade-newer compare used to live here
+// too; it moved into test/version-compare.test.ts with the comparator it now exercises.
 import { expect, test } from "bun:test";
-import { isNewer } from "../src/engine/settings.ts";
 import { parseInterval, plistLabel, renderAgentPlist } from "../src/lib/launchd.ts";
 
 test("parseInterval normalizes s/m/h and bare seconds", () => {
@@ -43,12 +43,4 @@ test("plistLabel extracts the Label, or undefined when absent", () => {
   const p = renderAgentPlist({ label: "com.boomtube.verify", programArgs: ["/b"], startInterval: 60 });
   expect(plistLabel(p)).toBe("com.boomtube.verify");
   expect(plistLabel("<plist><dict></dict></plist>")).toBeUndefined();
-});
-
-test("isNewer compares release strings component-wise", () => {
-  expect(isNewer("0.12.0", "0.11.0")).toBe(true);
-  expect(isNewer("0.11.1", "0.11.0")).toBe(true);
-  expect(isNewer("1.0.0", "0.99.99")).toBe(true);
-  expect(isNewer("0.11.0", "0.11.0")).toBe(false);
-  expect(isNewer("0.10.0", "0.11.0")).toBe(false);
 });

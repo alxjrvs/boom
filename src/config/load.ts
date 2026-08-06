@@ -29,12 +29,12 @@ export interface ConfigRemote {
   readonly ref?: string;
 }
 
-export interface ConfigBreadcrumb {
+interface ConfigBreadcrumb {
   readonly path: string;
   readonly remote: ConfigRemote;
 }
 
-export function configBreadcrumbPath(env: Env): string {
+function configBreadcrumbPath(env: Env): string {
   return join(stateHome(env), "boom", "config");
 }
 

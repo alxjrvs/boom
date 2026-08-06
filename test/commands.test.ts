@@ -17,6 +17,7 @@ import {
   materializeAgentsFarm,
   planAgentsFarm,
   pruneFarmProject,
+  requireCodeDir,
   resolveCodeDir,
 } from "../src/engine/code.ts";
 import { runUserCommand } from "../src/engine/discovery.ts";
@@ -73,6 +74,37 @@ test("resolveCodeDir reads the breadcrumb `boom code init` writes", async () => 
   await mkdir(join(stateHome, "boom"), { recursive: true });
   await writeFile(join(stateHome, "boom", "code"), `${codeDir}\n`);
   expect(await resolveCodeDir(env)).toBe(codeDir);
+});
+
+// The guard four `boom code` subcommands used to hand-copy. It is the *only* place that error
+// string lives now, so this pins its wording, its stream and the bail-out contract at once.
+test("requireCodeDir writes one canonical error, sets exit 1, and returns undefined", async () => {
+  let err = "";
+  const stateHome = await base();
+  const ctx = {
+    env: { XDG_STATE_HOME: stateHome, HOME: join(await base(), "nope") },
+    process: { stderr: { write: (s: string) => (err += s) }, exitCode: 0 },
+  } as unknown as BoomContext;
+  expect(await requireCodeDir(ctx)).toBeUndefined();
+  expect(err).toBe("boom code: no code dir — run: boom code init [DIR]\n");
+  expect(ctx.process.exitCode).toBe(1);
+});
+
+test("requireCodeDir returns the resolved dir and leaves the exit code alone", async () => {
+  const dir = await base();
+  const ctx = {
+    env: { BOOM_CODE: dir },
+    process: {
+      stderr: {
+        write: () => {
+          throw new Error("should not write on the happy path");
+        },
+      },
+      exitCode: 0,
+    },
+  } as unknown as BoomContext;
+  expect(await requireCodeDir(ctx)).toBe(dir);
+  expect(ctx.process.exitCode).toBe(0);
 });
 
 test("findRepos finds git repos by the leaf rule, skipping worktrees", async () => {

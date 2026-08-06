@@ -4,6 +4,7 @@
 import type { Dirent } from "node:fs";
 import { mkdir, readdir, readFile, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
+import type { BoomContext } from "../context.ts";
 import { boomStateDir, type Env } from "../lib/paths.ts";
 
 export function codeBreadcrumbPath(env: Env): string {
@@ -29,6 +30,20 @@ export async function resolveCodeDir(env: Env): Promise<string | undefined> {
     if (c && (await isDir(c))) return c;
   }
   return undefined;
+}
+
+// The one code-dir guard shared by every `boom code` subcommand that needs a workspace:
+// resolve it or print the single canonical "no code dir" error. Returns undefined so callers
+// bail uniformly. Mirrors config/load.ts's requireConfigBreadcrumb — four hand-copied guards
+// is four chances for the remediation hint to drift apart.
+export async function requireCodeDir(ctx: BoomContext): Promise<string | undefined> {
+  const root = await resolveCodeDir(ctx.env);
+  if (!root) {
+    ctx.process.stderr.write("boom code: no code dir — run: boom code init [DIR]\n");
+    ctx.process.exitCode = 1;
+    return undefined;
+  }
+  return root;
 }
 
 // Grouping folders to never crawl into: `Legacy` archives retired projects (often
@@ -65,11 +80,11 @@ export async function findRepos(root: string): Promise<string[]> {
 // @-taggable for dispatch — independent of any running background agent. It lives
 // outside boom's state dir (a short, memorable path you can cd into by hand) and is
 // rebuilt from scratch each run, so nothing else should be kept there.
-export interface FarmLink {
+interface FarmLink {
   readonly name: string;
   readonly target: string;
 }
-export interface FarmPlan {
+interface FarmPlan {
   readonly links: FarmLink[];
   readonly collisions: FarmLink[];
 }
@@ -87,7 +102,7 @@ export function agentsFarmDir(env: Env): string {
 // immediately before writing, delete only the farm key, write via temp+rename so a
 // reader never sees a half-written file, and swallow every error rather than surface
 // a write race. Returns whether a key was actually removed (for the caller's log).
-export function claudeConfigPath(env: Env): string {
+function claudeConfigPath(env: Env): string {
   return join(env.HOME ?? "", ".claude.json");
 }
 

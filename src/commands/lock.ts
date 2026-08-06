@@ -6,6 +6,7 @@
 import { buildCommand } from "@stricli/core";
 import type { BoomContext } from "../context.ts";
 import { boomLock } from "../engine/pinning.ts";
+import { jsonFlag } from "./flags.ts";
 
 export const lockCommand = buildCommand<{ check?: boolean; json?: boolean }, [], BoomContext>({
   docs: { brief: "Pin resolved package versions to boom.lock (--check reports drift, exit 0/2/1)" },
@@ -16,7 +17,7 @@ export const lockCommand = buildCommand<{ check?: boolean; json?: boolean }, [],
         optional: true,
         brief: "Compare installed versions against boom.lock instead of writing it",
       },
-      json: { kind: "boolean", optional: true, brief: "Emit a structured JSON report" },
+      json: jsonFlag,
     },
   },
   async func(flags) {

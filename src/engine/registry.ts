@@ -1,7 +1,8 @@
 // The resource registry: a data-driven, phase-ordered table of resource types — the
-// executable form of the phase order (link → copy → dir → pkg → osx_default → launchd →
-// run → check → hook) that used to live only in a comment above a hand-written dispatch
-// sequence. Adding a resource is one table entry, not an edit to the section loop.
+// executable form of the phase order that used to live only in a comment above a hand-written
+// dispatch sequence. Adding a resource is one table entry, not an edit to the section loop.
+// The order below is the one SPEC.md and config/schema.ts state:
+//   link → copy → tmpl → secret → dir → pkg → osx_default → launchd → systemd → run → check → hook
 //
 // Each resource declares how to turn a Section into labelled work units (so the per-item
 // error boundary can name what failed) and, optionally, a `finalize` hook that runs once at

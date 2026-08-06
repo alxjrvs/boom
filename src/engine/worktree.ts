@@ -207,7 +207,7 @@ export function pidAlive(pid: number): boolean {
 
 export type Verdict = "reap" | "keep" | "skip";
 
-export interface Judgement {
+interface Judgement {
   readonly entry: WorktreeEntry;
   readonly verdict: Verdict;
   // Human-readable justification, shown per-worktree in the report.
@@ -417,7 +417,7 @@ export async function pushBranch(wt: string, branch: string, env: Env): Promise<
   return code === 0;
 }
 
-export type Removal = { readonly ok: true } | { readonly ok: false; readonly error: string };
+type Removal = { readonly ok: true } | { readonly ok: false; readonly error: string };
 
 // Remove the worktree directory, leaving the branch ref untouched. `--force` covers the
 // prunable case (a registered worktree whose directory already vanished) and nothing

@@ -22,7 +22,7 @@ export interface ShellResult {
   readonly stderr?: string;
 }
 
-export interface RunOptions {
+interface RunOptions {
   // Keep the parent's stdout clean for a `--json` envelope by routing the child's
   // stdout to fd 2 (the parent's stderr) — diagnostics stay visible, off the JSON
   // channel. Default: inherit the parent's stdout.

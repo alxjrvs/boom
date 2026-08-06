@@ -29,34 +29,18 @@ export function addRemote(dir: string, name: string, url: string, env: Env): Cap
   return captureArgv(["git", "remote", "add", name, url], env, { cwd: dir });
 }
 
-export function fetchOrigin(dir: string, env: Env): CaptureResult {
-  return captureArgv(["git", "fetch", "origin"], env, { cwd: dir });
-}
-
-// Async twins of the two network-slow config-repo ops, awaited under the active-work spinner
-// (see engine/sync.ts). The rest of git plumbing is local + fast, so it stays synchronous.
+// The two network-slow config-repo ops, awaited under the active-work spinner (see
+// engine/sync.ts). The rest of git plumbing is local + fast, so it stays synchronous.
 export function fetchOriginAsync(dir: string, env: Env): Promise<CaptureResult> {
   return captureArgvAsync(["git", "fetch", "origin"], env, { cwd: dir });
-}
-
-export function pullRebaseAutostashAsync(dir: string, env: Env): Promise<CaptureResult> {
-  return captureArgvAsync(["git", "pull", "--rebase", "--autostash"], env, { cwd: dir });
-}
-
-export function ffPull(dir: string, env: Env): CaptureResult {
-  return captureArgv(["git", "pull", "--ff-only"], env, { cwd: dir });
 }
 
 // --autostash: git itself stashes any dirty tracked changes before rebasing and
 // restores them after — including automatically on `rebaseAbort`, so a conflict
 // never strands local edits. Untracked files are never touched by a rebase, so they
 // don't need stashing for this to be safe.
-export function pullRebaseAutostash(dir: string, env: Env): CaptureResult {
-  return captureArgv(["git", "pull", "--rebase", "--autostash"], env, { cwd: dir });
-}
-
-export function rebaseOnto(dir: string, ref: string, env: Env): CaptureResult {
-  return captureArgv(["git", "rebase", ref], env, { cwd: dir });
+export function pullRebaseAutostashAsync(dir: string, env: Env): Promise<CaptureResult> {
+  return captureArgvAsync(["git", "pull", "--rebase", "--autostash"], env, { cwd: dir });
 }
 
 // Harmless (git errors, callers ignore the result) when no rebase is in progress —
@@ -77,11 +61,7 @@ export function checkoutRef(dir: string, ref: string, env: Env): CaptureResult {
   return captureArgv(["git", "checkout", ref], env, { cwd: dir });
 }
 
-export function push(dir: string, env: Env): CaptureResult {
-  return captureArgv(["git", "push"], env, { cwd: dir });
-}
-
-// Async twin, awaited under push's active-work indicator so the network round-trip narrates.
+// Awaited under push's active-work indicator so the network round-trip narrates.
 export function pushAsync(dir: string, env: Env): Promise<CaptureResult> {
   return captureArgvAsync(["git", "push"], env, { cwd: dir });
 }
@@ -162,14 +142,9 @@ export function untrackedFiles(dir: string, env: Env): string[] {
   return r.code === 0 && r.stdout.length > 0 ? r.stdout.split("\n") : [];
 }
 
-// `ls-remote` touches only the remote, never the local clone — safe for `boom doctor`
-// to call without mutating anything.
-export function remoteReachable(url: string, env: Env): boolean {
-  return captureArgv(["git", "ls-remote", "--exit-code", url], env).code === 0;
-}
-
-// Async twin, awaited under doctor's active-work spinner — the reachability probe is a network
-// round-trip and shouldn't run silently.
+// `ls-remote` touches only the remote, never the local clone — safe for `boom doctor` to call
+// without mutating anything. Awaited under doctor's active-work spinner: the reachability probe
+// is a network round-trip and shouldn't run silently.
 export async function remoteReachableAsync(url: string, env: Env): Promise<boolean> {
   return (await captureArgvAsync(["git", "ls-remote", "--exit-code", url], env)).code === 0;
 }
@@ -180,7 +155,7 @@ export async function remoteReachableAsync(url: string, env: Env): Promise<boole
 // so the two can't disagree. undefined when `git rev-list` itself failed (a broken clone
 // or unreadable range) — the caller must not read that as "no drift". Assumes an upstream
 // exists (@{u} resolves); callers check hasUpstream first.
-export interface RepoDrift {
+interface RepoDrift {
   readonly behind: number;
   readonly unpushed: boolean;
   readonly dirty: boolean;

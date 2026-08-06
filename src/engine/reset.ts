@@ -24,7 +24,7 @@ import {
 } from "../lib/git.ts";
 import { bandsReporter } from "../lib/reporter.ts";
 
-export interface ResetOptions {
+interface ResetOptions {
   readonly force?: boolean;
   readonly yes?: boolean;
   readonly dryRun?: boolean;

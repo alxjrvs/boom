@@ -96,17 +96,26 @@ test("a watched step still captures stderr, so a failure is still explainable", 
 test("live() writes immediately — a band-buffered line would print after the prompt it explains", () => {
   const s = sink();
   // bands mode on: every other sub-line would be held until the band closes. live() must not be.
-  const r = new Reporter(s.stream, s.stream, true, false, false, true, true, false);
+  const r = new Reporter(
+    { out: s.stream, err: s.stream },
+    { color: true, surface: "bands", interactive: true },
+  );
   r.live("Upgrading cask tuple");
   expect(s.read()).toContain("Upgrading cask tuple");
 });
 
 test("live() is suppressed for JSON (envelope stays clean) and verbose (tool already streams)", () => {
   const j = sink();
-  new Reporter(j.stream, j.stream, true, true, false, true, true, false).live("x");
+  new Reporter(
+    { out: j.stream, err: j.stream },
+    { color: true, json: true, surface: "bands", interactive: true },
+  ).live("x");
   expect(j.read()).toBe("");
   const v = sink();
-  new Reporter(v.stream, v.stream, true, false, true, true, true, false).live("x");
+  new Reporter(
+    { out: v.stream, err: v.stream },
+    { color: true, verbose: true, surface: "bands", interactive: true },
+  ).live("x");
   expect(v.read()).toBe("");
 });
 
