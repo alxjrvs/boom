@@ -86,6 +86,46 @@ test("loadConfig still rejects a typo'd [[sections]] even though section is opti
   await expect(loadConfig(dir)).rejects.toBeInstanceOf(BoomConfigError);
 });
 
+test("loadConfig accepts a scalar and a list for every `when` axis", async () => {
+  const dir = await sandbox();
+  await writeFile(
+    join(dir, "boomfile.toml"),
+    `[[section]]
+name = "scalar"
+when = { os = "darwin", host = "laptop", profile = "work" }
+
+[[section]]
+name = "list"
+when = { os = ["darwin", "linux"], host = ["laptop", "desktop"], profile = ["work", "home"] }
+`,
+  );
+  const cfg = await loadConfig(dir);
+  expect(cfg.section[0]?.when).toEqual({ os: "darwin", host: "laptop", profile: "work" });
+  expect(cfg.section[1]?.when).toEqual({
+    os: ["darwin", "linux"],
+    host: ["laptop", "desktop"],
+    profile: ["work", "home"],
+  });
+});
+
+test("loadConfig rejects an unknown os in a `when` list", async () => {
+  const dir = await sandbox();
+  // Widening the axis to a union must not widen what an os *value* may be.
+  await writeFile(join(dir, "boomfile.toml"), `[[section]]\nname = "x"\nwhen = { os = ["darwin", "win"] }\n`);
+  await expect(loadConfig(dir)).rejects.toBeInstanceOf(BoomConfigError);
+});
+
+test("loadConfig accepts `unless`/`creates` guards on a run step", async () => {
+  const dir = await sandbox();
+  await writeFile(
+    join(dir, "boomfile.toml"),
+    `[[section]]\nname = "x"\nrun = [{ on = "sync", cmd = "lefthook install", creates = ".git/hooks/pre-commit", unless = "test -x /usr/bin/true" }]\n`,
+  );
+  const cfg = await loadConfig(dir);
+  expect(cfg.section[0]?.run?.[0]?.creates).toBe(".git/hooks/pre-commit");
+  expect(cfg.section[0]?.run?.[0]?.unless).toBe("test -x /usr/bin/true");
+});
+
 test("loadConfig rejects a non-octal link mode at the schema boundary", async () => {
   const dir = await sandbox();
   await writeFile(

@@ -153,9 +153,15 @@ Resources:
   `.timer`) into `~/.config/systemd/user` and own its `systemctl --user` lifecycle
   (daemon-reload + `enable --now` on sync, `disable --now` on uninstall); linux-only. Because
   the unit text is generated, an unchanged stanza re-renders byte-identical → a no-op sync
-- `run = [{ on, cmd, timeout? }]` — the inline imperative escape; `on` is a verb or a list of
-  `"sync"|"verify"|"uninstall"`; `timeout` (seconds) caps a step's wall-clock so a hung
-  command can't block reconcile
+- `run = [{ on, cmd, timeout?, unless?, creates? }]` — the inline imperative escape; `on` is a
+  verb or a list of `"sync"|"verify"|"uninstall"`; `timeout` (seconds) caps a step's wall-clock
+  so a hung command can't block reconcile. `unless` is a shell command used as a **predicate**
+  (skip the step when it exits 0); `creates` is a path (`~`-expanded, relative to the repo —
+  the step's own cwd) skipped when it already exists. Either one satisfied skips the step, and
+  the guards apply to **every** verb the step binds to (on `on = "uninstall"`, `creates` reads
+  "skip when the path exists", which is usually backwards — use `unless` there). `creates` is
+  evaluated in a dry run; `unless` is **not** — a preview never executes user shell, it reports
+  that it couldn't tell
 - `check = [{ path, present?, absent?, message?, missing_file?, repair? }]` — content
   assertions: every `present` regex must match and every `absent` must not. On `verify` this
   folds into the exit code + JSON report; on `sync`, `repair` (a shell command, run only when
@@ -163,7 +169,8 @@ Resources:
 - `hook = [{ name, with? }]` — load `hooks/<name>.ts`, the TS resource-type extension; `with`
   carries arbitrary (TOML-typed) values, not just strings
 
-A section may carry `when = { os, host, profile }` to gate by machine; overlay
+A section may carry `when = { os, host, profile }` to gate by machine, where each value is a
+string **or** a list of strings (any-of within an axis, AND across axes); overlay
 files `boomfile.<os|host|profile>.toml` are merged onto the base. `--profile`
 (repeatable) activates named profiles; os/host auto-match (overridable via
 `BOOM_OS`/`BOOM_HOST`). An overlay merges its `[vars]` and `[boom]` over the base's

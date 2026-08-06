@@ -174,7 +174,7 @@ secret = [{ dst = "~/.config/gh/token", ref = "op://Private/GitHub/token" }]
 
 [[section]]
 name = "macOS only"
-when = { os = "darwin" }          # gate by os / host / profile
+when = { os = "darwin" }          # gate by os / host / profile (each takes a list too)
 osx_default = [{ domain = "com.apple.dock", key = "autohide", value = true }]
 launchd = [{ src = "launchd/com.me.agent.plist" }]   # link + launchctl load -w, idempotent
 

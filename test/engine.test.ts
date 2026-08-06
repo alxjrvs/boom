@@ -3,10 +3,11 @@
 // bats behavioral oracle (verbs/exit-codes/--only/copy-vs-link/hook).
 import { expect, test } from "bun:test";
 import { realpathSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BoomContext } from "../src/context.ts";
+import { readRun } from "../src/engine/journal.ts";
 import { reconcile } from "../src/engine/reconcile.ts";
 import { readManifest, writeManifest } from "../src/engine/state.ts";
 import { linkTarget, pathExists } from "../src/lib/fs.ts";
@@ -220,6 +221,68 @@ test("run step with on = uninstall fires on uninstall, not sync", async () => {
   expect(await pathExists(join(sb.home, "torn-down"))).toBe(false); // not on sync
   expect(await reconcile("uninstall", sb.ctx, {})).toBe(0);
   expect(await pathExists(join(sb.home, "torn-down"))).toBe(true); // fires on uninstall
+});
+
+test("run: `creates` skips the step when the path exists, and runs it when it doesn't", async () => {
+  const sb = await sandbox(
+    `[[section]]\nname = "S"\nrun = [{ on = "sync", cmd = 'touch "$HOME/marker"', creates = "sentinel" }]\n`,
+  );
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  expect(await pathExists(join(sb.home, "marker"))).toBe(true); // no sentinel yet → step runs
+
+  // The sentinel lands in the *repo*, not the invocation cwd: a relative `creates` resolves
+  // against ctx.repo, matching the cwd the step itself runs under.
+  await writeFile(join(sb.repo, "sentinel"), "");
+  await rm(join(sb.home, "marker"));
+  sb.clear();
+  expect(await reconcile("sync", sb.ctx, { verbose: true })).toBe(0);
+  expect(await pathExists(join(sb.home, "marker"))).toBe(false);
+  expect(sb.out()).toContain("skipped (creates");
+});
+
+test("run: `unless` skips the step when the probe exits 0", async () => {
+  const sb = await sandbox(
+    `[[section]]\nname = "S"\nrun = [{ on = "sync", cmd = 'touch "$HOME/marker"', unless = 'test -e "$HOME/done"' }]\n`,
+  );
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  expect(await pathExists(join(sb.home, "marker"))).toBe(true); // probe fails → step runs
+
+  await writeFile(join(sb.home, "done"), "");
+  await rm(join(sb.home, "marker"));
+  sb.clear();
+  expect(await reconcile("sync", sb.ctx, { verbose: true })).toBe(0);
+  expect(await pathExists(join(sb.home, "marker"))).toBe(false);
+  expect(sb.out()).toContain("skipped (unless succeeded");
+});
+
+test("run: --dry-run evaluates `creates` but never executes `unless`", async () => {
+  // A preview must be honest about a step it would skip…
+  const satisfied = await sandbox(
+    `[[section]]\nname = "S"\nrun = [{ on = "sync", cmd = 'touch "$HOME/marker"', creates = "sentinel" }]\n`,
+  );
+  await writeFile(join(satisfied.repo, "sentinel"), "");
+  expect(await reconcile("sync", satisfied.ctx, { dryRun: true, verbose: true })).toBe(0);
+  expect(satisfied.out()).not.toContain("would run:");
+  expect(satisfied.out()).toContain("skipped (creates");
+
+  // …and must never be the first thing that runs a user's shell to find out.
+  const probe = await sandbox(
+    `[[section]]\nname = "S"\nrun = [{ on = "sync", cmd = 'touch "$HOME/marker"', unless = 'touch "$HOME/PROBE-RAN"' }]\n`,
+  );
+  expect(await reconcile("sync", probe.ctx, { dryRun: true })).toBe(0);
+  expect(await pathExists(join(probe.home, "PROBE-RAN"))).toBe(false);
+  expect(await pathExists(join(probe.home, "marker"))).toBe(false);
+  expect(probe.out()).toContain("not evaluated in a dry run");
+});
+
+test("run: a guarded step records no side-effect row", async () => {
+  const sb = await sandbox(
+    `[[section]]\nname = "S"\nrun = [{ on = "sync", cmd = 'touch "$HOME/marker"', creates = "sentinel" }]\n`,
+  );
+  await writeFile(join(sb.repo, "sentinel"), "");
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  // A condition is not a side effect: a skipped step must leave nothing for rollback to warn about.
+  expect((await readRun(sb.ctx.env))?.sides ?? []).toHaveLength(0);
 });
 
 test("hook runs a TS resource module with its inputs", async () => {

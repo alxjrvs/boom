@@ -572,7 +572,7 @@
   <section id="boomfile" style="--band:var(--solar);--on:var(--ink)">
     <div class="sec-head">
       <h2 class="disp">It's all one file!</h2>
-      <p class="sub">Typed, validated TOML — a list of sections, each declaring resources that run in phase order. Gate any section to an OS, a host, or a named profile.</p>
+      <p class="sub">Typed, validated TOML — a list of sections, each declaring resources that run in phase order. Gate any section to an OS, a host, or any of several named profiles.</p>
     </div>
     <div class="bfgrid">
       <div class="panel print lead-c">
@@ -597,7 +597,7 @@
           <li><b>pkg</b> — a Brewfile, mise tool versions, or an apt/dnf/cargo/npm/pipx/gem/flatpak list</li>
           <li><b>osx_default · launchd · systemd</b> — macOS defaults + agents, or generated systemd user units on Linux</li>
           <li><b>dir · check</b> — ensure a directory exists; assert (and repair) file content</li>
-          <li><b>run</b> — a shell step tied to a verb</li>
+          <li><b>run</b> — a shell step tied to a verb, skippable with <code>unless</code>/<code>creates</code></li>
           <li><b>hook</b> — your own typed module</li>
         </ul>
       </div>
