@@ -1,7 +1,7 @@
 // Filesystem resources: link + copy. One `file` shape, two placement strategies (symlink
 // vs byte-copy). `src` may be a single repo path or a glob pattern — a glob expands to one
 // placement per match, `dst` treated as a directory, structure preserved below the pattern's
-// static prefix. `copy` additionally supports `expand` (render ${env:VAR}/${host}/${os}).
+// static prefix. Neither places rendered content — that is `tmpl` (template.ts).
 import { realpath } from "node:fs/promises";
 import { hostname } from "node:os";
 import { basename, dirname, join } from "node:path";
@@ -248,9 +248,10 @@ async function linkOne(entry: File, place: Placement, ctx: ReconcileCtx): Promis
   }
 }
 
-// Substitute `${env:VAR}` / `${host}` / `${os}` in an `expand`ed copy's content. Unknown
-// `${env:…}` resolves to empty; unmatched `${…}` is left verbatim (so a literal shell
-// `${...}` in a config survives). The escape hatch for per-machine content without a hook.
+// The `tmpl` vocabulary: substitute `${env:VAR}` / `${host}` / `${os}` in a template's text.
+// Unknown `${env:…}` resolves to empty; unmatched `${…}` is left verbatim (so a literal shell
+// `${...}` in a config survives). It lives here, not in template.ts, only because this file
+// owns the placement primitives it was first written against; `template.ts` is its one caller.
 export function renderTemplate(text: string, ctx: ReconcileCtx): string {
   return text
     .replace(/\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g, (_, name: string) => ctx.env[name] ?? "")
@@ -267,14 +268,12 @@ async function copyOne(entry: File, place: Placement, ctx: ReconcileCtx): Promis
   ctx.declared.push({ kind: "copy", dst, src });
   const disp = displayPath(dst, ctx.env);
   const { report } = ctx;
-  const expand = entry.expand === true;
 
-  // Is dst already the intended content? (rendered content when expand; a plain byte-compare
-  // otherwise, which stays a cheap filesEqual with no read of the whole file).
+  // Is dst already the intended content? A byte-compare — cheap, and with `expand` retired a
+  // copy's intended content is exactly its source's.
   const current = async (): Promise<boolean> => {
     if (!(await pathExists(dst))) return false;
-    if (!expand) return filesEqual(src, dst);
-    return (await Bun.file(dst).text()) === renderTemplate(await Bun.file(src).text(), ctx);
+    return filesEqual(src, dst);
   };
 
   // Desired dst mode: explicit, else preserve the *source's* mode — copyFile/Bun.write don't,
@@ -309,8 +308,7 @@ async function copyOne(entry: File, place: Placement, ctx: ReconcileCtx): Promis
         : { kind: "remove" };
       await ctx.journal?.done("copy", dst, undo);
       await mkdir(dirname(dst), { recursive: true });
-      if (expand) await Bun.write(dst, renderTemplate(await Bun.file(src).text(), ctx));
-      else await copyFile(src, dst);
+      await copyFile(src, dst);
       await chmod(dst, await wantMode());
       report.ok(`${disp} copied`);
       return;

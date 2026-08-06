@@ -419,6 +419,38 @@ test("pkg apt: off-platform (darwin) is a no-op, reported on verify", async () =
   expect(sb.out()).toContain("Linux-only");
 });
 
+// System packages are shared machine state, so `boom uninstall` must leave them alone unless the
+// entry explicitly claims ownership. Both directions matter: silently keeping a package the user
+// opted to remove is annoying; silently `apt-get remove`-ing one they didn't is destructive.
+test("pkg apt: uninstall keeps packages by default and removes them under `remove_on_uninstall`", async () => {
+  const decl = (flag: string) =>
+    `[[section]]\nname = "P"\npkg = [{ manager = "apt", file = "packages.txt"${flag} }]\n`;
+  const wire = async (sb: Sandbox): Promise<string> => {
+    await writeFile(join(sb.repo, "packages.txt"), "ripgrep\n");
+    const bin = join(sb.repo, ".fakebin");
+    const log = join(sb.repo, "apt-calls.log");
+    await fakeBin(bin, "sudo", 'exec "$@"\n');
+    await fakeBin(bin, "apt-get", `echo "$@" >> "${log}"\nexit 0\n`);
+    await fakeBin(bin, "dpkg", `case " $DPKG_INSTALLED " in *" $2 "*) exit 0;; *) exit 1;; esac\n`);
+    const env = sb.ctx.env as Record<string, string | undefined>;
+    env.PATH = `${bin}:${process.env.PATH ?? ""}`;
+    env.DPKG_INSTALLED = "ripgrep"; // installed, so only the flag decides whether it survives
+    return log;
+  };
+
+  // Flag absent → nothing is removed, and the report says why rather than staying silent.
+  const kept = await sandbox(decl(""), { BOOM_OS: "linux" });
+  const keptLog = await wire(kept);
+  expect(await reconcile("uninstall", kept.ctx, { verbose: true })).toBe(0);
+  expect(kept.out()).toContain("kept (remove_on_uninstall not set)");
+  expect(await pathExists(keptLog)).toBe(false); // apt-get was never invoked at all
+
+  const removed = await sandbox(decl(", remove_on_uninstall = true"), { BOOM_OS: "linux" });
+  const removedLog = await wire(removed);
+  expect(await reconcile("uninstall", removed.ctx, {})).toBe(0);
+  expect(await readFile(removedLog, "utf8")).toContain("remove -y ripgrep");
+});
+
 // ------------------------------------------------ pkg user-scoped managers (cargo/npm/pipx/…)
 
 // A stateful fake for a user-scoped manager: an env var ($<VAR>) holds the space-separated set of
@@ -463,6 +495,37 @@ exit 0
   // uninstall removes what's declared.
   expect(await reconcile("uninstall", sb.ctx, {})).toBe(0);
   expect((await readFile(state, "utf8")).trim()).toBe("");
+});
+
+// The opt-*out* direction. A user-scoped manager reclaims by default, so the only thing standing
+// between a global tool and `npm rm -g` is this flag — the test is that uninstall becomes a no-op
+// on packages it would otherwise have removed one line earlier.
+test("pkg npm: `remove_on_uninstall = false` keeps a global that uninstall would otherwise remove", async () => {
+  const sb = await sandbox(
+    `[[section]]\nname = "P"\npkg = [{ manager = "npm", file = "npm.txt", remove_on_uninstall = false }]\n`,
+  );
+  await writeFile(join(sb.repo, "npm.txt"), "prettier\ntypescript\n");
+  const bin = join(sb.repo, ".fakebin");
+  const state = join(sb.repo, "npm.state");
+  await writeFile(state, "prettier typescript ");
+  await fakeBin(
+    bin,
+    "npm",
+    `S="${state}"; touch "$S"; set=$(cat "$S")
+case "$1 $2" in
+  "install -g") echo "$set $3" | tr ' ' '\\n' | grep -v '^$' | sort -u | tr '\\n' ' ' > "$S";;
+  "rm -g") echo " $set " | sed "s/ $3 / /" | xargs > "$S";;
+  "ls -g") case " $set " in *" $4 "*) exit 0;; *) exit 1;; esac;;
+esac
+exit 0
+`,
+  );
+  const env = sb.ctx.env as Record<string, string | undefined>;
+  env.PATH = `${bin}:${process.env.PATH ?? ""}`;
+
+  expect(await reconcile("uninstall", sb.ctx, { verbose: true })).toBe(0);
+  expect((await readFile(state, "utf8")).trim().split(/\s+/).sort()).toEqual(["prettier", "typescript"]);
+  expect(sb.out()).toContain("kept (remove_on_uninstall = false)");
 });
 
 test("pkg cargo: list-query manager parses `cargo install --list` once; sync installs the missing crate", async () => {

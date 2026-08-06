@@ -166,7 +166,7 @@ const chezmoi: Importer = {
         .join("/")
         .replace(/\.tmpl$/, "");
       if (isTemplate) {
-        notes.push(`chezmoi template ${rel} → ~/${target} — render manually or use a \`copy\` + expand`);
+        notes.push(`chezmoi template ${rel} → ~/${target} — render manually or use a \`tmpl\` entry`);
         continue;
       }
       if (isSymlink) {
