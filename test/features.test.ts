@@ -1020,3 +1020,108 @@ test("checkpoint refuses while another run holds the lock", async () => {
   release();
   expect(await checkpoint(sb.ctx, "good")).toBe(0);
 });
+
+// --- precedence: duplicate destinations resolve last-wins, end to end -----------------------
+
+// A sandbox whose repo `use`s a local module, with both layers' link source files on disk.
+// `modSection` / `baseSection` are the two `[[section]]` bodies that will fight over a dst.
+async function twoLayerSandbox(modSection: string, baseSection: string): Promise<Sandbox> {
+  const sb = await sandbox(`use = ["./mod"]\n${baseSection}`);
+  await mkdir(join(sb.repo, "mod"), { recursive: true });
+  await writeFile(join(sb.repo, "mod", "boomfile.toml"), modSection);
+  await writeFile(join(sb.repo, "mod", "dotfile"), "from the module\n");
+  await writeFile(join(sb.repo, "dotfile"), "from the base repo\n");
+  return sb;
+}
+
+test("precedence: a two-layer link override converges instead of failing verify forever", async () => {
+  const sb = await twoLayerSandbox(
+    `[[section]]\nname = "Mod"\nlink = [{ src = "dotfile", dst = "~/.zshrc" }]\n`,
+    `[[section]]\nname = "Shell"\nlink = [{ src = "dotfile", dst = "~/.zshrc" }]\n`,
+  );
+  // Before last-wins, the module linked first and the base's placement then found a foreign file
+  // at dst — skipped under the default linkMode, so verify failed permanently and no `boom
+  // source` could ever converge it.
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  expect(await linkTarget(join(sb.home, ".zshrc"))).toBe(join(sb.repo, "dotfile"));
+  expect(await reconcile("verify", sb.ctx, {})).toBe(0);
+});
+
+test("precedence: a duplicate dst completes with a verdict band, not a UNIQUE-constraint stack trace", async () => {
+  const sb = await twoLayerSandbox(
+    `[[section]]\nname = "Mod"\nlink = [{ src = "dotfile", dst = "~/.zshrc" }]\n`,
+    `[[section]]\nname = "Shell"\ncopy = [{ src = "dotfile", dst = "~/.zshrc" }]\n`,
+  );
+  expect(await reconcile("sync", sb.ctx, { command: "source" })).toBe(0);
+  expect(sb.out()).toContain("COMPLETE");
+  expect(sb.out()).not.toContain("UNIQUE constraint");
+});
+
+// composeConfig runs before the section loop, so its notes land under CONFIG. A note is held back
+// from the *live* stream when quiet, but the category summary replays every buffered non-skip
+// record — so an override surfaces in the dense default too, and always in --json.
+test("precedence: an override is reported as a CONFIG note and rides in the JSON report", async () => {
+  const twoLayers = (): Promise<Sandbox> =>
+    twoLayerSandbox(
+      `[[section]]\nname = "Mod"\nlink = [{ src = "dotfile", dst = "~/.zshrc" }]\n`,
+      `[[section]]\nname = "Shell"\nlink = [{ src = "dotfile", dst = "~/.zshrc" }]\n`,
+    );
+
+  const quiet = await twoLayers();
+  expect(await reconcile("sync", quiet.ctx, {})).toBe(0);
+  expect(quiet.out()).toContain("CONFIG");
+  expect(quiet.out()).toContain("~/.zshrc — link from ./mod overridden by link in boomfile.toml");
+
+  const structured = await twoLayers();
+  expect(await reconcile("sync", structured.ctx, { json: true })).toBe(0);
+  const report = JSON.parse(structured.out()) as { records: { level: string; msg: string }[] };
+  expect(report.records.some((r) => r.level === "note" && r.msg.includes("overridden by"))).toBe(true);
+});
+
+// The destructive path Layer 5's gate exists for: keying over sections that never run would let a
+// `when`-gated winner take the destination away from the module that still declares it — the file
+// would be declared by nobody and reapOrphans would delete it on a plain `boom source`.
+test("precedence: a `when`-gated winner never causes the loser's file to be reaped", async () => {
+  const sb = await twoLayerSandbox(
+    `[[section]]\nname = "Mod"\nlink = [{ src = "dotfile", dst = "~/.npmrc" }]\n`,
+    `[[section]]\nname = "Work"\nwhen = { profile = "work" }\nlink = [{ src = "dotfile", dst = "~/.npmrc" }]\n`,
+  );
+  const dst = join(sb.home, ".npmrc");
+
+  // With the profile: the base wins, and the manifest records the destination as boom's.
+  expect(await reconcile("sync", sb.ctx, { profiles: ["work"] })).toBe(0);
+  expect(await linkTarget(dst)).toBe(join(sb.repo, "dotfile"));
+
+  // Without it: the base section is gated out, so the module's declaration is the only live one
+  // and the destination stays declared. (The default skip linkMode leaves the base's symlink
+  // alone — the point is ownership, not which source wins.) Key the winner over gated-out
+  // sections instead and this run declares the destination nowhere, and reaps the file.
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  expect(await pathExists(dst)).toBe(true);
+  expect(sb.out()).not.toContain("reaped orphan");
+});
+
+// The second way a winner can fail to own what it wins: a `secret` is deliberately kept out of the
+// owned-destinations manifest, so a secret that evicted the `copy` declaring the same path would
+// leave it declared by nobody — while the prior manifest still lists it, and reaping deletes that.
+// (Worse with the backend unavailable: the render fails AND the file goes.) Keyed per kind now, so
+// the two are independent declarations and the secret's own skip arm leaves the file alone.
+test("precedence: a secret never evicts the copy that owns the same dst", async () => {
+  const sb = await twoLayerSandbox(
+    `[[section]]\nname = "Mod"\ncopy = [{ src = "dotfile", dst = "~/.netrc" }]\n`,
+    `[[section]]\nname = "Base"\n`,
+  );
+  const dst = join(sb.home, ".netrc");
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  expect(await pathExists(dst)).toBe(true); // run 1 places it and takes ownership
+
+  // The user then adds the documented cross-kind override to their own boomfile.
+  sb.env.MY_NETRC = "rendered\n";
+  await writeFile(
+    join(sb.repo, "boomfile.toml"),
+    `use = ["./mod"]\n[[section]]\nname = "Base"\nsecret = [{ dst = "~/.netrc", ref = "env:MY_NETRC" }]\n`,
+  );
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  expect(await pathExists(dst)).toBe(true);
+  expect(sb.out()).not.toContain("reaped orphan");
+});

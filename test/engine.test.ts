@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BoomContext } from "../src/context.ts";
 import { reconcile } from "../src/engine/reconcile.ts";
+import { readManifest, writeManifest } from "../src/engine/state.ts";
 import { linkTarget, pathExists } from "../src/lib/fs.ts";
 
 interface Sandbox {
@@ -307,4 +308,20 @@ test("pkg mise: sync runs `mise install`; verify keys drift off `ls --missing` s
   expect(sb.out()).toContain("mise tools missing");
 
   expect(await calls()).toContain("install");
+});
+
+test("manifest: a duplicate dst collapses last-wins instead of throwing a raw SQLiteError", async () => {
+  const sb = await sandbox(`[[section]]\nname = "Shell"\n`);
+  const env = sb.ctx.env as Record<string, string | undefined>;
+  const dst = join(sb.home, ".zshrc");
+  // `manifest.dst` is a PRIMARY KEY: before the collapse this threw straight out of the
+  // reconcile, rolling the manifest back to the stale prior set and leaving the run uncommitted.
+  await writeManifest(env, [
+    { kind: "link", dst, src: join(sb.repo, "mod/zshrc") },
+    { kind: "copy", dst, src: join(sb.repo, "repo/zshrc") },
+  ]);
+  const rows = await readManifest(env);
+  expect(rows).toHaveLength(1);
+  expect(rows[0]?.kind).toBe("copy"); // the LAST entry is the one that survives
+  expect(rows[0]?.src).toBe(join(sb.repo, "repo/zshrc"));
 });

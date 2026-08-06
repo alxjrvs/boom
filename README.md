@@ -203,7 +203,10 @@ express. Multi-machine setups gate sections with `when`, layer overlay files
 `[vars]`-only overlay is the lightest way to differentiate a machine. Two things to know: a
 `[boom].schedule` in an overlay **replaces** the base's timer list (it's an array, not a table),
 and `use` in an overlay is an error — modules compose *before* your own sections, so declaring
-one in the file that loads *last* would invert that; put it in `boomfile.toml`.
+one in the file that loads *last* would invert that; put it in `boomfile.toml`. When two layers
+declare the same destination, the **last one wins** and the other is dropped before the run
+(reported as a note) — so overriding a module's `link` is just re-declaring the `dst` in your own
+repo, instead of a losing link surfacing as a verify failure nothing could ever converge.
 
 A top-level `[boom]` table folds boom's own self-wiring into the reconcile — refresh the
 Claude skill, nudge/auto-upgrade when a newer boom ships, record a fleet summary,

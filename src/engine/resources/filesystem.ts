@@ -14,6 +14,8 @@ import {
   ensureSymlink,
   expandTilde,
   filesEqual,
+  GLOB_MAGIC,
+  isGlobPattern,
   linkTarget,
   mkdir,
   pathExists,
@@ -30,10 +32,6 @@ interface Placement {
   readonly dst: string;
   readonly srcRel: string;
 }
-
-// The glob metacharacters Bun.Glob honors. A plain path contains none, so a single-file
-// entry never pays the scan cost or the directory-dst semantics.
-const GLOB_MAGIC = /[*?[\]{}]/;
 
 // The static prefix directory of a glob pattern — everything up to the last `/` before the
 // first magic segment. A match is placed relative to this, so `nvim/**/*.lua` keeps its
@@ -53,7 +51,7 @@ function globBase(pattern: string): string {
 // one per match; zero matches warns (a typo'd pattern is otherwise indistinguishable from
 // success), except on uninstall where "nothing to remove" is a legitimate no-op.
 async function placements(entry: File, kind: string, ctx: ReconcileCtx): Promise<Placement[]> {
-  if (!GLOB_MAGIC.test(entry.src)) {
+  if (!isGlobPattern(entry.src)) {
     return [{ src: join(ctx.repo, entry.src), dst: expandTilde(entry.dst, ctx.env), srcRel: entry.src }];
   }
   const base = globBase(entry.src);
