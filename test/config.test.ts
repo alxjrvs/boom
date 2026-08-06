@@ -145,6 +145,24 @@ test("loadConfig accepts a valid octal link mode", async () => {
   expect(cfg.section[0]?.link?.[0]?.mode).toBe("0700");
 });
 
+test('loadConfig accepts manager = "gh"', async () => {
+  const dir = await sandbox();
+  await writeFile(
+    join(dir, "boomfile.toml"),
+    `[[section]]\nname = "x"\npkg = [{ manager = "gh", file = "gh-extensions.txt" }]\n`,
+  );
+  const cfg = await loadConfig(dir);
+  expect(cfg.section[0]?.pkg?.[0]?.manager).toBe("gh");
+});
+
+test("loadConfig rejects an unknown pkg manager, naming the offending field", async () => {
+  const dir = await sandbox();
+  await writeFile(join(dir, "boomfile.toml"), `[[section]]\nname = "x"\npkg = [{ manager = "ghx" }]\n`);
+  const err = await loadConfig(dir).catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(BoomConfigError);
+  expect((err as Error).message).toContain("section.0.pkg.0.manager");
+});
+
 test("resolveConfigDir honors BOOM_CONFIG over a bogus cwd", async () => {
   const dir = await sandbox();
   await writeFile(join(dir, "boomfile.toml"), `[[section]]\nname = "x"\n`);

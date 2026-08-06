@@ -35,8 +35,16 @@ export const FileSchema = v.strictObject({
 // user-scoped managers `cargo`/`npm` (global)/`pipx`/`gem`/`flatpak` (`flatpak` Linux-only), `#`
 // comments allowed; `mise` reads the repo's own mise config and ignores it. Each manager is one
 // dispatch arm in packages.ts — the registry north star, not a top-level key per manager.
+//
+// `gh` installs `gh` CLI extensions from the same newline-separated list, one `owner/repo` per
+// line. **Owner-qualified, never the bare name**: four community forks answer to `gh-stack`, so
+// the owner *is* the identity — `gh extension install stack` is ambiguous and unpinnable. Ordering
+// gotcha: this arm shells out to `gh`, so declare it *after* whichever `pkg` entry installs `gh`
+// (entries run in array order, sections in declaration order). boom has no cross-section
+// dependency mechanism; get the order wrong on a fresh machine and the arm reports
+// `gh not installed`.
 export const PkgSchema = v.strictObject({
-  manager: v.picklist(["brew", "mise", "apt", "dnf", "cargo", "npm", "pipx", "gem", "flatpak"]),
+  manager: v.picklist(["brew", "mise", "apt", "dnf", "cargo", "npm", "pipx", "gem", "flatpak", "gh"]),
   file: v.optional(v.string()),
 });
 

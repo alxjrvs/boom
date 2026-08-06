@@ -137,7 +137,11 @@ Resources:
 - `pkg = [{ manager, file? }]` — satisfy a package manager. `brew` runs `brew bundle` over
   `file` (default `Brewfile`); `mise` runs `mise install`; `apt`/`dnf`/`cargo`/`npm` (global)/
   `pipx`/`gem`/`flatpak` install a newline-separated `file` package list, each gating on its
-  CLI being present (a missing tool is a reported failure, not a crash). One array entry per
+  CLI being present (a missing tool is a reported failure, not a crash). `gh` installs `gh` CLI
+  extensions from the same newline list, one owner-qualified `owner/repo` per line (four forks
+  answer to `gh-stack`, so the owner is the identity) — `gh extension install`, verify diffs
+  `gh extension list`, uninstall removes by bare name; declare it *after* the manager that
+  installs `gh`, since there is no cross-section dependency mechanism. One array entry per
   manager; a new manager is one dispatch arm, not a new section key
 - `osx_default = [{ domain, key, value, type? }]` — a `defaults write`; `type` is inferred
   from the TOML value (`bool`/`int`/`float`/`string`) and only stated to override an edge

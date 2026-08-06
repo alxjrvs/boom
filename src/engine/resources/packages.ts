@@ -23,6 +23,7 @@ export async function reconcilePkg(entry: Pkg, ctx: ReconcileCtx): Promise<void>
     case "pipx":
     case "gem":
     case "flatpak":
+    case "gh":
       return reconcileUserPkgs(entry.manager, entry.file, ctx);
   }
 }
@@ -282,7 +283,7 @@ async function reconcileLinuxPkgs(
 // answer; cargo and pipx have no per-package query, so their installed set is parsed once from a
 // list command and membership-tested. Every command shape mirrors adopt.ts's OTHER_MANAGERS so
 // detection (`boom adopt`) and management (`boom sync`) agree on the exact CLIs.
-type UserMgrName = "cargo" | "npm" | "pipx" | "gem" | "flatpak";
+type UserMgrName = "cargo" | "npm" | "pipx" | "gem" | "flatpak" | "gh";
 
 // A per-package probe (its exit code is the answer) vs. a one-shot list parsed into an installed
 // set (for tools with no per-package query). `parse` returns the set of installed package names.
@@ -296,6 +297,13 @@ interface UserMgr {
   readonly linuxOnly?: boolean;
   readonly install: string[]; // base argv; the package name is appended
   readonly uninstall: string[]; // base argv; the package name is appended
+  // How a declared entry is spelled in the query set. `gh` lowercases: GitHub treats `owner/repo`
+  // case-insensitively, so a declaration that differs only in case would otherwise miss the
+  // installed set and reinstall on every sync — precisely the non-idempotence this arm exists to fix.
+  readonly key?: (declared: string) => string;
+  // What the uninstall argv takes, when it isn't what `install` took. `gh extension remove` wants
+  // the bare extension *name* (`stack`), never the `owner/repo` that installed it.
+  readonly uninstallArg?: (declared: string) => string;
   readonly query: PkgQuery;
 }
 
@@ -309,6 +317,24 @@ function firstTokens(out: string): Set<string> {
     if (name) names.add(name);
   }
   return names;
+}
+
+// The `owner/repo` column of `gh extension list`. There is no `--json` for this command, and piped
+// (which is how captureArgv reads it) gh prints one TSV row per extension —
+// "gh stack\tgithub/gh-stack\tv0.1.0" — so the repo is picked **by shape** (the only token holding
+// a `/`) rather than by column index, which survives padding and column-order churn. With nothing
+// installed gh prints nothing and exits non-zero; the list-query call site ignores the exit code and
+// parses stdout, so that lands as the empty set. The query is local (it reads the extensions dir):
+// no network, no auth, so verify stays cheap and offline.
+const isRepoRef = (token: string): boolean => token.includes("/");
+
+function ghExtensions(out: string): Set<string> {
+  const repos = new Set<string>();
+  for (const line of out.split("\n")) {
+    const repo = line.trim().split(/\s+/).find(isRepoRef);
+    if (repo) repos.add(repo.toLowerCase());
+  }
+  return repos;
 }
 
 const USER_MGR: Record<UserMgrName, UserMgr> = {
@@ -344,6 +370,15 @@ const USER_MGR: Record<UserMgrName, UserMgr> = {
     install: ["flatpak", "install", "-y"],
     uninstall: ["flatpak", "uninstall", "-y"],
     query: { each: (p) => ["flatpak", "info", p] },
+  },
+  gh: {
+    cli: "gh",
+    install: ["gh", "extension", "install"],
+    uninstall: ["gh", "extension", "remove"],
+    // github/gh-stack → stack: gh strips the conventional `gh-` prefix when it names the command.
+    uninstallArg: (p) => (p.split("/").pop() ?? p).replace(/^gh-/, ""),
+    key: (p) => p.toLowerCase(),
+    query: { list: ["gh", "extension", "list"], parse: ghExtensions },
   },
 };
 
@@ -385,9 +420,12 @@ async function reconcileUserPkgs(
   // output into a set (cargo/pipx have no per-package probe); the rest probe each name's exit code.
   const q = spec.query;
   const installed = "list" in q ? q.parse(captureArgv([...q.list], ctx.env).stdout) : undefined;
+  // `key` normalizes a declared entry into the spelling the parsed set uses (gh: case-folded).
+  // Only the list discipline needs it — the `each` probes hand the name straight to the tool.
+  const norm = spec.key ?? ((p: string) => p);
   const isInstalled = (p: string): boolean =>
     installed
-      ? installed.has(p)
+      ? installed.has(norm(p))
       : captureArgv((q as { each: (p: string) => string[] }).each(p), ctx.env).code === 0;
 
   switch (ctx.verb) {
@@ -432,13 +470,17 @@ async function reconcileUserPkgs(
         report.skip(`${mgr}: nothing to remove`);
         return;
       }
+      // The removal argv can spell a package differently from the one that installed it (gh:
+      // `remove stack` undoes `install github/gh-stack`). Resolve it once so the dry-run plan
+      // prints the command that would actually run, rather than a plausible-looking near miss.
+      const arg = spec.uninstallArg ?? ((p: string) => p);
       if (ctx.dryRun) {
-        report.plan(`would run: ${spec.uninstall.join(" ")} ${present.join(" ")}`);
+        report.plan(`would run: ${spec.uninstall.join(" ")} ${present.map(arg).join(" ")}`);
         return;
       }
       for (const p of present) {
         const r = await report.spin(`${mgr} uninstall ${p}`, () =>
-          runArgvAsync([...spec.uninstall, p], ctx.env, toolIo(ctx.json, ctx.verbose)),
+          runArgvAsync([...spec.uninstall, arg(p)], ctx.env, toolIo(ctx.json, ctx.verbose)),
         );
         if (r.code === 0) report.ok(`${mgr}: removed ${p}`);
         else

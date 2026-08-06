@@ -162,7 +162,7 @@ name = "Packages"
 pkg = [
   { manager = "brew", file = "Brewfile" },          # brew bundle over the Brewfile
   { manager = "mise" },                             # mise install (reads the repo's mise config)
-  { manager = "cargo", file = "cargo.txt" },        # also: apt, dnf, npm (-g), pipx, gem, flatpak
+  { manager = "cargo", file = "cargo.txt" },        # also: apt, dnf, npm (-g), pipx, gem, flatpak, gh (extensions)
 ]
 
 [[section]]

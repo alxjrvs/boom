@@ -518,6 +518,121 @@ test("pkg gem: a manager absent from PATH reports fail, not a crash", async () =
   expect(sb.out()).toContain("gem not installed");
 });
 
+// ---------------------------------------------------------------- pkg gh (CLI extensions)
+
+// A stateful fake `gh`: the state file holds one installed `owner/repo` per line, and
+// `extension list` renders it the way real gh does when piped — a TSV row per extension whose
+// *second* column is the repo ("gh stack\tgithub/gh-stack\tv0"). That shape is the regression
+// guard for parsing by shape (the token containing a `/`) rather than by column index. With
+// nothing installed real gh prints nothing and exits 1, so the fake does too.
+async function fakeGh(bin: string, state: string, log: string): Promise<void> {
+  await fakeBin(
+    bin,
+    "gh",
+    `S="${state}"; L="${log}"; touch "$S"; touch "$L"
+case "$2" in
+  list)
+    [ -s "$S" ] || exit 1
+    while IFS= read -r r; do
+      [ -n "$r" ] || continue
+      n=$(basename "$r" | sed 's/^gh-//')
+      printf 'gh %s\\t%s\\tv0\\n' "$n" "$r"
+    done < "$S";;
+  install) echo "install $3" >> "$L"; echo "$3" >> "$S";;
+  remove) echo "remove $3" >> "$L"; grep -iv "/gh-$3$" "$S" > "$S.tmp"; mv "$S.tmp" "$S";;
+esac
+exit 0
+`,
+  );
+}
+
+test("pkg gh: sync installs a missing extension, verify diffs `gh extension list`, uninstall removes it", async () => {
+  const sb = await sandbox(`[[section]]\nname = "P"\npkg = [{ manager = "gh", file = "gh-ext.txt" }]\n`);
+  await writeFile(join(sb.repo, "gh-ext.txt"), "# extensions\ngithub/gh-stack\n");
+  const bin = join(sb.repo, ".fakebin");
+  const state = join(sb.repo, "gh.state");
+  const log = join(sb.repo, "gh-calls.log");
+  await writeFile(state, "");
+  await fakeGh(bin, state, log);
+  const env = sb.ctx.env as Record<string, string | undefined>;
+  env.PATH = `${bin}:${process.env.PATH ?? ""}`;
+
+  // Nothing installed → verify warns (exit 2) and names the miss owner-qualified.
+  expect(await reconcile("verify", sb.ctx, {})).toBe(2);
+  expect(sb.out()).toContain("gh missing: github/gh-stack");
+
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  expect((await readFile(state, "utf8")).trim()).toBe("github/gh-stack");
+  expect(await reconcile("verify", sb.ctx, {})).toBe(0);
+
+  // uninstall reverses the declared set, leaving the extension list empty.
+  expect(await reconcile("uninstall", sb.ctx, {})).toBe(0);
+  expect((await readFile(state, "utf8")).trim()).toBe("");
+});
+
+test("pkg gh: a second sync installs nothing", async () => {
+  const sb = await sandbox(`[[section]]\nname = "P"\npkg = [{ manager = "gh", file = "gh-ext.txt" }]\n`);
+  await writeFile(join(sb.repo, "gh-ext.txt"), "github/gh-stack\n");
+  const bin = join(sb.repo, ".fakebin");
+  const state = join(sb.repo, "gh.state");
+  const log = join(sb.repo, "gh-calls.log");
+  await writeFile(state, "");
+  await fakeGh(bin, state, log);
+  const env = sb.ctx.env as Record<string, string | undefined>;
+  env.PATH = `${bin}:${process.env.PATH ?? ""}`;
+
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  expect((await readFile(log, "utf8")).trim()).toBe("install github/gh-stack");
+});
+
+test("pkg gh: a differently-cased declaration still matches an installed extension", async () => {
+  const sb = await sandbox(`[[section]]\nname = "P"\npkg = [{ manager = "gh", file = "gh-ext.txt" }]\n`);
+  // GitHub treats owner/repo case-insensitively; without the `key` hook this reinstalls forever.
+  await writeFile(join(sb.repo, "gh-ext.txt"), "GitHub/gh-Stack\n");
+  const bin = join(sb.repo, ".fakebin");
+  const state = join(sb.repo, "gh.state");
+  const log = join(sb.repo, "gh-calls.log");
+  await writeFile(state, "github/gh-stack\n");
+  await fakeGh(bin, state, log);
+  const env = sb.ctx.env as Record<string, string | undefined>;
+  env.PATH = `${bin}:${process.env.PATH ?? ""}`;
+
+  expect(await reconcile("verify", sb.ctx, {})).toBe(0);
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  expect((await readFile(log, "utf8")).trim()).toBe("");
+});
+
+test("pkg gh: uninstall calls `gh extension remove <name>`, not the owner/repo", async () => {
+  const sb = await sandbox(`[[section]]\nname = "P"\npkg = [{ manager = "gh", file = "gh-ext.txt" }]\n`);
+  await writeFile(join(sb.repo, "gh-ext.txt"), "github/gh-stack\n");
+  const bin = join(sb.repo, ".fakebin");
+  const state = join(sb.repo, "gh.state");
+  const log = join(sb.repo, "gh-calls.log");
+  await writeFile(state, "github/gh-stack\n");
+  await fakeGh(bin, state, log);
+  const env = sb.ctx.env as Record<string, string | undefined>;
+  env.PATH = `${bin}:${process.env.PATH ?? ""}`;
+
+  // --dry-run must print the argv that would really run, not the owner/repo near miss.
+  expect(await reconcile("uninstall", sb.ctx, { dryRun: true })).toBe(0);
+  expect(sb.out()).toContain("gh extension remove stack");
+
+  expect(await reconcile("uninstall", sb.ctx, {})).toBe(0);
+  expect((await readFile(log, "utf8")).trim()).toBe("remove stack");
+});
+
+test("pkg gh: gh absent from PATH is a reported failure, not a crash", async () => {
+  const sb = await sandbox(`[[section]]\nname = "P"\npkg = [{ manager = "gh", file = "gh-ext.txt" }]\n`);
+  await writeFile(join(sb.repo, "gh-ext.txt"), "github/gh-stack\n");
+  const bin = join(sb.repo, ".empty");
+  await mkdir(bin, { recursive: true });
+  const env = sb.ctx.env as Record<string, string | undefined>;
+  env.PATH = bin;
+  expect(await reconcile("verify", sb.ctx, {})).toBe(1);
+  expect(sb.out()).toContain("gh not installed");
+});
+
 // ------------------------------------------------------ osx_default journaling + rollback
 
 test("osx_default: sync journals the prior value (type inferred) and rollback restores it", async () => {
