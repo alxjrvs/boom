@@ -18,7 +18,7 @@ import {
   repoDrift,
   revListCount,
 } from "../lib/git.ts";
-import type { Env } from "../lib/proc.ts";
+import type { Env } from "../lib/paths.ts";
 import type { Reporter } from "../lib/reporter.ts";
 import { commitLocalChanges } from "./commit.ts";
 import type { Verb } from "./types.ts";

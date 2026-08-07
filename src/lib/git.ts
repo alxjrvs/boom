@@ -3,14 +3,8 @@
 // `boom source push` need (ahead/behind, upstream, reachability). Shells out via
 // captureArgv — no libgit2, no GitHub API client; ambient git/SSH auth is whatever
 // already works in the user's shell.
-import {
-  type CaptureResult,
-  captureArgv,
-  captureArgvAsync,
-  type Env,
-  runArgv,
-  type ShellResult,
-} from "./proc.ts";
+import type { Env } from "./paths.ts";
+import { type CaptureResult, captureArgv, captureArgvAsync, runArgv, type ShellResult } from "./proc.ts";
 
 export function cloneRepo(url: string, dest: string, env: Env): CaptureResult {
   return captureArgv(["git", "clone", url, dest], env);

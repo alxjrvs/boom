@@ -10,7 +10,7 @@
 // lock springs into existence already carrying the pid.
 import { linkSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { boomStateDir, type Env } from "../engine/state.ts";
+import { boomStateDir, type Env } from "./paths.ts";
 
 // A live run holds the lock (as opposed to an unexpected fs error) — reconcile reports this
 // as a clean failure rather than a crash.

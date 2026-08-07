@@ -31,15 +31,15 @@ import {
   readRun,
   setRunLabel,
 } from "../src/engine/journal.ts";
-import { boomLock, readLock, writeLock } from "../src/engine/lock.ts";
 import { boomStatus } from "../src/engine/overview.ts";
+import { boomLock, readLock, writeLock } from "../src/engine/pinning.ts";
 import { reconcile } from "../src/engine/reconcile.ts";
 import { checkpoint, rollback, rollbackTo } from "../src/engine/rollback.ts";
-import { backupsDir } from "../src/engine/state.ts";
 import { linkTarget, pathExists } from "../src/lib/fs.ts";
 import { headSha } from "../src/lib/git.ts";
 import { acquireLock } from "../src/lib/lock.ts";
 import { notifyArgv } from "../src/lib/notify.ts";
+import { backupsDir } from "../src/lib/paths.ts";
 
 interface Sandbox {
   readonly home: string;

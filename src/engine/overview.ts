@@ -18,7 +18,7 @@ import { bandsReporter } from "../lib/reporter.ts";
 import { VERSION } from "../lib/version.ts";
 import { fleetHost, readMachines } from "./fleet.ts";
 import { listRuns } from "./journal.ts";
-import { readLock } from "./lock.ts";
+import { readLock } from "./pinning.ts";
 import { reportRepoDrift } from "./status.ts";
 
 // The macOS keychain item the 1Password service-account path resolves secrets through — the same

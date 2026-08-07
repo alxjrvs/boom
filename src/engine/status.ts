@@ -6,8 +6,8 @@
 // verify's warning tier), 1 when nothing is linked or git can't answer.
 import { type ConfigRemote, requireConfigBreadcrumb } from "../config/load.ts";
 import type { BoomContext } from "../context.ts";
-import type { Env } from "../engine/state.ts";
 import { fetchOriginAsync, hasUpstream, repoDrift } from "../lib/git.ts";
+import type { Env } from "../lib/paths.ts";
 import { bandsReporter, type Reporter } from "../lib/reporter.ts";
 
 // Shared verdict wording for the read-only source commands: a warning tier (drift → exit 2) and

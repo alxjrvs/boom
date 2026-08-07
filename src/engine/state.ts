@@ -1,14 +1,12 @@
-// boom's on-disk state under ${XDG_STATE_HOME:-~/.local/state}/boom/:
-//   state.db          bun:sqlite store — the owned-destinations manifest + the per-run
-//                     transaction journal (see db.ts / journal.ts)
-//   backups/<id>/...  files displaced by an overwrite (so rollback can restore)
-// The manifest was a hand-parsed TSV file before; it now lives in state.db, with a one-time
-// import of any legacy TSV so orphan reaping doesn't reset across the upgrade.
+// The owned-destinations manifest: which files boom put where, so a destination dropped
+// from the config can be reaped. Backed by the `manifest` table in state.db, with a one-time
+// import of the pre-sqlite TSV so orphan reaping doesn't reset across that upgrade.
+// The *layout* of the state dir (and the `Env` alias) lives in `lib/paths.ts` — this file is
+// the reader, not the map.
 import { readFile, rm } from "node:fs/promises";
-import { join } from "node:path";
+import type { Env } from "../lib/paths.ts";
+import { manifestPath } from "../lib/paths.ts";
 import { withDb } from "./db.ts";
-
-export type Env = Record<string, string | undefined>;
 
 // One owned destination. `kind` + `src` let reaping recognize copies (regular files,
 // which carry no symlink target to point back at the repo) — not just links — so a
@@ -17,20 +15,6 @@ export interface ManifestEntry {
   readonly kind: "link" | "copy";
   readonly dst: string;
   readonly src: string;
-}
-
-export function stateHome(env: Env): string {
-  return env.XDG_STATE_HOME ?? join(env.HOME ?? "", ".local", "state");
-}
-export function boomStateDir(env: Env): string {
-  return join(stateHome(env), "boom");
-}
-// The pre-sqlite manifest path — retained only to import a legacy TSV once (see below).
-export function manifestPath(env: Env): string {
-  return join(boomStateDir(env), "manifest");
-}
-export function backupsDir(env: Env): string {
-  return join(boomStateDir(env), "backups");
 }
 
 interface ManifestRow {

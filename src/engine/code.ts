@@ -4,7 +4,7 @@
 import type { Dirent } from "node:fs";
 import { mkdir, readdir, readFile, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
-import { boomStateDir, type Env } from "./state.ts";
+import { boomStateDir, type Env } from "../lib/paths.ts";
 
 export function codeBreadcrumbPath(env: Env): string {
   return join(boomStateDir(env), "code");

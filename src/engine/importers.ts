@@ -11,9 +11,8 @@
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { displayPath, pathExists } from "../lib/fs.ts";
+import type { Env } from "../lib/paths.ts";
 import { captureArgv, hasCommand } from "../lib/proc.ts";
-
-type Env = Record<string, string | undefined>;
 
 // One translated file: a `link` (symlink into the manager's tree) or `copy` (materialize the
 // content) whose `src` is a tilde-relative path into the manager's source and `dst` the `$HOME`

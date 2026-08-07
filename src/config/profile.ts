@@ -2,7 +2,7 @@
 // os + host auto-match the machine (overridable via BOOM_OS / BOOM_HOST, which also
 // makes them testable); profiles are opt-in via `--profile <name>` (repeatable).
 import { hostname } from "node:os";
-import type { Env } from "../engine/state.ts";
+import type { Env } from "../lib/paths.ts";
 import type { Section } from "./schema.ts";
 
 export type OsKind = "darwin" | "linux" | "unknown";

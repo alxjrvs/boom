@@ -399,10 +399,13 @@ src/
     resources/             link · copy · tmpl · secret · dir · pkg · osx · launchd · systemd · run · check · hook
     secrets/backends.ts    pluggable secret backends (op · env · pass · age · sops)
     secrets/askpass.ts     SUDO_ASKPASS shim: answer a spawned tool's sudo prompt from the vault
-    db.ts journal.ts state.ts   bun:sqlite store: transaction journal + manifest
+    db.ts journal.ts       bun:sqlite store: transaction journal
+    state.ts               the owned-destinations manifest (layout lives in lib/paths.ts)
+    skill.ts               renders the Claude SKILL.md (commands/skill.ts is the CLI wrapper)
+    pinning.ts             boom lock / --check: resolved package versions in boom.lock
     rollback.ts code.ts discovery.ts
-  config/  schema.ts load.ts remote.ts profile.ts modules.ts registry.ts (curated module packs)
-  lib/     reporter.ts color.ts fs.ts proc.ts git.ts version.ts
+  config/  schema.ts load.ts compose.ts remote.ts profile.ts modules.ts registry.ts (curated module packs)
+  lib/     reporter.ts color.ts fs.ts paths.ts proc.ts git.ts release.ts version.ts
 test/                       bun test (unit + sandboxed integration)
 examples/dotfiles/          a runnable boomfile.toml example
 .github/workflows/          ci.yml (check + cross-compile smoke), release.yml (tag → matrix → attach)

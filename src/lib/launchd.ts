@@ -4,7 +4,7 @@
 // launchctl call is darwin-only; callers OS-gate before reaching here. Pure builders
 // (parseInterval/renderAgentPlist/plistLabel) are unit-tested without touching launchctl.
 import { join } from "node:path";
-import type { Env } from "./proc.ts";
+import type { Env } from "./paths.ts";
 import { captureArgv } from "./proc.ts";
 
 // ~/Library/LaunchAgents — where per-user LaunchAgents live (loaded at login). Undefined

@@ -6,12 +6,13 @@ import { basename, dirname, join } from "node:path";
 import { buildCommand } from "@stricli/core";
 import type { BoomContext } from "../context.ts";
 import { chmod, rename, rm } from "../lib/fs.ts";
-import type { Env } from "../lib/proc.ts";
+import type { Env } from "../lib/paths.ts";
 import { runArgv } from "../lib/proc.ts";
+// The release-metadata fetchers live in lib/ so the engine's sync-time upgrade check can reach
+// them without importing a command; `REPO` comes back here for the asset/checksum URLs.
+import { latestRelease, REPO, type Release } from "../lib/release.ts";
 import { bandsReporter, type Reporter } from "../lib/reporter.ts";
 import { VERSION } from "../lib/version.ts";
-
-const REPO = "alxjrvs/boom";
 
 // The Bun `--target` suffixes boom ships. These are exactly the targets release.yml
 // cross-compiles and ci.yml smoke-builds; the lockstep is guarded by a test that greps
@@ -65,41 +66,6 @@ export async function swapInto(self: string, staged: string): Promise<void> {
 
 function releaseTarget(): string | undefined {
   return releaseTargetFor(process.platform, process.arch);
-}
-
-interface Release {
-  readonly tag: string; // e.g. "v0.0.3"
-  readonly version: string; // tag without the leading "v"
-}
-
-async function latestRelease(): Promise<Release> {
-  // GitHub requires a User-Agent; Accept pins the v3 JSON media type.
-  const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
-    headers: { "User-Agent": "boom-upgrade", Accept: "application/vnd.github+json" },
-  });
-  if (!res.ok) throw new Error(`GitHub API ${res.status} ${res.statusText}`);
-  const body = (await res.json()) as { tag_name?: string };
-  const tag = body.tag_name;
-  if (!tag) throw new Error("release has no tag_name");
-  return { tag, version: tag.replace(/^v/, "") };
-}
-
-// Best-effort latest-version probe for the `[boom] upgrade_check_on_sync` nudge: returns the
-// latest release version, or undefined on any error (offline, rate-limited, no release) —
-// never throws, so a sync-time check can't fail the sync. A 5s deadline keeps a flaky
-// network from stalling reconcile.
-export async function fetchLatestVersion(): Promise<string | undefined> {
-  try {
-    const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
-      headers: { "User-Agent": "boom-upgrade", Accept: "application/vnd.github+json" },
-      signal: AbortSignal.timeout(5000),
-    });
-    if (!res.ok) return undefined;
-    const body = (await res.json()) as { tag_name?: string };
-    return body.tag_name?.replace(/^v/, "") || undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 async function fetchBytes(url: string): Promise<Uint8Array> {

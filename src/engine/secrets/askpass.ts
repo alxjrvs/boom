@@ -34,8 +34,8 @@
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { chmod, mkdir, rm } from "../../lib/fs.ts";
-import type { Env } from "../../lib/proc.ts";
-import { boomStateDir } from "../state.ts";
+import type { Env } from "../../lib/paths.ts";
+import { boomStateDir } from "../../lib/paths.ts";
 
 // 0700: only the owner may run it. The shim is not itself a secret (it names a vault reference),
 // but it *is* a "print me the admin password" button, so it gets no wider audience than the user

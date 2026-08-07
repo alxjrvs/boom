@@ -10,7 +10,7 @@ import { dirname, join } from "node:path";
 import { parse as parseToml } from "smol-toml";
 import * as v from "valibot";
 import type { BoomContext } from "../context.ts";
-import { type Env, stateHome } from "../engine/state.ts";
+import { type Env, stateHome } from "../lib/paths.ts";
 import { type Boomfile, BoomfileSchema, type Overlay, OverlaySchema } from "./schema.ts";
 
 export const CONFIG_FILE = "boomfile.toml";

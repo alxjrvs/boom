@@ -4,8 +4,8 @@ import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { boomStateDir } from "../src/engine/state.ts";
 import { acquireLock, LockHeldError } from "../src/lib/lock.ts";
+import { boomStateDir } from "../src/lib/paths.ts";
 
 async function stateEnv(): Promise<Record<string, string>> {
   const env = { XDG_STATE_HOME: await mkdtemp(join(tmpdir(), "boom-lock-")) };

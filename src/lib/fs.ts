@@ -2,6 +2,7 @@
 // all metadata/link ops — Bun.write cannot create symlinks or set modes.
 import { chmod, copyFile, cp, lstat, mkdir, readlink, rename, rm, stat, symlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import type { Env } from "./paths.ts";
 
 // Move `src` → `dst`, surviving a cross-filesystem boundary. `rename(2)` is atomic but
 // throws EXDEV when the two paths live on different mounts — which the backup tree does
@@ -18,8 +19,6 @@ async function moveAcross(src: string, dst: string): Promise<void> {
     await rm(src, { recursive: true, force: true });
   }
 }
-
-type Env = Record<string, string | undefined>;
 
 // The glob metacharacters Bun.Glob honors. A plain path contains none, so a single-file entry
 // never pays the scan cost or the directory-dst semantics.

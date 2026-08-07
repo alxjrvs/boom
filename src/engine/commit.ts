@@ -3,7 +3,7 @@
 // can't drift between them: `boom source push` (push.ts) commits-then-pushes, and sync's
 // --commit mode (engine/sync.ts) commits before pulling instead of autostashing.
 import { addAll, commitStaged, isClean } from "../lib/git.ts";
-import type { Env } from "../lib/proc.ts";
+import type { Env } from "../lib/paths.ts";
 
 export const DEFAULT_COMMIT_MESSAGE = "boom: local changes";
 
