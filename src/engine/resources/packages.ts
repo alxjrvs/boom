@@ -14,17 +14,20 @@ export async function reconcilePkg(entry: Pkg, ctx: ReconcileCtx): Promise<void>
       return reconcileBrew(entry.file ?? "Brewfile", ctx);
     case "mise":
       return reconcileMise(ctx);
+    // The whole `entry` goes down (not just `file`) so the arms can read `remove_on_uninstall`;
+    // the narrowed manager literal still rides alongside it, because that is what keys the typed
+    // LINUX_MGR/USER_MGR lookups — `entry.manager` is the full union at those call sites.
     case "apt":
-      return reconcileLinuxPkgs("apt", entry.file, ctx);
+      return reconcileLinuxPkgs("apt", entry, ctx);
     case "dnf":
-      return reconcileLinuxPkgs("dnf", entry.file, ctx);
+      return reconcileLinuxPkgs("dnf", entry, ctx);
     case "cargo":
     case "npm":
     case "pipx":
     case "gem":
     case "flatpak":
     case "gh":
-      return reconcileUserPkgs(entry.manager, entry.file, ctx);
+      return reconcileUserPkgs(entry.manager, entry, ctx);
   }
 }
 
@@ -180,9 +183,17 @@ const LINUX_MGR = {
   apt: {
     cli: "apt-get",
     install: ["sudo", "apt-get", "install", "-y"],
+    // Only reached under `remove_on_uninstall = true`. Deliberately plain: no --force, no
+    // --ignore-dependencies, so removing something another package needs fails loudly.
+    remove: ["sudo", "apt-get", "remove", "-y"],
     query: (p: string) => ["dpkg", "-s", p],
   },
-  dnf: { cli: "dnf", install: ["sudo", "dnf", "install", "-y"], query: (p: string) => ["rpm", "-q", p] },
+  dnf: {
+    cli: "dnf",
+    install: ["sudo", "dnf", "install", "-y"],
+    remove: ["sudo", "dnf", "remove", "-y"],
+    query: (p: string) => ["rpm", "-q", p],
+  },
 } as const;
 
 // boom builds this sudo argv itself, so it has to opt into the askpass shim the way Homebrew does
@@ -204,13 +215,10 @@ async function readPackages(file: string, ctx: ReconcileCtx): Promise<string[]> 
     .filter((l) => l.length > 0);
 }
 
-async function reconcileLinuxPkgs(
-  mgr: "apt" | "dnf",
-  file: string | undefined,
-  ctx: ReconcileCtx,
-): Promise<void> {
+async function reconcileLinuxPkgs(mgr: "apt" | "dnf", entry: Pkg, ctx: ReconcileCtx): Promise<void> {
   const { report } = ctx;
-  const { cli, install, query } = LINUX_MGR[mgr];
+  const { file } = entry;
+  const { cli, install, remove, query } = LINUX_MGR[mgr];
 
   // OS-gated like osx/launchd: a Linux-only manager on a mac is a no-op (reported on verify so
   // a cross-platform section doesn't silently pass), not a failure.
@@ -272,8 +280,38 @@ async function reconcileLinuxPkgs(
       else report.warn(`${mgr} missing: ${missing.join(", ")} — run: boom source`);
       return;
     }
-    case "uninstall":
-      return; // system packages survive uninstall, like brew
+    case "uninstall": {
+      // System packages are shared machine state — another user, another tool, or the distro
+      // itself may depend on one boom happens to declare. So removal is opt-in *per entry*:
+      // `remove_on_uninstall = true` is a declaration of ownership, not a convenience flag.
+      if (entry.remove_on_uninstall !== true) {
+        report.skip(`${mgr}: kept (remove_on_uninstall not set)`);
+        return;
+      }
+      // Only remove what is actually installed: `apt-get remove` on an absent package is a
+      // non-zero failure, which would turn one already-clean package into a reported error.
+      const present = packages.filter((p) => captureArgv(query(p), ctx.env).code === 0);
+      if (present.length === 0) {
+        report.skip(`${mgr}: nothing to remove`);
+        return;
+      }
+      if (ctx.dryRun) {
+        report.plan(`would run: ${remove.join(" ")} ${present.join(" ")}`);
+        return;
+      }
+      const mayPrompt = !ctx.env.SUDO_ASKPASS;
+      const env = mayPrompt
+        ? { ...ctx.env, SUDO_PROMPT: sudoPrompt(`${cli} remove (${present.length} package(s))`) }
+        : ctx.env;
+      const r = await report.spin(
+        `${mgr} remove`,
+        () => runArgvAsync([...withAskpass(remove, ctx.env), ...present], env, toolIo(ctx.json, ctx.verbose)),
+        { mayPrompt },
+      );
+      if (r.code === 0) report.ok(`${mgr}: removed ${present.length} package(s)`);
+      else report.fail(`${mgr} remove failed${lastLine(r.stderr) ? `: ${lastLine(r.stderr)}` : ""}`);
+      return;
+    }
   }
 }
 
@@ -382,12 +420,9 @@ const USER_MGR: Record<UserMgrName, UserMgr> = {
   },
 };
 
-async function reconcileUserPkgs(
-  mgr: UserMgrName,
-  file: string | undefined,
-  ctx: ReconcileCtx,
-): Promise<void> {
+async function reconcileUserPkgs(mgr: UserMgrName, entry: Pkg, ctx: ReconcileCtx): Promise<void> {
   const { report } = ctx;
+  const { file } = entry;
   const spec = USER_MGR[mgr];
 
   // OS-gated like the apt/dnf arm: a Linux-only manager on a mac is a reported no-op, not a fail.
@@ -463,8 +498,16 @@ async function reconcileUserPkgs(
       return;
     }
     case "uninstall": {
+      // The opt-*out* direction: these managers reclaim by default, so `= false` is how you keep a
+      // global tool boom installed but doesn't own the lifecycle of (an editor's language server
+      // the rest of your shell depends on, say). Only an explicit `false` opts out — an absent key
+      // is today's behavior, unchanged.
+      if (entry.remove_on_uninstall === false) {
+        report.skip(`${mgr}: kept (remove_on_uninstall = false)`);
+        return;
+      }
       // These user-scoped managers can cleanly remove what boom installed (unlike system packages,
-      // which survive uninstall), so uninstall reverses the declared set.
+      // which survive uninstall by default), so uninstall reverses the declared set.
       const present = packages.filter((p) => isInstalled(p));
       if (present.length === 0) {
         report.skip(`${mgr}: nothing to remove`);

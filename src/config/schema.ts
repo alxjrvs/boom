@@ -17,15 +17,27 @@ const ModeSchema = v.pipe(
 //
 // One `file` shape covers both `link` and `copy` (they differ only in symlink-vs-copy).
 // `src` may be a *glob* pattern — then `dst` is treated as a directory and every match is
-// placed under it, preserving the path structure below the glob's static prefix. `expand`
-// (honored by `copy` only — a symlink has no content to render) substitutes `${env:VAR}` /
-// `${host}` / `${os}` in the file before writing: the escape hatch for the one dotfile that
-// must differ per machine, without dropping to a hook.
+// placed under it, preserving the path structure below the glob's static prefix. Neither
+// form renders content: a file whose text must differ per machine is a `tmpl`, which reads
+// the same `${env:VAR}`/`${host}`/`${os}` vocabulary plus `${NAME}` from `[vars]`.
 export const FileSchema = v.strictObject({
   src: v.string(),
   dst: v.string(),
   mode: v.optional(ModeSchema),
-  expand: v.optional(v.boolean()),
+  // Retired, and kept *declared* so the failure can name the migration: dropping the key
+  // outright leaves strictObject's generic "unknown key", which says the config is wrong but
+  // not what to do about it. `v.never` rejects any present value (an absent key still parses
+  // through `v.optional`). Delete the key at 1.0, once the message has outlived its usefulness.
+  // A template literal with escaped `\${`: these are placeholder *spellings* for the reader, and
+  // spelling them in a plain string trips noTemplateCurlyInString (which cannot tell prose from a
+  // forgotten interpolation).
+  expand: v.optional(
+    v.never(
+      "`copy.expand` was retired in favour of `tmpl` — replace this entry with " +
+        `\`tmpl = [{ src, dst, mode? }]\`, which renders the same \${env:VAR}/\${host}/\${os} ` +
+        `plus \${NAME} from [vars]`,
+    ),
+  ),
 });
 
 // A package manager to satisfy: one array entry per manager, replacing the old scalar
@@ -43,10 +55,29 @@ export const FileSchema = v.strictObject({
 // (entries run in array order, sections in declaration order). boom has no cross-section
 // dependency mechanism; get the order wrong on a fresh machine and the arm reports
 // `gh not installed`.
-export const PkgSchema = v.strictObject({
-  manager: v.picklist(["brew", "mise", "apt", "dnf", "cargo", "npm", "pipx", "gem", "flatpak", "gh"]),
-  file: v.optional(v.string()),
-});
+//
+// `remove_on_uninstall` settles the uninstall asymmetry with one explicit key instead of nine
+// implicit policies. Absent = today's behavior exactly, so no existing boomfile changes: the six
+// user-scoped managers (cargo/npm/pipx/gem/flatpak/gh) remove what they installed, apt/dnf never
+// do. `= true` opts apt/dnf **in** (a root-level `apt-get remove -y` of the declared list — hence
+// opt-in, per entry); `= false` opts a user-scoped manager **out**, for a global tool boom installs
+// but must not reclaim. Spelled to match `dir`'s `remove_on_uninstall` rather than a bare
+// `uninstall`. Rejected on brew/mise below — the `v.check` rides on the *object* because the
+// constraint is cross-field (the key's legality depends on `manager`).
+export const PkgSchema = v.pipe(
+  v.strictObject({
+    manager: v.picklist(["brew", "mise", "apt", "dnf", "cargo", "npm", "pipx", "gem", "flatpak", "gh"]),
+    file: v.optional(v.string()),
+    remove_on_uninstall: v.optional(v.boolean()),
+  }),
+  v.check(
+    (p) => p.remove_on_uninstall === undefined || (p.manager !== "brew" && p.manager !== "mise"),
+    "`remove_on_uninstall` isn't supported for `brew`/`mise` — their declared set lives in a " +
+      "Brewfile / the repo's mise config, and neither has a \"remove exactly what this file " +
+      'declares" verb (`brew bundle cleanup` does the opposite). Tear those down with a `run` ' +
+      'step bound to `on = "uninstall"`.',
+  ),
+);
 
 // The verbs a `run` step can bind to. `on` accepts a single verb or a list, so "run on sync
 // *and* uninstall" is one entry, not a duplicated pair.
@@ -131,7 +162,7 @@ export const CheckSchema = v.strictObject({
 // a fresh render's undo is a plain remove — but a pre-existing file at `dst` is the user's, so
 // it is left alone by default and only displaced (backed up, recoverably) under
 // `boom source --fix`. `mode` defaults to 0600 (a secret nobody else can read). The declarative
-// counterpart to `copy` + `expand`, for secrets.
+// counterpart to `tmpl`, for secrets.
 export const SecretSchema = v.pipe(
   v.strictObject({
     dst: v.string(),
@@ -147,12 +178,12 @@ export const SecretSchema = v.pipe(
 );
 
 // A rendered template: read one repo-relative `src`, substitute `${NAME}` placeholders from
-// the top-level `[vars]` table (plus the `${env:VAR}`/`${host}`/`${os}` vocabulary `copy`'s
-// `expand` already understands), and write the result to `dst`. The first-class,
-// strict-superset form of `copy` + `expand`: one template + per-profile vars instead of N
-// near-identical machine-specific overlay files. An unknown `${NAME}` is a hard failure (a
-// silently-unresolved placeholder in a config is worse than a loud error), whereas a literal
-// shell `${FOO:-bar}` (anything but a bare identifier) is left verbatim like `expand` does.
+// the top-level `[vars]` table (plus the `${env:VAR}`/`${host}`/`${os}` vocabulary), and write
+// the result to `dst`. The replacement for the retired `copy.expand`, which rendered that same
+// vocabulary and nothing else: one template + per-profile vars instead of N near-identical
+// machine-specific overlay files. An unknown `${NAME}` is a hard failure (a silently-unresolved
+// placeholder in a config is worse than a loud error), whereas a literal shell `${FOO:-bar}`
+// (anything but a bare identifier) is left verbatim.
 export const TmplSchema = v.strictObject({
   src: v.string(),
   dst: v.string(),

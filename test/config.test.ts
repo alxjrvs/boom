@@ -126,6 +126,60 @@ test("loadConfig accepts `unless`/`creates` guards on a run step", async () => {
   expect(cfg.section[0]?.run?.[0]?.unless).toBe("test -x /usr/bin/true");
 });
 
+// `copy.expand` is retired. The point of keeping the key *declared* (as `v.never`) is that the
+// failure can name the migration, so the error text is the contract here — not just the reject.
+test("loadConfig rejects the retired `copy.expand` and names `tmpl` in the error", async () => {
+  const dir = await sandbox();
+  await writeFile(
+    join(dir, "boomfile.toml"),
+    `[[section]]\nname = "x"\ncopy = [{ src = "a", dst = "~/a", expand = true }]\n`,
+  );
+  const err = await loadConfig(dir).catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(BoomConfigError);
+  const msg = (err as Error).message;
+  expect(msg).toContain("section.0.copy.0.expand");
+  expect(msg).toMatch(/copy\.expand/); // what to stop doing
+  expect(msg).toMatch(/tmpl/); // what to do instead — the migration must be nameable from the error
+});
+
+// Guard against over-rejecting: `v.optional(v.never(…))` must still let an absent key through,
+// or retiring one flag would break every plain `copy` in every boomfile.
+test("loadConfig still accepts a copy entry without expand", async () => {
+  const dir = await sandbox();
+  await writeFile(
+    join(dir, "boomfile.toml"),
+    `[[section]]\nname = "x"\ncopy = [{ src = "a", dst = "~/a" }]\n`,
+  );
+  const cfg = await loadConfig(dir);
+  expect(cfg.section[0]?.copy?.[0]?.dst).toBe("~/a");
+});
+
+test("loadConfig rejects `remove_on_uninstall` on brew and on mise, and accepts it on apt and on npm", async () => {
+  const dir = await sandbox();
+  for (const mgr of ["brew", "mise"]) {
+    await writeFile(
+      join(dir, "boomfile.toml"),
+      `[[section]]\nname = "x"\npkg = [{ manager = "${mgr}", remove_on_uninstall = true }]\n`,
+    );
+    const err = await loadConfig(dir).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(BoomConfigError);
+    expect((err as Error).message).toContain("remove_on_uninstall");
+  }
+  await writeFile(
+    join(dir, "boomfile.toml"),
+    `[[section]]
+name = "x"
+pkg = [
+  { manager = "apt", file = "apt.txt", remove_on_uninstall = true },
+  { manager = "npm", file = "npm.txt", remove_on_uninstall = false },
+]
+`,
+  );
+  const cfg = await loadConfig(dir);
+  expect(cfg.section[0]?.pkg?.[0]?.remove_on_uninstall).toBe(true);
+  expect(cfg.section[0]?.pkg?.[1]?.remove_on_uninstall).toBe(false);
+});
+
 test("loadConfig rejects a non-octal link mode at the schema boundary", async () => {
   const dir = await sandbox();
   await writeFile(

@@ -111,17 +111,18 @@ fixed phase order:
 `link → copy → tmpl → secret → dir → pkg → osx_default → launchd → systemd → run → check → hook`.
 Resources:
 
-- `link` / `copy` `= [{ src, dst, mode?, expand? }]` — place a repo file at `dst` (symlink vs
+- `link` / `copy` `= [{ src, dst, mode? }]` — place a repo file at `dst` (symlink vs
   byte-copy). `src` may be a **glob** (then `dst` is a directory and each match is placed
   under it, structure preserved below the pattern's static prefix); when a pattern matches both
   a directory and its descendants (`**`), the directory match is dropped in favour of the
   descendants, and a placement whose destination resolves inside the config repo is refused —
-  boom never links the repo into itself. `expand` (copy only)
-  substitutes `${env:VAR}`/`${host}`/`${os}` in the content — per-machine files without a hook
+  boom never links the repo into itself. Neither form renders content — that is `tmpl`
 - `tmpl = [{ src, dst, mode? }]` — render `src` to `dst`, interpolating `${NAME}` from the
-  top-level `[vars]` table (plus the same `${env:VAR}`/`${host}`/`${os}` vocab as `expand`). A
-  strict superset of `copy` + `expand`: one template with per-machine `[vars]` replaces N
-  near-identical overlay files. An unknown `${NAME}` is a hard failure (never a dangling write)
+  top-level `[vars]` table, plus `${env:VAR}`/`${host}`/`${os}`. The replacement for the
+  retired `copy.expand` and a strict superset of it: one template with per-machine `[vars]`
+  replaces N near-identical overlay files. An unknown `${NAME}` is a hard failure (never a
+  dangling write). A boomfile still carrying `expand` fails at **load**, with a message naming
+  the two-line migration
 - `secret = [{ dst, ref? | template?, mode?, backend? }]` — render a secret to a file at sync
   time; `mode` defaults to `0600`. The `backend` is inferred from the ref scheme (`op://`→op,
   `env:`→env, `pass:`→pass, `*.age`→age, `*.sops`→sops) or set explicitly — 1Password
@@ -134,7 +135,7 @@ Resources:
 - `dir = [{ path, mode?, remove_on_uninstall? }]` — ensure a standalone directory exists
   (declarative `mkdir -p`/`chmod`); `remove_on_uninstall = true` removes it on uninstall *only
   if empty*
-- `pkg = [{ manager, file? }]` — satisfy a package manager. `brew` runs `brew bundle` over
+- `pkg = [{ manager, file?, remove_on_uninstall? }]` — satisfy a package manager. `brew` runs `brew bundle` over
   `file` (default `Brewfile`); `mise` runs `mise install`; `apt`/`dnf`/`cargo`/`npm` (global)/
   `pipx`/`gem`/`flatpak` install a newline-separated `file` package list, each gating on its
   CLI being present (a missing tool is a reported failure, not a crash). `gh` installs `gh` CLI
@@ -142,7 +143,15 @@ Resources:
   answer to `gh-stack`, so the owner is the identity) — `gh extension install`, verify diffs
   `gh extension list`, uninstall removes by bare name; declare it *after* the manager that
   installs `gh`, since there is no cross-section dependency mechanism. One array entry per
-  manager; a new manager is one dispatch arm, not a new section key
+  manager; a new manager is one dispatch arm, not a new section key.
+  `remove_on_uninstall` decides what `boom uninstall` reclaims, per entry. Omitted, it is
+  today's behavior: the user-scoped managers remove what they installed, `apt`/`dnf` never do.
+  `= true` opts a system manager **in** (`sudo apt-get remove -y <declared>`, only for packages
+  actually installed) — opt-in because system packages are shared machine state, so the flag is
+  a declaration of ownership. `= false` opts a user-scoped manager **out**. It is a load-time
+  error on `brew`/`mise`: their declared set lives in a Brewfile / the repo's mise config and
+  neither has a "remove exactly what this file declares" verb (`brew bundle cleanup` does the
+  opposite) — tear those down with a `run` step bound to `on = "uninstall"`
 - `osx_default = [{ domain, key, value, type? }]` — a `defaults write`; `type` is inferred
   from the TOML value (`bool`/`int`/`float`/`string`) and only stated to override an edge
   case. The prior value is journaled, so `boom rollback` restores it (or deletes a key boom
