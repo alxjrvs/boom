@@ -20,7 +20,7 @@ import { writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { Secret } from "../../config/schema.ts";
 import { chmod, displayPath, expandTilde, mkdir, pathExists, rm, stat } from "../../lib/fs.ts";
-import { displace, type UndoToken } from "../journal.ts";
+import { journalWrite } from "../journal.ts";
 import { getBackend, type SecretResult } from "../secrets/backends.ts";
 import type { ReconcileCtx } from "../types.ts";
 
@@ -110,14 +110,13 @@ export async function reconcileSecret(entry: Secret, ctx: ReconcileCtx): Promise
         }
         return;
       }
-      // A fresh render journals a remove-only undo: rollback deletes it, and boom's own
-      // plaintext never reaches the backup tree. An overwrite (only reachable under `--fix`,
-      // and only for content that actually differs) displaces first, so the file being replaced
-      // is recoverable — that file is the user's, not something boom put there. The `done` row
-      // lands BEFORE the write in both branches, so a crash mid-write is still reversible.
-      await ctx.journal?.intent("secret", dst);
-      const undo: UndoToken = conflict ? await displace(dst, ctx.backupRoot) : { kind: "remove" };
-      await ctx.journal?.done("secret", dst, undo);
+      // One shared helper, not a fourth hand-inlined copy of the invariant — and its
+      // `pathExists ? displace : {kind:"remove"}` is exactly this resource's discipline: a fresh
+      // render journals a remove-only undo, so boom's own plaintext never reaches the backup
+      // tree and rollback deletes it; an overwrite (only reachable under `--fix`, and only for
+      // content that actually differs) displaces first, because that file is the user's, not
+      // something boom put there. The whole undo record lands BEFORE the write either way.
+      await journalWrite("secret", dst, ctx);
       await writeSecret(dst, r.value, mode);
       report.ok(`${disp} rendered (0${mode.toString(8)})`);
       return;

@@ -5,9 +5,10 @@
 // recovery hazard the old NDJSON log had.
 import type { Database } from "bun:sqlite";
 import { rm } from "node:fs/promises";
-import { backupTo } from "../lib/fs.ts";
+import { backupTo, pathExists } from "../lib/fs.ts";
 import { openDb, withDb } from "./db.ts";
 import { backupsDir, type Env } from "./state.ts";
+import type { ReconcileCtx } from "./types.ts";
 
 // How to reverse one mutation: remove what we created, rmdir a directory we created, restore a
 // backed-up file, or — for the one non-file effect — re-apply a macOS default's prior value
@@ -39,6 +40,27 @@ export async function displace(
   if (backupRoot) return { kind: "restore", from: await backupTo(dst, backupRoot) };
   await rm(dst, { recursive, force: true });
   return { kind: "remove" };
+}
+
+// Record the whole undo for a file about to be written: intent, displace whatever is there,
+// then `done` — all BEFORE the write. It returns nothing on purpose. The old shape handed the
+// token back and let the caller write `done` *after* the write "succeeded", which sounds
+// careful and is the opposite: `displace` has already moved the prior file into the backup
+// tree, so a crash between the two orphans it with no row pointing at it — unrecoverable,
+// because rollback only knows what the journal names. Undo-before-create is the invariant
+// filesystem.ts:84-88 states verbatim; this is the one helper every other writer routes through.
+//
+// The no-journal guard lives HERE, not at the call sites: `displace` with an undefined
+// backupRoot falls back to `rm(dst, { force: true })`, so a caller that skipped the guard on a
+// verify or dry run would DELETE the destination. Inside the helper, "a documented no-op
+// outside a mutating sync" is structurally true for every caller present and future.
+export async function journalWrite(op: string, file: string, ctx: ReconcileCtx): Promise<void> {
+  if (!ctx.journal) return;
+  await ctx.journal.intent(op, file);
+  const undo: UndoToken = (await pathExists(file))
+    ? await displace(file, ctx.backupRoot)
+    : { kind: "remove" };
+  await ctx.journal.done(op, file, undo);
 }
 
 export interface DoneRecord {

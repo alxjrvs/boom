@@ -251,13 +251,17 @@ On-disk state lives in a single **bun:sqlite** database at
 `${XDG_STATE_HOME:-~/.local/state}/boom/state.db` (`src/engine/db.ts`): the per-run
 transaction journal (intent/done rows + undo token, a `committed` flag) and the `manifest`
 of owned destinations. Each journal row commits atomically (WAL), so an interrupted run
-leaves whole rows — there's no torn-record to guard against on read. A mutating run holds
-an exclusive lockfile under the state dir (`src/lib/lock.ts`) so two concurrent
-sync runs can't race on destinations or clobber each other's manifest; a stale lock
-from a crashed run (dead pid) is reclaimed. `committed` is set only when the run finished
-with zero failures, so `rollback --list` distinguishes a clean run from a half-applied one;
-each destructive filesystem op journals its undo *before* the write, so a crash mid-op is
-still reversible. `source --resume` continues the interrupted run in place (its id + backup
+leaves whole rows — there's no torn-record to guard against on read. Every run that writes
+holds an exclusive lockfile under the state dir (`src/lib/lock.ts`) — `sync` **and**
+`uninstall`, plus `rollback`, `rollback --to` and `checkpoint` — so concurrent runs can't race
+on destinations or clobber each other's manifest; a stale lock from a crashed run (dead pid)
+is reclaimed, and a read-only `rollback --dry-run` is deliberately left unlocked. `committed`
+is set only when the run finished with zero failures, and only *after* the `[boom]`
+self-wiring and the end-of-run finalize phases, both of which can still fail — a failure in
+either leaves the run uncommitted, so `rollback --list` distinguishes a clean run from a
+half-applied one. Each destructive filesystem op journals its whole undo — intent, the
+displaced original, and the `done` row naming it — *before* the write, so no crash can orphan
+a backup nothing points at. `source --resume` continues the interrupted run in place (its id + backup
 tree) rather than opening a new one. Mutating runs also
 **back up** any displaced file under `…/backups/<run-id>/`. `boom rollback` replays a run's
 `done` rows in reverse (remove created links, restore backups, re-apply a macOS default's

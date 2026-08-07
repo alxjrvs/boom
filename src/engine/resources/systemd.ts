@@ -11,7 +11,7 @@ import { detectOs } from "../../config/profile.ts";
 import type { Systemd } from "../../config/schema.ts";
 import { displayPath, mkdir, pathExists } from "../../lib/fs.ts";
 import { captureArgv, type Env, hasCommand } from "../../lib/proc.ts";
-import { displace, type UndoToken } from "../journal.ts";
+import { displace, journalWrite } from "../journal.ts";
 import type { ReconcileCtx } from "../types.ts";
 
 // ~/.config/systemd/user — where per-user units live (honoring XDG_CONFIG_HOME). Undefined
@@ -68,18 +68,16 @@ interface Unit {
 }
 
 // Journal + write a unit file, but only when its content actually changed (byte-identical →
-// skip, keeping an unchanged sync a true no-op). The undo token is recorded BEFORE the write
-// (displaced original into the backup tree, or a plain remove for a fresh file) so a crash
-// mid-write is still reversible — the filesystem resource's undo-before-create discipline.
+// skip, keeping an unchanged sync a true no-op). The WHOLE undo record — displaced original
+// into the backup tree plus the `done` row naming it — lands before the write, via the shared
+// helper: this block used to write `done` after `Bun.write` while its own comment claimed
+// otherwise, so a throw from the mkdir left the displaced unit orphaned in the backup tree
+// with nothing pointing at it.
 async function writeUnit(unit: Unit, ctx: ReconcileCtx): Promise<boolean> {
   if ((await pathExists(unit.path)) && (await Bun.file(unit.path).text()) === unit.text) return false;
-  await ctx.journal?.intent("systemd", unit.path);
-  const undo: UndoToken = (await pathExists(unit.path))
-    ? await displace(unit.path, ctx.backupRoot)
-    : { kind: "remove" };
+  await journalWrite("systemd", unit.path, ctx);
   await mkdir(dirname(unit.path), { recursive: true });
   await Bun.write(unit.path, unit.text);
-  await ctx.journal?.done("systemd", unit.path, undo);
   return true;
 }
 

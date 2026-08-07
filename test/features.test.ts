@@ -38,6 +38,7 @@ import { checkpoint, rollback, rollbackTo } from "../src/engine/rollback.ts";
 import { backupsDir } from "../src/engine/state.ts";
 import { pathExists } from "../src/lib/fs.ts";
 import { headSha } from "../src/lib/git.ts";
+import { acquireLock } from "../src/lib/lock.ts";
 import { notifyArgv } from "../src/lib/notify.ts";
 
 interface Sandbox {
@@ -878,4 +879,60 @@ test("adopt --from stow with no source dir: warns, writes an empty proposal", as
   expect(await adopt(sb.ctx, { out, from: "stow" })).toBe(0);
   expect(sb.out()).toContain("no stow config found");
   expect(await pathExists(join(out, "boomfile.toml"))).toBe(true);
+});
+
+// ------------------------------------------------------- the run lock covers every writer
+
+// The lock is keyed on pid and this suite runs in one process, so holding it here is exactly
+// what a concurrent `boom source` looks like to the command under test.
+const LINKED = `[[section]]\nname = "S"\nlink = [{ src = ".a", dst = "~/.a" }]\n`;
+
+async function syncedSandbox(): Promise<Sandbox> {
+  const sb = await sandbox(LINKED);
+  await writeFile(join(sb.repo, ".a"), "a");
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  return sb;
+}
+
+test("uninstall refuses while another run holds the lock", async () => {
+  const sb = await syncedSandbox();
+  const release = acquireLock(sb.env);
+  expect(await reconcile("uninstall", sb.ctx, {})).toBe(1);
+  expect(sb.out()).toContain("another boom run is in progress");
+  expect(await pathExists(join(sb.home, ".a"))).toBe(true); // refused outright, not half torn down
+  release();
+  expect(await reconcile("uninstall", sb.ctx, {})).toBe(0);
+  expect(await pathExists(join(sb.home, ".a"))).toBe(false);
+});
+
+test("rollback refuses while another run holds the lock", async () => {
+  const sb = await syncedSandbox();
+  const release = acquireLock(sb.env);
+  expect(await rollback(sb.ctx)).toBe(1);
+  expect(sb.out()).toContain("another boom run is in progress");
+  expect(await pathExists(join(sb.home, ".a"))).toBe(true); // nothing was reversed
+  release();
+  expect(await rollback(sb.ctx)).toBe(0);
+  expect(await pathExists(join(sb.home, ".a"))).toBe(false);
+});
+
+test("rollback --dry-run reads through a held lock", async () => {
+  const sb = await syncedSandbox();
+  const release = acquireLock(sb.env);
+  // Deliberately unlocked: a read-only preview has to stay available for the length of a long
+  // sync, even at the cost of the plan going stale.
+  expect(await rollback(sb.ctx, undefined, true)).toBe(0);
+  expect(sb.out()).toContain("would remove");
+  expect(await pathExists(join(sb.home, ".a"))).toBe(true);
+  release();
+});
+
+test("checkpoint refuses while another run holds the lock", async () => {
+  const sb = await syncedSandbox();
+  const release = acquireLock(sb.env);
+  expect(await checkpoint(sb.ctx, "good")).toBe(1);
+  expect(sb.out()).toContain("another boom run is in progress");
+  expect(await findRunByLabel(sb.env, "good")).toBeUndefined(); // the label was never written
+  release();
+  expect(await checkpoint(sb.ctx, "good")).toBe(0);
 });

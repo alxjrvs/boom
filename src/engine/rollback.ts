@@ -4,10 +4,27 @@ import { rm, rmdir } from "node:fs/promises";
 import { detectOs } from "../config/profile.ts";
 import type { BoomContext } from "../context.ts";
 import { displayPath, restoreFrom } from "../lib/fs.ts";
+import { acquireLock } from "../lib/lock.ts";
 import { captureArgv, cleanEnv } from "../lib/proc.ts";
 import { bandsReporter, type Reporter } from "../lib/reporter.ts";
 import { findRunByLabel, listRuns, pruneHorizon, readRun, setRunLabel, type UndoToken } from "./journal.ts";
 import { removeManifestEntries } from "./state.ts";
+
+// Replaying a run mutates the same destinations, and rewrites the same manifest, that a sync
+// does — so it takes the same exclusive lock a mutating reconcile takes, or a scheduled sync
+// overlapping a manual rollback silently interleaves creates and removes. Released in a
+// `finally`, so every exit path frees it including a throw from the body.
+//
+// Typed on BoomContext rather than Env deliberately: all three call sites already hold a ctx,
+// and this file imports no `Env` today — reading `ctx.env` here keeps it that way.
+async function underRunLock<T>(ctx: BoomContext, body: () => Promise<T>): Promise<T> {
+  const release = acquireLock(ctx.env);
+  try {
+    return await body();
+  } finally {
+    release();
+  }
+}
 
 // One-line preview of what reversing a record would do (for --dry-run). An exhaustive switch
 // with a `never` default, not an if/else chain: adding a fifth UndoToken kind must be a compile
@@ -101,7 +118,14 @@ export async function checkpoint(ctx: BoomContext, name: string): Promise<number
     report.fail(`checkpoint '${name}' already marks run ${existing} — pick another name`);
     return report.finish({ ok: "checkpoint done", fail: (f) => `checkpoint: ${f} failure(s)` });
   }
-  await setRunLabel(ctx.env, run.runId, name);
+  // Labelling touches the `runs` table a concurrent sync is inserting into, so it takes the run
+  // lock like every other writer. A held lock is a reported failure, never a stack trace.
+  try {
+    await underRunLock(ctx, () => setRunLabel(ctx.env, run.runId, name));
+  } catch (e) {
+    report.fail((e as Error).message);
+    return report.finish({ ok: "checkpoint done", fail: (f) => `checkpoint: ${f} failure(s)` });
+  }
   report.header("Checkpoint");
   report.ok(`'${name}' → ${run.runId}`);
   report.note(`return to it with: boom rollback --to ${name}`);
@@ -198,7 +222,15 @@ export async function rollback(ctx: BoomContext, runId?: string, dryRun = false)
     return report.finish({ ok: "rollback done", fail: (f) => `rollback: ${f} failure(s)` });
   }
   report.header(`rollback ${run.runId}${dryRun ? " — dry run (no changes)" : ""}`);
-  await reverseRun(ctx, run, report, dryRun);
+  try {
+    // --dry-run reads only and stays UNLOCKED on purpose, mirroring reconcile: a preview racing
+    // a sync may print a stale plan, but blocking read-only inspection for the length of a long
+    // sync is the worse failure.
+    if (dryRun) await reverseRun(ctx, run, report, dryRun);
+    else await underRunLock(ctx, () => reverseRun(ctx, run, report, dryRun));
+  } catch (e) {
+    report.fail((e as Error).message);
+  }
   return report.finish({ ok: "rollback done", fail: (f) => `rollback: ${f} failure(s)` });
 }
 
@@ -236,9 +268,20 @@ export async function rollbackTo(ctx: BoomContext, name: string, dryRun = false)
     report.warn(
       `history was pruned past '${name}' — run(s) made after it are no longer reversible (journal pruned up to ${horizon}); rewound only the ${newer.length} retained run(s)`,
     );
-  for (const summary of newer) {
-    const run = await readRun(ctx.env, summary.runId);
-    if (run) await reverseRun(ctx, run, report, dryRun);
+  // The whole rewind runs inside ONE lock acquisition, not one per run: releasing between runs
+  // would let a sync land in the middle of a multi-run rewind and leave the machine at neither
+  // the checkpoint nor the state it started from. Dry run stays unlocked (see `rollback`).
+  const rewind = async (): Promise<void> => {
+    for (const summary of newer) {
+      const run = await readRun(ctx.env, summary.runId);
+      if (run) await reverseRun(ctx, run, report, dryRun);
+    }
+  };
+  try {
+    if (dryRun) await rewind();
+    else await underRunLock(ctx, rewind);
+  } catch (e) {
+    report.fail((e as Error).message);
   }
   return report.finish({
     ok: `rolled back to '${name}'`,
