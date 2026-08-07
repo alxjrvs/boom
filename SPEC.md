@@ -265,10 +265,47 @@ verb-aware (sync installs/refreshes, verify reports drift, uninstall tears the t
 
 ### Hooks = the resource-type extension contract
 
-`hooks/<name>.ts` default-exports (or names) `sync`/`verify`/`uninstall`
-functions receiving a `HookApi`: `{ with, verb, dryRun, env, ok, warn, fail, note }`.
+`hooks/<name>.ts` default-exports (or names) `sync`/`verify`/`uninstall` functions — plus an
+optional `declare` run on *every* verb — receiving a `HookApi`:
+
+```
+{ with, verb, dryRun, env,                       // inputs
+  repo, vars, os, host, profiles, linkMode, verbose, update,   // the run's context
+  ok, warn, fail, note, plan, skip,              // the same output tiers a core resource uses
+  declare(entry), journalWrite(op, file) }       // the two capabilities
+```
+
 Loaded by runtime `import()` (works inside the compiled binary). This replaces the
-bash `_NAME_<verb>` hooks and is the public extension point.
+bash `_NAME_<verb>` hooks and is the public extension point. What a hook gets is what a
+built-in resource gets:
+
+- **Ownership** — `declare({ kind: "link" | "copy", dst, src })` puts a destination in the
+  manifest, so orphan reaping treats it exactly like a link boom placed. It means *boom owns
+  this and may delete it*; declare only what you placed. `declare` fires on verify and dry runs
+  too, or a hook-declared file would read as drift on every verify. It is not an uninstall
+  path: `boom uninstall` dispatches each section's uninstall verb and then clears the manifest
+  without acting on it, so tearing a hook-placed destination down is the hook's own `uninstall`
+  export. A hook boom cannot load (missing module, broken import) declares nothing, so that run
+  skips orphan reaping entirely rather than reaping what the hook would have claimed.
+- **Undo** — `await api.journalWrite(op, file)` writes the transaction's undo record (and backs
+  up whatever is there) *before* the hook writes, so `boom rollback` reverses it. It is a
+  documented no-op outside a mutating sync, so calling it unconditionally is safe.
+- **`--fix` semantics** — `linkMode` tells a hook whether the user asked to overwrite, so it can
+  hold the same never-clobber-an-unowned-file default the core resources hold.
+- **Silence in steady state** — `skip()` collapses out of the default bands and `plan()` is the
+  dry run's "would …" tier, so a converged hook prints nothing until `-v`.
+- **The run's profile** — `os`/`host`/`profiles` come from the run's context, which
+  `process.platform` cannot reproduce (it sees neither `--profile` nor `BOOM_OS`/`BOOM_HOST`).
+- **Module-shippable** — a hook resolves from the declaring section's origin, so a `use`d module
+  ships `hooks/<name>.ts` alongside the sections that name it.
+
+A hook is still arbitrary code, so the `hook` side-effect marker stays in the journal regardless:
+journaling part of a hook's work never makes all of it reversible.
+
+What remains a **core** change is adding a new resource **type**: `SectionSchema` is a valibot
+`strictObject` and `RESOURCES` is a static table — both deliberate consequences of the
+typed-validated-TOML north star. Note also that `HookApi` is not importable by a hook module
+(hooks are untyped `.ts` loaded by `import()`), so nothing type-checks a hook against it.
 
 ### Transaction + state
 

@@ -16,6 +16,7 @@ interface Sandbox {
   readonly repo: string;
   readonly ctx: BoomContext;
   out(): string;
+  clear(): void;
 }
 
 async function sandbox(boomfile: string): Promise<Sandbox> {
@@ -50,7 +51,15 @@ async function sandbox(boomfile: string): Promise<Sandbox> {
     exitCode: 0,
   };
   const ctx = { process: proc, env, cwd: repo } as unknown as BoomContext;
-  return { home, repo, ctx, out: () => buf.out };
+  return {
+    home,
+    repo,
+    ctx,
+    out: () => buf.out,
+    clear: () => {
+      buf.out = "";
+    },
+  };
 }
 
 test("link: sync → verify ok → uninstall removes", async () => {
@@ -218,12 +227,106 @@ test("hook runs a TS resource module with its inputs", async () => {
     `[[section]]\nname = "H"\nhook = [{ name = "greet", with = { who = "world" } }]\n`,
   );
   await mkdir(join(sb.repo, "hooks"), { recursive: true });
+  // Also exports `declare` — proving the added export is optional in the other direction: a
+  // module that has one runs it, and it does not disturb the plain verb dispatch beside it.
   await writeFile(
     join(sb.repo, "hooks/greet.ts"),
-    `export function sync(api) { api.ok("hello " + api.with.who); }\n`,
+    `export function declare(api) { api.note("declared for " + api.verb); }
+     export function sync(api) { api.ok("hello " + api.with.who); }\n`,
   );
   expect(await reconcile("sync", sb.ctx, {})).toBe(0); // dense default shows the hook's ok() line
   expect(sb.out()).toContain("hello world");
+  expect(sb.out()).toContain("declared for sync");
+});
+
+// A hook is a first-class resource: it gets the run's own context, not just its `with` inputs.
+// `profiles` and `host` are the two a hook could not reconstruct from process.platform — the
+// --profile list lives only in the CLI opts, and BOOM_HOST is an override.
+test("a hook sees the run's context, not just its inputs", async () => {
+  const sb = await sandbox(`[vars]\nEMAIL = "a@b.c"\n[[section]]\nname = "H"\nhook = [{ name = "ctx" }]\n`);
+  const env = sb.ctx.env as Record<string, string | undefined>;
+  env.BOOM_OS = "linux";
+  env.BOOM_HOST = "testbox";
+  await mkdir(join(sb.repo, "hooks"), { recursive: true });
+  await writeFile(
+    join(sb.repo, "hooks/ctx.ts"),
+    `import { writeFileSync } from "node:fs";
+     export function sync(api) {
+       writeFileSync(api.env.HOME + "/ctx.json", JSON.stringify({
+         repo: api.repo, os: api.os, host: api.host, profiles: [...api.profiles],
+         linkMode: api.linkMode, verbose: api.verbose, update: api.update, vars: api.vars,
+       }));
+     }\n`,
+  );
+  expect(
+    await reconcile("sync", sb.ctx, {
+      profiles: ["work"],
+      linkMode: "overwrite",
+      update: true,
+      verbose: true,
+    }),
+  ).toBe(0);
+  const seen = JSON.parse(await readFile(join(sb.home, "ctx.json"), "utf8"));
+  expect(seen).toEqual({
+    repo: sb.repo,
+    os: "linux",
+    host: "testbox",
+    profiles: ["work"],
+    linkMode: "overwrite",
+    verbose: true,
+    update: true,
+    vars: { EMAIL: "a@b.c" },
+  });
+});
+
+test("a converged hook is silent without -v", async () => {
+  const sb = await sandbox(`[[section]]\nname = "Hooky"\nhook = [{ name = "quiet" }]\n`);
+  await mkdir(join(sb.repo, "hooks"), { recursive: true });
+  await writeFile(
+    join(sb.repo, "hooks/quiet.ts"),
+    `export function sync(api) { api.skip("already converged"); }\n`,
+  );
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  // A band whose only lines are skips collapses entirely — no message AND no header.
+  expect(sb.out()).not.toContain("already converged");
+  expect(sb.out()).not.toContain("HOOKS");
+  sb.clear();
+  expect(await reconcile("sync", sb.ctx, { verbose: true })).toBe(0);
+  expect(sb.out()).toContain("already converged");
+  expect(sb.out()).toContain("Hooky");
+});
+
+test("a hook's dry run uses the plan tier", async () => {
+  const sb = await sandbox(`[[section]]\nname = "H"\nhook = [{ name = "planner" }]\n`);
+  await mkdir(join(sb.repo, "hooks"), { recursive: true });
+  await writeFile(
+    join(sb.repo, "hooks/planner.ts"),
+    `export function sync(api) { if (api.dryRun) api.plan("would place ~/.thing"); }\n`,
+  );
+  expect(await reconcile("sync", sb.ctx, { dryRun: true })).toBe(0);
+  expect(sb.out()).toContain("would place ~/.thing");
+});
+
+test("a sync-only hook reports unchecked on verify instead of passing silently", async () => {
+  const sb = await sandbox(`[[section]]\nname = "H"\nhook = [{ name = "synconly" }]\n`);
+  await mkdir(join(sb.repo, "hooks"), { recursive: true });
+  await writeFile(join(sb.repo, "hooks/synconly.ts"), `export function sync(api) { api.ok("did"); }\n`);
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  sb.clear();
+  // `note`, not `warn`: verify's warn tier is exit 2, so warning here would make every
+  // sync-only hook permanent false drift. The exit code is half the assertion.
+  expect(await reconcile("verify", sb.ctx, {})).toBe(0);
+  expect(sb.out()).toContain("unchecked");
+});
+
+test("a module-shipped hook resolves from the module's own directory", async () => {
+  const sb = await sandbox(`use = ["./mod"]\n[[section]]\nname = "local"\n`);
+  const mod = join(sb.repo, "mod");
+  await mkdir(join(mod, "hooks"), { recursive: true });
+  await writeFile(join(mod, "boomfile.toml"), `[[section]]\nname = "shared"\nhook = [{ name = "greet" }]\n`);
+  await writeFile(join(mod, "hooks/greet.ts"), `export function sync(api) { api.ok("from the module"); }\n`);
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  expect(sb.out()).toContain("from the module");
 });
 
 // A fake `brew` on PATH that just logs its argv — real `brew bundle` isn't installable

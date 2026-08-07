@@ -1,7 +1,17 @@
 // M3: the sync transaction — journal, backups, rollback, verify --json, and orphan
 // reaping. Each test drives the engine against a fully sandboxed $HOME + repo.
 import { expect, test } from "bun:test";
-import { mkdir, mkdtemp, readdir, readFile, readlink, realpath, symlink, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  readlink,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import type { BoomContext } from "../src/context.ts";
@@ -496,4 +506,140 @@ test("--resume continues the interrupted run rather than opening a second one", 
   const runs = await listRuns(sb.ctx.env);
   expect(runs).toHaveLength(1); // reused the interrupted run — did NOT open a second
   expect(runs[0]?.committed).toBe(true); // and it's now completed cleanly
+});
+
+// --- hooks as first-class resources -------------------------------------------------------
+
+// Drop a hook module into the sandbox repo. Hooks are untyped `.ts` loaded by runtime import(),
+// so the body is written as source text — exactly how a user ships one.
+async function hookModule(repo: string, name: string, body: string): Promise<void> {
+  await mkdir(join(repo, "hooks"), { recursive: true });
+  await writeFile(join(repo, "hooks", `${name}.ts`), body);
+}
+
+const PLACER = `import { copyFileSync } from "node:fs";
+  const dst = (api) => api.env.HOME + "/.hooked";
+  const src = (api) => api.repo + "/hooked.src";
+  export function declare(api) { api.declare({ kind: "copy", dst: dst(api), src: src(api) }); }
+  export function sync(api) { copyFileSync(src(api), dst(api)); }
+  export function verify(api) { api.skip("hooked is current"); }
+`;
+
+test("a hook-declared destination enters the manifest and is reaped when the hook stops declaring it", async () => {
+  const sb = await sandbox(`[[section]]\nname = "S"\nhook = [{ name = "placer" }]\n`);
+  await sb.write("hooked.src", "generated\n");
+  await hookModule(sb.repo, "placer", PLACER);
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  const dst = join(sb.home, ".hooked");
+  expect(await pathExists(dst)).toBe(true);
+  expect((await readManifest(sb.env)).some((e) => e.dst === dst)).toBe(true); // boom owns it
+
+  // Drop the hook from the config: what a hook declared is reaped exactly like a core copy.
+  await sb.write("boomfile.toml", `[[section]]\nname = "S"\n`);
+  sb.clear();
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  expect(await pathExists(dst)).toBe(false);
+  expect(sb.out()).toContain("reaped orphan");
+});
+
+test("an unloadable hook suppresses reaping instead of deleting what it declared", async () => {
+  // The invariant the core resources hold by construction (filesystem.ts pushes to `declared`
+  // before it does anything that can fail) and a hook cannot: its declarations live in a module
+  // that may not load. Without the guard, `rm hooks/placer.ts` is a DELETE of ~/.hooked on a run
+  // that still exits 0 — and the byte-match guard doesn't save it, since a generated file is
+  // byte-identical to its source by definition. Realistic triggers: a `use`d module that failed
+  // to fetch, a renamed hook file, a partial checkout — all reachable by a scheduled `boom source`.
+  const missing = await sandbox(`[[section]]\nname = "S"\nhook = [{ name = "placer" }]\n`);
+  const missingDst = join(missing.home, ".hooked");
+  await missing.write("hooked.src", "generated\n");
+  await hookModule(missing.repo, "placer", PLACER);
+  expect(await reconcile("sync", missing.ctx, {})).toBe(0);
+  expect(await pathExists(missingDst)).toBe(true);
+
+  await rm(join(missing.repo, "hooks/placer.ts"));
+  missing.clear();
+  expect(await reconcile("sync", missing.ctx, {})).toBe(0);
+  expect(await pathExists(missingDst)).toBe(true);
+  expect(missing.out()).not.toContain("reaped");
+  // Ownership survives too, or the deletion is merely deferred to the next run.
+  expect((await readManifest(missing.env)).some((e) => e.dst === missingDst)).toBe(true);
+
+  // The other bail-out before `declare`: a module that exists but throws on import. It has to be
+  // a DIFFERENT hook name than the one that already ran — `import()` caches by resolved path, so
+  // rewriting placer.ts in place would re-serve the working module out of the ESM registry and
+  // test nothing.
+  const broken = await sandbox(`[[section]]\nname = "S"\nhook = [{ name = "placer" }]\n`);
+  const brokenDst = join(broken.home, ".hooked");
+  await broken.write("hooked.src", "generated\n");
+  await hookModule(broken.repo, "placer", PLACER);
+  expect(await reconcile("sync", broken.ctx, {})).toBe(0);
+  await broken.write("boomfile.toml", `[[section]]\nname = "S"\nhook = [{ name = "wrecked" }]\n`);
+  await hookModule(broken.repo, "wrecked", `throw new Error("kaboom");\n`);
+  broken.clear();
+  expect(await reconcile("sync", broken.ctx, {})).toBe(1); // a failed load is still a failure
+  expect(await pathExists(brokenDst)).toBe(true);
+  expect(broken.out()).not.toContain("reaped");
+});
+
+test("a hook-declared destination does not false-orphan on verify", async () => {
+  // `declare` has to run on EVERY verb: reapOrphans compares the prior manifest against
+  // ctx.declared on verify too, and an unmatched entry is a warn — which is verify's exit-2
+  // tier. Assert the exit code, not just the text; that is the failure mode.
+  const sb = await sandbox(`[[section]]\nname = "S"\nhook = [{ name = "placer" }]\n`);
+  await sb.write("hooked.src", "generated\n");
+  await hookModule(sb.repo, "placer", PLACER);
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  sb.clear();
+  expect(await reconcile("verify", sb.ctx, {})).toBe(0);
+  expect(sb.out()).not.toContain("no longer declared");
+  expect(sb.out()).not.toContain("reaped");
+});
+
+test("a hook's journalWrite is undone by `boom rollback`", async () => {
+  const body = `import { writeFileSync } from "node:fs";
+    export async function sync(api) {
+      const f = api.env.HOME + "/.written";
+      await api.journalWrite("hook", f);
+      writeFileSync(f, "new");
+    }
+  `;
+  // (a) fresh file — the undo token is a plain remove, so rollback deletes it.
+  const fresh = await sandbox(`[[section]]\nname = "S"\nhook = [{ name = "w" }]\n`);
+  await hookModule(fresh.repo, "w", body);
+  expect(await reconcile("sync", fresh.ctx, {})).toBe(0);
+  expect(await readFile(join(fresh.home, ".written"), "utf8")).toBe("new");
+  expect(await rollback(fresh.ctx)).toBe(0);
+  expect(await pathExists(join(fresh.home, ".written"))).toBe(false);
+
+  // (b) pre-existing file — the prior bytes come back out of the run's backup tree, which is
+  // only true because the undo row (and the displace behind it) landed BEFORE the hook's write.
+  const over = await sandbox(`[[section]]\nname = "S"\nhook = [{ name = "w" }]\n`);
+  await hookModule(over.repo, "w", body);
+  await writeFile(join(over.home, ".written"), "original");
+  expect(await reconcile("sync", over.ctx, {})).toBe(0);
+  expect(await readFile(join(over.home, ".written"), "utf8")).toBe("new");
+  expect(await rollback(over.ctx)).toBe(0);
+  expect(await readFile(join(over.home, ".written"), "utf8")).toBe("original");
+});
+
+test("a hook's journalWrite never displaces outside a mutating sync", async () => {
+  // The sharpest edge in the contract: journalWrite calls displace(), and displace with no
+  // backupRoot REMOVES the path. journal + backupRoot exist only for a mutating sync, so an
+  // unguarded call on a verify or a dry run would delete the hook's target while the run
+  // reports changing nothing.
+  const sb = await sandbox(`[[section]]\nname = "S"\nhook = [{ name = "eager" }]\n`);
+  await hookModule(
+    sb.repo,
+    "eager",
+    `const f = (api) => api.env.HOME + "/.j";
+     export function sync(api) { return api.journalWrite("hook", f(api)); }
+     export function verify(api) { return api.journalWrite("hook", f(api)); }
+    `,
+  );
+  const f = join(sb.home, ".j");
+  await writeFile(f, "original");
+  expect(await reconcile("verify", sb.ctx, {})).toBe(0);
+  expect(await readFile(f, "utf8")).toBe("original");
+  expect(await reconcile("sync", sb.ctx, { dryRun: true })).toBe(0);
+  expect(await readFile(f, "utf8")).toBe("original");
 });

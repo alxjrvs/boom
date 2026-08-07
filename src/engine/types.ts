@@ -1,3 +1,4 @@
+import type { ProfileContext } from "../config/profile.ts";
 import type { Reporter } from "../lib/reporter.ts";
 import type { Journal } from "./journal.ts";
 import type { ManifestEntry } from "./state.ts";
@@ -25,10 +26,23 @@ export interface ReconcileCtx {
   // The boomfile's top-level `[vars]` table — the substitution source for the `tmpl` resource.
   // Empty when the boomfile declares none.
   readonly vars: Record<string, string>;
+  // The run's os/host/profile gate, computed once for section gating and carried rather than
+  // re-derived. A resource (or a hook) that reached for `process.platform` instead would silently
+  // lose the `--profile` list — it lives only in the CLI opts — and ignore the BOOM_OS/BOOM_HOST
+  // overrides that are what make profiles testable at all.
+  readonly profile: ProfileContext;
   readonly report: Reporter;
   // Destinations boom owns this run — populated as handlers run (drives orphan
   // reaping + the persisted manifest).
   readonly declared: ManifestEntry[];
+  // Set by a handler that could not enumerate everything it owns — today only `hook`, when the
+  // module is missing or won't load. Reaping deletes whatever the prior manifest holds and
+  // `declared` doesn't, so a run with a hole in `declared` would reap the missing hook's files:
+  // an error path turned into a deletion path. Reconcile treats this exactly like `--only`
+  // (skip the reap, merge into the prior manifest instead of replacing it), because it is the
+  // same fact — this run does not know the full ownership set. Mutable by design; every handler
+  // may raise it, nothing lowers it.
+  ownershipIncomplete: boolean;
   // Transaction state (present for a mutating sync run):
   readonly journal?: Journal;
   readonly backupRoot?: string;

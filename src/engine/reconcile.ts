@@ -59,8 +59,9 @@ export interface ReconcileOptions {
 }
 
 // Merge a partial run's declared set into the prior manifest (union by dst, declared
-// wins). Used when --only scoped the run: only the named sections re-declared, so the
-// other sections' ownership must be preserved rather than dropped.
+// wins). Used whenever `declared` is known to be incomplete — --only scoped the run to some
+// sections, or a hook couldn't be loaded to state what it owns — so the un-redeclared
+// ownership is preserved rather than dropped (and silently reaped on a later run).
 function mergeManifest(prior: readonly ManifestEntry[], declared: readonly ManifestEntry[]): ManifestEntry[] {
   const byDst = new Map<string, ManifestEntry>();
   for (const e of prior) byDst.set(e.dst, e);
@@ -269,8 +270,12 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
       verbose,
       env: childEnv,
       vars: composition.vars,
+      // The same `pc` the section gate below keys on — carried, not recomputed, so a resource
+      // never has to re-derive the run's os/host/profiles (and lose --profile doing it).
+      profile: pc,
       report,
       declared: [],
+      ownershipIncomplete: false,
       journal,
       backupRoot,
       dirty: new Set<string>(),
@@ -291,17 +296,26 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
 
     // Reaping compares the *whole* prior manifest against what this run declared. Under
     // --only just the named sections re-declared, so every other section would look
-    // orphaned — skip reaping entirely for a scoped run.
+    // orphaned — skip reaping entirely for a scoped run. `ownershipIncomplete` is the same
+    // fact arrived at the hard way (a hook that couldn't be loaded never declared), and it
+    // gets the same treatment: reaping on a partial `declared` deletes the files of whatever
+    // failed, which is the one thing an error must never do. Say so out loud — a silently
+    // skipped reap is indistinguishable from having nothing to reap.
     if (verb !== "uninstall" && !only) {
       report.category = "ORPHANS";
-      await reapOrphans(rctx, priorManifest);
+      if (rctx.ownershipIncomplete)
+        report.note("orphan reaping skipped — a resource above could not report what it owns");
+      else await reapOrphans(rctx, priorManifest);
     }
 
     if (mutating) {
       await pruneRuns(ctx.env);
       // A scoped run only knows about the sections it ran, so merge into the prior
       // manifest rather than replacing it (which would drop — and later reap — the rest).
-      await writeManifest(ctx.env, only ? mergeManifest(priorManifest, rctx.declared) : rctx.declared);
+      // A run with an unloadable hook is in the same position: replacing the manifest there
+      // would drop the hook's entries and hand the deletion to the NEXT run instead of this one.
+      const partial = Boolean(only) || rctx.ownershipIncomplete;
+      await writeManifest(ctx.env, partial ? mergeManifest(priorManifest, rctx.declared) : rctx.declared);
     } else if (verb === "uninstall" && !dryRun) {
       await writeManifest(ctx.env, []); // uninstall clears the manifest
     }
