@@ -55,10 +55,14 @@ export async function reconcileDir(entry: Dir, ctx: ReconcileCtx): Promise<void>
         report.plan(`${disp} would be created${entry.mode ? ` (mode ${entry.mode})` : ""}`);
         return;
       }
-      // Creating a directory is reversible by a plain remove — journal the undo before the
-      // mkdir so a crash mid-create is still rolled back (mirrors the filesystem resource).
+      // Journal the undo before the mkdir so a crash mid-create is still rolled back (mirrors
+      // the filesystem resource). `rmdir`, not `remove`: this site *created* the directory, and
+      // by rollback time the user may have filled it — the same reason the uninstall arm below
+      // refuses a non-empty dir. The other mkdir journal site (filesystem.ts, ~:82) records the
+      // *displacement* of a conflicting non-directory, which is reversed by restoring it, so
+      // the two look alike and mean opposite things.
       await ctx.journal?.intent("mkdir", path);
-      await ctx.journal?.done("mkdir", path, { kind: "remove" });
+      await ctx.journal?.done("mkdir", path, { kind: "rmdir" });
       await mkdir(path, { recursive: true });
       await applyMode();
       report.ok(entry.mode ? `${disp} created (mode ${entry.mode})` : `${disp} created`);

@@ -5,6 +5,7 @@ import { detectOs } from "../../config/profile.ts";
 import type { OsxDefault } from "../../config/schema.ts";
 import { expandHome } from "../../lib/fs.ts";
 import { captureArgv, cleanEnv } from "../../lib/proc.ts";
+import { firstOsxUndo, stashOsxPrior, type UndoToken } from "../journal.ts";
 import type { ReconcileCtx } from "../types.ts";
 
 // `type` is optional in the schema; NonNullable is the resolved type after inference.
@@ -48,6 +49,13 @@ export function osxMatches(type: OsxType, current: string, value: OsxValue): boo
   return current.trim() === want;
 }
 
+// Gotcha for the uninstall arm below: uninstall is not a journaled run (`mutating = verb ===
+// "sync" && !dryRun`, reconcile.ts), so `ctx.journal` is undefined here. That arm therefore
+// *reads* the recorded undo through `ctx.env` instead of writing one, and its own mutation is
+// not itself rollback-able — the same deal every other resource's uninstall makes. It reuses
+// the sync arm's `cleanEnv` + `Bun.spawnSync` shape rather than borrowing rollback.ts's
+// restoreOsx: that module owns the replay-a-run direction, and a sandboxed test needs the
+// PATH-resolved `defaults` this one gets.
 export async function reconcileOsxDefault(entry: OsxDefault, ctx: ReconcileCtx): Promise<void> {
   if (detectOs(ctx.env) !== "darwin") return;
   const { report } = ctx;
@@ -86,8 +94,21 @@ export async function reconcileOsxDefault(entry: OsxDefault, ctx: ReconcileCtx):
       // rollback` can `defaults write` it back — or `defaults delete` a key boom introduced.
       // Recorded before the write, like the file resources: a crash mid-write is still
       // reversible (restoring the unchanged prior is a harmless no-op).
+      const undo: Extract<UndoToken, { kind: "osx" }> = {
+        kind: "osx",
+        domain,
+        key,
+        type,
+        prior: ok ? cur : null,
+      };
       await ctx.journal?.intent("osx", disp);
-      await ctx.journal?.done("osx", disp, { kind: "osx", domain, key, type, prior: ok ? cur : null });
+      await ctx.journal?.done("osx", disp, undo);
+      // The journal row ages out (pruneRuns keeps 10 runs); the machine's *pre-boom* value has
+      // to outlive it or `boom uninstall` would later "restore" boom's own earlier value as if
+      // the user had set it. The stash is insert-if-absent, which is what makes it the FIRST
+      // prior rather than the latest. Gated on ctx.journal so only a real mutating run records
+      // one — a prior is a fact about a write that happened.
+      if (ctx.journal) await stashOsxPrior(ctx.env, undo);
       const p = Bun.spawnSync(["defaults", "write", domain, key, `-${type}`, String(value)], {
         env,
         stdout: "ignore",
@@ -107,8 +128,45 @@ export async function reconcileOsxDefault(entry: OsxDefault, ctx: ReconcileCtx):
       else report.warn(`${disp} = ${cur || "<unset>"}, expected ${want}`);
       return;
     }
-    case "uninstall":
+    case "uninstall": {
+      // Everything needed to reverse the write is already recorded, so returning early here was
+      // boom leaving the machine changed by a teardown that claims to remove it.
+      const undo = await firstOsxUndo(ctx.env, domain, key);
+      if (!undo) {
+        // Without a record boom cannot tell a key it introduced from one that was always there,
+        // and deleting someone else's default is unrecoverable — so leave it and say so.
+        report.skip(`${disp} — no journaled prior, left as is`);
+        return;
+      }
+      const verb = undo.prior === null ? "delete" : "restore";
+      if (ctx.dryRun) {
+        report.note(`would ${verb} ${disp}`);
+        return;
+      }
+      const argv =
+        undo.prior === null
+          ? ["defaults", "delete", domain, key]
+          : ["defaults", "write", domain, key, `-${undo.type}`, undo.prior];
+      const p = Bun.spawnSync(argv, { env, stdout: "ignore", stderr: "ignore" });
+      if (p.exitCode !== 0) {
+        // `defaults delete` exits 1 on a key that is already gone, and the meta stash is never
+        // invalidated by an uninstall — so without this the delete is re-attempted forever and
+        // every uninstall after the first one fails. Absent means the teardown's goal already
+        // holds: idempotent, like dir.ts's `if (!(await pathExists(path))) return`, and nothing
+        // moved, so no ctx.dirty and no UI restart.
+        if (undo.prior === null && !readCurrent().ok) {
+          report.skip(`${disp} already unset`);
+          return;
+        }
+        report.fail(`${disp} (defaults ${verb} failed)`);
+        return;
+      }
+      report.ok(undo.prior === null ? `${disp} deleted` : `${disp} restored to ${undo.prior}`);
+      // Same reason as sync: the owning UI processes only pick up a changed default on restart,
+      // and a teardown that leaves the Dock showing boom's value has not finished.
+      ctx.dirty.add("osx");
       return;
+    }
   }
 }
 

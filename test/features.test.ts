@@ -475,6 +475,43 @@ test("rollback --to an unknown checkpoint fails cleanly", async () => {
   expect(sb.out()).toContain("no checkpoint named 'nope'");
 });
 
+test("rollback --to warns and exits 2 when history was pruned past the checkpoint", async () => {
+  const sb = await sandbox('[[section]]\nname = "x"\n');
+  const ids: string[] = [];
+  for (let i = 0; i < 4; i++) {
+    const id = newRunId();
+    ids.push(id);
+    new Journal(sb.env, id).close();
+  }
+  await setRunLabel(sb.env, ids[0] as string, "good"); // the checkpoint, exempt from the count bound
+  await pruneRuns(sb.env, 1); // keeps only the newest unlabelled run — two post-checkpoint runs are gone
+
+  // Reaching the checkpoint is now impossible: the deleted runs' undo records went with them.
+  // Exiting 0 here would tell the operator they are back at 'good' when they are not.
+  expect(await rollbackTo(sb.ctx, "good")).toBe(2);
+  expect(sb.out()).toContain("history was pruned");
+});
+
+test("rollback reports a failed defaults restore instead of ok", async () => {
+  const sb = await sandbox('[[section]]\nname = "x"\n', { emptyPath: true });
+  sb.env.BOOM_OS = "darwin";
+  await fakeBinEmpty(sb.base, "defaults", "exit 1\n"); // every `defaults` invocation fails
+  const j = new Journal(sb.env, newRunId());
+  await j.done("osx", "NSGlobalDomain AppleShowAllExtensions", {
+    kind: "osx",
+    domain: "NSGlobalDomain",
+    key: "AppleShowAllExtensions",
+    type: "bool",
+    prior: "1",
+  });
+  j.close();
+
+  // The spawn's exit code used to go unread, so a machine left un-restored reported `restored …`
+  // and exit 0 — the worst lie a rollback can tell.
+  expect(await rollback(sb.ctx)).toBe(1);
+  expect(sb.out()).toContain("defaults exit 1");
+});
+
 // --- boom.lock ----------------------------------------------------------------------------
 
 test("lock: write + read round-trips, quoting keys that carry @", async () => {

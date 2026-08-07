@@ -1,35 +1,69 @@
 // Roll back a previous sync by replaying its journal's `done` records in reverse:
 // remove what boom created, restore what an overwrite displaced.
-import { rm } from "node:fs/promises";
+import { rm, rmdir } from "node:fs/promises";
 import { detectOs } from "../config/profile.ts";
 import type { BoomContext } from "../context.ts";
 import { displayPath, restoreFrom } from "../lib/fs.ts";
-import { cleanEnv } from "../lib/proc.ts";
+import { captureArgv, cleanEnv } from "../lib/proc.ts";
 import { bandsReporter, type Reporter } from "../lib/reporter.ts";
-import { findRunByLabel, listRuns, readRun, setRunLabel, type UndoToken } from "./journal.ts";
+import { findRunByLabel, listRuns, pruneHorizon, readRun, setRunLabel, type UndoToken } from "./journal.ts";
 import { removeManifestEntries } from "./state.ts";
 
-// One-line preview of what reversing a record would do (for --dry-run).
+// One-line preview of what reversing a record would do (for --dry-run). An exhaustive switch
+// with a `never` default, not an if/else chain: adding a fifth UndoToken kind must be a compile
+// error here, because the old chain's fall-through silently previewed it as "would restore".
 function undoPreview(undo: UndoToken, disp: string): string {
-  if (undo.kind === "remove") return `would remove ${disp}`;
-  if (undo.kind === "osx") return `would ${undo.prior === null ? "delete" : "restore"} default ${disp}`;
-  return `would restore ${disp}`;
+  switch (undo.kind) {
+    case "remove":
+      return `would remove ${disp}`;
+    case "rmdir":
+      return `would remove ${disp} (only if still empty)`;
+    case "osx":
+      return `would ${undo.prior === null ? "delete" : "restore"} default ${disp}`;
+    case "restore":
+      return `would restore ${disp}`;
+    default: {
+      const _never: never = undo;
+      return _never;
+    }
+  }
 }
 
 // Re-apply a macOS default's prior value (or delete a key boom introduced). Non-darwin is a
-// reported no-op — the journal could have been carried to another host.
-function restoreOsx(undo: Extract<UndoToken, { kind: "osx" }>, ctx: BoomContext, report: Reporter): void {
+// reported no-op — the journal could have been carried to another host. Returns whether the
+// prior was actually re-applied: the caller must not mark a record reversed on the strength
+// of a spawn nobody checked.
+function restoreOsx(undo: Extract<UndoToken, { kind: "osx" }>, ctx: BoomContext, report: Reporter): boolean {
   if (detectOs(ctx.env) !== "darwin") {
     report.warn(`skipped osx restore ${undo.domain} ${undo.key} (not darwin)`);
-    return;
+    return false;
   }
   const env = cleanEnv(ctx.env);
   const argv =
     undo.prior === null
       ? ["defaults", "delete", undo.domain, undo.key]
       : ["defaults", "write", undo.domain, undo.key, `-${undo.type}`, undo.prior];
-  Bun.spawnSync(argv, { env, stdout: "ignore", stderr: "ignore" });
+  // Every other spawn in the engine reads its exit code; an unchecked one here turns a failed
+  // restore into a green rollback — the worst lie this command can tell, since the operator
+  // walks away believing the machine is back to a known state.
+  const r = Bun.spawnSync(argv, { env, stdout: "ignore", stderr: "ignore" });
+  if (r.exitCode !== 0) {
+    // …but `defaults delete` exits 1 when the key (or its whole domain) is already absent, so
+    // the exit code alone can't tell "couldn't delete it" from "there was nothing to delete".
+    // Ask, and treat absent as reversed — the same call undoMkdir's ENOENT arm makes, for the
+    // same reason: rolling one run back twice, or a user who tidied the key away first, must
+    // not flip a previously-clean `boom rollback` to exit 1.
+    if (undo.prior === null && captureArgv(["defaults", "read", undo.domain, undo.key], ctx.env).code !== 0) {
+      report.ok(`default ${undo.domain} ${undo.key} already gone`);
+      return true;
+    }
+    report.fail(
+      `${undo.prior === null ? "delete" : "restore"} of default ${undo.domain} ${undo.key} failed (defaults exit ${r.exitCode})`,
+    );
+    return false;
+  }
   report.ok(`${undo.prior === null ? "deleted" : "restored"} default ${undo.domain} ${undo.key}`);
+  return true;
 }
 
 // `boom rollback --list` — enumerate the retained runs so the ids `--run-id` accepts are
@@ -74,6 +108,33 @@ export async function checkpoint(ctx: BoomContext, name: string): Promise<number
   return report.finish({ ok: `checkpoint '${name}' set`, fail: (f) => `checkpoint: ${f} failure(s)` });
 }
 
+// Reverse a `mkdir` with rmdir(2), never `rm -rf`: the directory boom created may have been
+// filled by the user since, and a recursive remove would take their data with it. Returns
+// whether the directory is actually gone (i.e. whether the record was reversed).
+async function undoMkdir(dst: string, disp: string, report: Reporter): Promise<boolean> {
+  try {
+    await rmdir(dst);
+    report.ok(`removed ${disp}`);
+    return true;
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    // The whole point of rmdir: a non-empty directory is a report, not a deletion. macOS/BSD
+    // returns EEXIST where Linux returns ENOTEMPTY for the identical condition.
+    if (code === "ENOTEMPTY" || code === "EEXIST") {
+      report.warn(`${disp} left in place — not empty`);
+      return false;
+    }
+    // Already in the post-rollback state (the user removed it themselves). Reversed, not
+    // failed — the `remove` arm's `force: true` treats a missing path the same way, and
+    // without this a tidy user flips a previously-clean `boom rollback` to exit 1.
+    if (code === "ENOENT") {
+      report.ok(`${disp} already gone`);
+      return true;
+    }
+    throw e; // anything else (EACCES, ENOTDIR) is a real failure for the caller's catch
+  }
+}
+
 // The non-undefined shape readRun returns — the unit reverseRun operates on.
 type Run = NonNullable<Awaited<ReturnType<typeof readRun>>>;
 
@@ -91,16 +152,24 @@ async function reverseRun(ctx: BoomContext, run: Run, report: Reporter, dryRun: 
       continue;
     }
     try {
-      if (rec.undo.kind === "remove") {
-        await rm(rec.dst, { recursive: true, force: true });
-        report.ok(`removed ${disp}`);
-      } else if (rec.undo.kind === "osx") {
-        restoreOsx(rec.undo, ctx, report);
-      } else {
-        await restoreFrom(rec.undo.from, rec.dst);
-        report.ok(`restored ${disp}`);
+      switch (rec.undo.kind) {
+        case "remove":
+          await rm(rec.dst, { recursive: true, force: true });
+          report.ok(`removed ${disp}`);
+          reversed.push(rec.dst);
+          break;
+        case "rmdir":
+          if (await undoMkdir(rec.dst, disp, report)) reversed.push(rec.dst);
+          break;
+        case "osx":
+          if (restoreOsx(rec.undo, ctx, report)) reversed.push(rec.dst);
+          break;
+        case "restore":
+          await restoreFrom(rec.undo.from, rec.dst);
+          report.ok(`restored ${disp}`);
+          reversed.push(rec.dst);
+          break;
       }
-      reversed.push(rec.dst);
     } catch (e) {
       report.fail(`${disp}: ${(e as Error).message}`);
     }
@@ -137,8 +206,11 @@ export async function rollback(ctx: BoomContext, runId?: string, dryRun = false)
 // every run made AFTER it, newest-first. The checkpoint run itself is deliberately NOT reversed
 // (that's the state we're returning to). Run ids sort chronologically, so "made after" is a
 // plain id comparison, and listRuns' newest-first order is exactly the reverse-replay order.
-// Best-effort across retained history: a post-checkpoint run whose journal was already pruned
-// is skipped (its row is gone), so keep checkpoints within the retained window to rewind fully.
+// Best-effort across retained history — but *reported* best-effort: a post-checkpoint run whose
+// journal was pruned can no longer be reversed, and this command used to skip it and still exit
+// 0, which reads as "you are back at the checkpoint" when you are not. It now carries a warning
+// tier (exit 2) and names the prune horizon, so keeping checkpoints inside the retained window
+// is an instruction the tool gives rather than one the operator has to already know.
 export async function rollbackTo(ctx: BoomContext, name: string, dryRun = false): Promise<number> {
   const report = bandsReporter(ctx.process, ctx.env, "rollback", { setup: "REWINDING TO A CHECKPOINT…" });
   const target = await findRunByLabel(ctx.env, name);
@@ -150,11 +222,27 @@ export async function rollbackTo(ctx: BoomContext, name: string, dryRun = false)
   report.header(`rollback to '${name}' (${target})${dryRun ? " — dry run (no changes)" : ""}`);
   if (newer.length === 0) {
     report.note(`already at checkpoint '${name}' — no later runs to undo`);
-    return report.finish({ ok: `at checkpoint '${name}'`, fail: (f) => `rollback: ${f} failure(s)` });
+    return report.finish({
+      ok: `at checkpoint '${name}'`,
+      fail: (f) => `rollback: ${f} failure(s)`,
+      warn: (w) => `rollback: ${w} warning(s)`,
+    });
   }
+  // A horizon at or past the checkpoint means runs between them were deleted, so `newer` is a
+  // subset of what actually happened after it — the difference between a partial rewind and a
+  // complete one, which only the journal's own destruction record can tell us.
+  const horizon = await pruneHorizon(ctx.env);
+  if (horizon !== undefined && horizon > target)
+    report.warn(
+      `history was pruned past '${name}' — run(s) made after it are no longer reversible (journal pruned up to ${horizon}); rewound only the ${newer.length} retained run(s)`,
+    );
   for (const summary of newer) {
     const run = await readRun(ctx.env, summary.runId);
     if (run) await reverseRun(ctx, run, report, dryRun);
   }
-  return report.finish({ ok: `rolled back to '${name}'`, fail: (f) => `rollback: ${f} failure(s)` });
+  return report.finish({
+    ok: `rolled back to '${name}'`,
+    fail: (f) => `rollback: ${f} failure(s)`,
+    warn: (w) => `rollback: ${w} warning(s)`,
+  });
 }
