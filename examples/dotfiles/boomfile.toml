@@ -114,6 +114,18 @@ src = "zsh/[0-9]*.zsh"
 dst = "~/.config/zsh/"
 
 [[section]]
+name = "gh extensions"
+
+# `gh` extensions are a `pkg` manager like any other: one `owner/repo` per line in the file.
+# Owner-qualified deliberately — four community forks answer to the name `gh-stack`, so the
+# owner is what makes the declaration unambiguous. Because it shells out to `gh`, this section
+# comes *after* the one whose Brewfile installs it: entries run in array order and sections in
+# declaration order, and boom has no cross-section dependency mechanism. `boom verify` diffs
+# `gh extension list` against this file (drift from a hand-removed extension is visible, which
+# a fire-and-forget `run` step could never report) and `boom uninstall` removes them.
+pkg = [{ manager = "gh", file = "gh-extensions.txt" }]
+
+[[section]]
 name = "SSH perms"
 
 # `dir` ensures a standalone directory exists with a mode — the declarative form of the
