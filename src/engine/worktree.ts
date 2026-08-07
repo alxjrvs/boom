@@ -8,9 +8,22 @@
 // This module re-decides that question by *content* rather than by SHA, using git's
 // own patch-id equivalence (the same machinery `git cherry` uses to spot already-
 // applied commits). Reaping removes only the worktree directory and always leaves the
-// branch ref in place, so even a misjudged call loses no commits — the branch still
-// points at them and `git worktree add` can restore a checkout.
+// branch ref in place, so no *commit* is ever lost — the branch still points at them
+// and `git worktree add` can restore a checkout. That safety claim does NOT extend to
+// stack topology: `git worktree remove` deletes the worktree's admin dir, and the
+// gh-stack state lives inside it, so the branch chain and its PR numbers are gone from
+// this machine. `gh stack checkout <number>` re-attaches them from GitHub.
+//
+// Two facts about stacked PRs drive the stack handling below:
+//   * gh-stack records its state at `$GIT_DIR/gh-stack`, which inside a linked worktree
+//     resolves to `.git/worktrees/<name>/gh-stack` — PER-WORKTREE, not the repo-wide
+//     `.git/gh-stack` it is widely assumed to be. It is local JSON: reading it needs no
+//     `gh` invocation and no network.
+//   * a stack publishes via `gh stack submit`, one PR per branch. `git push -u origin
+//     <one-layer>` is never how a stack reaches the remote — at best a no-op, at worst
+//     it recreates a branch `delete_branch_on_merge` deliberately deleted.
 import { realpathSync } from "node:fs";
+import { join } from "node:path";
 import { captureArgvAsync, type Env, runArgvAsync } from "../lib/proc.ts";
 
 export interface WorktreeEntry {
@@ -18,11 +31,119 @@ export interface WorktreeEntry {
   readonly head: string;
   // Branch shortname, or undefined for a detached HEAD.
   readonly branch?: string;
+  // Present only when this worktree's admin dir holds gh-stack state. Its presence means
+  // the branch at HEAD *may be* one layer of a multi-PR stack — membership still has to be
+  // checked, because the file outlives the branch that created it.
+  readonly stack?: StackState;
   // The `locked` line's reason text, present only when the worktree is locked. Claude
   // Code writes "claude session <name> (pid NNNN start ...)" here for a live session.
   readonly lock?: string;
   // A registered worktree whose directory is gone; `git worktree prune` reclaims it.
   readonly prunable: boolean;
+}
+
+export interface StackPullRequest {
+  readonly number: number;
+  readonly url?: string;
+  // gh-stack's own *local cache* of the PR's state, refreshed only by `gh stack sync` /
+  // `gh stack view`. Fine to read for a label; never trusted as proof that a layer landed —
+  // that question is answered by patch-id below, so a stale `false` here costs nothing.
+  readonly merged?: boolean;
+}
+
+export interface StackBranch {
+  readonly branch: string;
+  // Recorded only once `gh stack submit` has run: a stack that exists purely locally has
+  // `{branch, base}` and nothing else (verified against a real un-submitted stack file).
+  // The live ref is the primary source for the layer's tree anyway; this is the fallback.
+  readonly head?: string;
+  readonly base: string;
+  readonly pullRequest?: StackPullRequest;
+}
+
+export interface StackState {
+  // Assigned by `gh stack submit`; a stack that has never been submitted has no number.
+  readonly number?: number;
+  // Bottom-to-top. Never empty — parseStackState rejects a stack with no usable layers,
+  // because an empty roster would read as "every layer landed".
+  readonly branches: readonly StackBranch[];
+}
+
+function toPullRequest(raw: unknown): StackPullRequest | undefined {
+  const o = raw as { number?: unknown; url?: unknown; merged?: unknown } | undefined;
+  if (typeof o?.number !== "number") return undefined;
+  return {
+    number: o.number,
+    url: typeof o.url === "string" ? o.url : undefined,
+    merged: typeof o.merged === "boolean" ? o.merged : undefined,
+  };
+}
+
+// Reject the whole stack on the first unusable layer rather than dropping that layer.
+// A partially-parsed roster is the dangerous shape: it shortens `total`, and a stack whose
+// only surviving layers happen to be landed would then read as fully landed. Undefined
+// degrades to the ordinary single-branch judgement, which is always the conservative answer.
+function toStack(raw: unknown): StackState | undefined {
+  const o = raw as { number?: unknown; branches?: unknown } | undefined;
+  if (!Array.isArray(o?.branches) || o.branches.length === 0) return undefined;
+  const branches: StackBranch[] = [];
+  for (const entry of o.branches) {
+    const b = entry as
+      | { branch?: unknown; head?: unknown; base?: unknown; pullRequest?: unknown }
+      | undefined;
+    if (typeof b?.branch !== "string" || typeof b.base !== "string") return undefined;
+    if (b.head !== undefined && typeof b.head !== "string") return undefined;
+    branches.push({
+      branch: b.branch,
+      head: b.head,
+      base: b.base,
+      pullRequest: toPullRequest(b.pullRequest),
+    });
+  }
+  return { number: typeof o.number === "number" ? o.number : undefined, branches };
+}
+
+// The gh-stack file, parsed as pure text so the selection rule is testable with no repo on
+// disk. `branch` is the worktree's checked-out branch: the stack that names it wins.
+//
+// The single-stack fallback (return `stacks[0]` even when it names no such branch) is
+// deliberately NARROW in meaning: an admin dir can still hold state from earlier work while
+// HEAD now sits on an unrelated branch, or is detached. judge() therefore refuses to draw a
+// *verdict* from a stack the branch is not a member of — see the membership gate there. The
+// fallback's only remaining job is to suppress `--push`, which is always the safe direction.
+export function parseStackState(text: string, branch?: string): StackState | undefined {
+  let doc: unknown;
+  try {
+    doc = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  const stacks = (doc as { stacks?: unknown } | undefined)?.stacks;
+  if (!Array.isArray(stacks) || stacks.length === 0) return undefined;
+  const parsed = stacks.map(toStack);
+  // `branch === undefined` (detached HEAD) can never match, since every branch is a string.
+  const named = parsed.find((s) => s?.branches.some((b) => b.branch === branch));
+  if (named) return named;
+  return parsed.length === 1 ? parsed[0] : undefined;
+}
+
+// `--absolute-git-dir`, not `--git-dir`: the latter answers a bare relative `.git` in a
+// primary checkout, which resolves against the wrong cwd here. Reading the `.git` pointer
+// file by hand was rejected outright — that format is git's to change, and `rev-parse` is
+// the supported way to ask. No `gh` invocation, no network: this is a local JSON read, and
+// a missing file (the overwhelmingly common case) is not an error.
+export async function readStackState(
+  wt: string,
+  branch: string | undefined,
+  env: Env,
+): Promise<StackState | undefined> {
+  const gitdir = await captureArgvAsync(["git", "rev-parse", "--absolute-git-dir"], env, { cwd: wt });
+  if (gitdir.code !== 0 || !gitdir.stdout) return undefined;
+  try {
+    return parseStackState(await Bun.file(join(gitdir.stdout, "gh-stack")).text(), branch);
+  } catch {
+    return undefined;
+  }
 }
 
 // `git worktree list --porcelain` emits stanzas separated by blank lines, each led by a
@@ -93,7 +214,8 @@ export interface Judgement {
   // A "keep" that exists solely because the work lives nowhere but this machine — the tree
   // is clean and nothing is in flight, the commits just aren't on a remote. Publishing the
   // branch resolves it into a "reap", which is what `--push` does. Never set on a verdict
-  // held back for any other reason (dirty, locked, unreadable): those must not be pushed.
+  // held back for any other reason (dirty, locked, unreadable, or holding gh-stack state):
+  // those must not be pushed.
   readonly pushable?: boolean;
 }
 
@@ -113,25 +235,111 @@ export async function defaultRemoteRef(repo: string, env: Env): Promise<string |
   return undefined;
 }
 
-// The content test. Replay the worktree's HEAD *tree* as a single synthetic commit on
-// top of the merge-base, then ask `git cherry` whether that patch already exists on the
-// default branch. `-` means yes (an equivalent patch-id is upstream) — exactly the shape
-// a squash-merge produces. The synthetic commit is written to the object store but is
-// referenced by nothing, so it is unreachable garbage collected in due course.
+// The content test. Replay `tree` as a single synthetic commit on top of `parent`, then ask
+// `git cherry` whether that patch already exists on the target branch. `-` means yes (an
+// equivalent patch-id is upstream) — exactly the shape a squash-merge produces. The
+// synthetic commit is written to the object store but is referenced by nothing, so it is
+// unreachable and garbage collected in due course.
+//
+// ⚠️ THE MATCH IS AGAINST THE PROBE'S OWN LINE, NOT "any line starting with -".
+// `git cherry <upstream> <head>` lists every commit in `merge-base(upstream,head)..head`,
+// one `+`/`-` line each. When `parent` is a merge-base (the single-branch caller below) the
+// range is exactly one commit, and matching any `-` line is accidentally correct. A per-layer
+// probe parents on a *sibling layer's head*, which is not an ancestor of the target, so the
+// range also contains every already-landed layer beneath it — each printed as `-`. Matching
+// any line there would declare an unmerged top layer merged and reap live work. `git cherry`
+// prints full SHAs, so comparing against the probe's own sha is exact.
+async function probeMerged(
+  wt: string,
+  tree: string,
+  parent: string,
+  target: string,
+  env: Env,
+): Promise<boolean> {
+  const probe = await captureArgvAsync(
+    ["git", "commit-tree", tree, "-p", parent, "-m", "boom-reap-probe"],
+    env,
+    {
+      cwd: wt,
+    },
+  );
+  if (probe.code !== 0 || !probe.stdout) return false;
+  const cherry = await captureArgvAsync(["git", "cherry", target, probe.stdout], env, { cwd: wt });
+  if (cherry.code !== 0) return false;
+  return cherry.stdout.split("\n").some((l) => l.startsWith("- ") && l.slice(2).trim() === probe.stdout);
+}
+
+// The whole-worktree content test: HEAD's tree replayed on the merge-base with the target.
 export async function isSquashMerged(wt: string, target: string, env: Env): Promise<boolean> {
   const base = await captureArgvAsync(["git", "merge-base", "HEAD", target], env, { cwd: wt });
   if (base.code !== 0 || !base.stdout) return false;
   const tree = await captureArgvAsync(["git", "rev-parse", "HEAD^{tree}"], env, { cwd: wt });
   if (tree.code !== 0 || !tree.stdout) return false;
-  const fake = await captureArgvAsync(
-    ["git", "commit-tree", tree.stdout, "-p", base.stdout, "-m", "boom-reap-probe"],
-    env,
-    { cwd: wt },
+  return probeMerged(wt, tree.stdout, base.stdout, target, env);
+}
+
+async function revParse(wt: string, rev: string, env: Env): Promise<string | undefined> {
+  const r = await captureArgvAsync(["git", "rev-parse", "--verify", "--quiet", rev], env, { cwd: wt });
+  return r.code === 0 && r.stdout ? r.stdout : undefined;
+}
+
+// Resolve the synthetic parent for layer `i`. Every layer's tree contains all the layers
+// beneath it, so pairing it with the layer BELOW as parent is what isolates that layer's own
+// diff — the whole-tree probe (isSquashMerged) is structurally incapable of matching an
+// N-way squash and returns `+` for every layer above the bottom.
+//
+// The bottom layer uses the live merge-base rather than its recorded `base` because a
+// cascading `gh stack sync` rebase supersedes the recorded value the moment trunk moves.
+async function layerParent(
+  wt: string,
+  stack: StackState,
+  i: number,
+  layerRef: string,
+  target: string,
+  env: Env,
+): Promise<string | undefined> {
+  if (i === 0) {
+    const mb = await captureArgvAsync(["git", "merge-base", layerRef, target], env, { cwd: wt });
+    return mb.code === 0 && mb.stdout ? mb.stdout : undefined;
+  }
+  const recorded = stack.branches[i]?.base;
+  // The recorded base can name an object this clone no longer has (a rewritten history, a
+  // pruned commit), so it is verified rather than trusted; the layer below is the fallback.
+  if (recorded) {
+    const ok = await revParse(wt, `${recorded}^{commit}`, env);
+    if (ok) return ok;
+  }
+  const below = stack.branches[i - 1];
+  if (!below) return undefined;
+  return (
+    (await revParse(wt, `${below.branch}^{commit}`, env)) ??
+    (below.head ? await revParse(wt, `${below.head}^{commit}`, env) : undefined)
   );
-  if (fake.code !== 0 || !fake.stdout) return false;
-  const cherry = await captureArgvAsync(["git", "cherry", target, fake.stdout], env, { cwd: wt });
-  if (cherry.code !== 0) return false;
-  return cherry.stdout.split("\n").some((l) => l.startsWith("-"));
+}
+
+// Judge a stack layer by layer: how many of its branches have their own diff already in the
+// target. A layer whose tree or parent cannot be resolved counts as NOT landed — the sweep's
+// default answer is always "leave it alone".
+export async function layersLanded(
+  wt: string,
+  stack: StackState,
+  target: string,
+  env: Env,
+): Promise<{ landed: number; total: number }> {
+  const total = stack.branches.length;
+  let landed = 0;
+  for (let i = 0; i < total; i++) {
+    const layer = stack.branches[i] as StackBranch;
+    // The live ref first: the recorded head goes stale on every `gh stack sync`.
+    const layerRef = (await revParse(wt, `${layer.branch}^{commit}`, env)) ?? layer.head;
+    if (!layerRef) continue;
+    const tree = await revParse(wt, `${layerRef}^{tree}`, env);
+    if (!tree) continue;
+    const parent = await layerParent(wt, stack, i, layerRef, target, env);
+    if (!parent) continue;
+    if (await probeMerged(wt, tree, parent, target, env)) landed++;
+  }
+  return { landed, total };
 }
 
 // Decide one worktree's fate. Ordered most-conservative-first: a live lock or a dirty
@@ -148,6 +356,34 @@ export async function judge(entry: WorktreeEntry, target: string | undefined, en
   const status = await captureArgvAsync(["git", "status", "--porcelain"], env, { cwd: wt });
   if (status.code !== 0) return { entry, verdict: "skip", why: "unreadable (git status failed)" };
   if (status.stdout !== "") return { entry, verdict: "keep", why: "uncommitted changes" };
+  // Take the stack path ONLY when this worktree's branch is actually a member of the stack.
+  // parseStackState's single-stack fallback can hand back a stack recorded by EARLIER work in
+  // this admin dir while HEAD now sits on an unrelated branch (or is detached). Judging that
+  // entry by layersLanded() would never look at HEAD at all, and because this arm sits above
+  // the rev-list gate it would also bypass the unpushed-commits protection — reaping a clean
+  // worktree whose commits exist only on this machine, unattended, on the daily timer.
+  const inStack =
+    entry.stack !== undefined &&
+    entry.branch !== undefined &&
+    entry.stack.branches.some((b) => b.branch === entry.branch);
+  // The position is load-bearing: a fully-pushed stack would otherwise reap below on "every
+  // commit is on a remote" while its PRs are all still open — and removing the worktree takes
+  // the gh-stack file with it. `skip`, not `keep`, because skip already means "don't ask,
+  // don't touch" in the interactive path: the answer to a half-landed stack is `gh stack
+  // merge`, not a per-worktree question. `pushable` is never set on this arm.
+  if (inStack) {
+    const stack = entry.stack as StackState;
+    const label = stack.number === undefined ? "unsubmitted stack" : `stack #${stack.number}`;
+    if (!target) return { entry, verdict: "skip", why: `${label} — no remote default branch to compare` };
+    const { landed, total } = await layersLanded(wt, stack, target, env);
+    return landed === total
+      ? { entry, verdict: "reap", why: `${label} — all ${total} layer(s) landed in ${target}` }
+      : { entry, verdict: "skip", why: `${label} — ${total - landed} of ${total} layers open` };
+  }
+  // A stack file is present but the branch is not a member (or HEAD is detached): the stack is
+  // used ONLY to force pushable=false below, and judgement falls through to the ordinary
+  // single-branch path — rev-list gate included.
+  //
   // Reachable from HEAD but from no remote-tracking ref — the same question Claude Code's
   // guard asks. Zero means the commits are literally pushed and the guard would have let go.
   const unpushed = await captureArgvAsync(["git", "rev-list", "--count", "HEAD", "--not", "--remotes"], env, {
@@ -156,8 +392,11 @@ export async function judge(entry: WorktreeEntry, target: string | undefined, en
   if (unpushed.code !== 0) return { entry, verdict: "skip", why: "unreadable (git rev-list failed)" };
   if (unpushed.stdout === "0") return { entry, verdict: "reap", why: "every commit is on a remote" };
   // A detached HEAD has no branch to publish, so it is never pushable — its commits can only
-  // be preserved by naming them, which is a decision for a human, not a sweep.
-  const pushable = entry.branch !== undefined;
+  // be preserved by naming them, which is a decision for a human, not a sweep. Neither is a
+  // worktree holding gh-stack state: its branch is publishable, but never THIS way. A stack
+  // goes out through `gh stack submit`, so `git push -u origin <one-layer>` is at best a
+  // no-op and at worst the sweep undoing a `delete_branch_on_merge`.
+  const pushable = entry.branch !== undefined && entry.stack === undefined;
   if (!target)
     return { entry, verdict: "keep", why: "unpushed commits, no remote default branch to compare", pushable };
   if (await isSquashMerged(wt, target, env))
@@ -234,5 +473,9 @@ export async function linkedWorktrees(repo: string, env: Env): Promise<WorktreeE
     }
   };
   const primary = real(repo);
-  return parseWorktreeList(listed.stdout).filter((e) => real(e.path) !== primary);
+  const kept = parseWorktreeList(listed.stdout).filter((e) => real(e.path) !== primary);
+  // The stack read is attached here, not inside judge(), so that every consumer — the report
+  // line, the interactive prompt, the push gate — sees exactly the same answer. One extra
+  // `git rev-parse` per linked worktree, run concurrently.
+  return Promise.all(kept.map(async (e) => ({ ...e, stack: await readStackState(e.path, e.branch, env) })));
 }
