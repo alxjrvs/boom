@@ -6,9 +6,7 @@
 import { buildCommand, buildRouteMap } from "@stricli/core";
 import type { BoomContext } from "../context.ts";
 import { boomFleet, fleetDiff, fleetDrift } from "../engine/fleet.ts";
-import { str } from "./flags.ts";
-
-const jsonFlag = { kind: "boolean", optional: true, brief: "Emit a structured JSON report" } as const;
+import { jsonFlag, str } from "./flags.ts";
 
 const listCommand = buildCommand<{ json?: boolean }, [], BoomContext>({
   docs: { brief: "List every machine's last-sync summary (boom version, drift)" },

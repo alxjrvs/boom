@@ -26,12 +26,12 @@ export interface ImportedEntry {
 // A `collect` result: the mechanical entries plus any scaffold notes (templates, scripts, or
 // whole-manager caveats) that couldn't be translated cleanly and need a human. Notes render as
 // comment lines in the proposal — never as unappliable config.
-export interface ImportResult {
+interface ImportResult {
   readonly entries: ImportedEntry[];
   readonly notes: string[];
 }
 
-export interface Importer {
+interface Importer {
   readonly name: string;
   // The manager's source dir if this machine has it, else undefined. Cheap existence probe.
   detect(env: Env): Promise<string | undefined> | string | undefined;
@@ -350,7 +350,7 @@ const nixDarwin: Importer = {
   },
 };
 
-export const IMPORTERS: readonly Importer[] = [stow, chezmoi, yadm, dotbot, nixDarwin];
+const IMPORTERS: readonly Importer[] = [stow, chezmoi, yadm, dotbot, nixDarwin];
 
 export function importerNames(): string {
   return IMPORTERS.map((i) => i.name).join(", ");

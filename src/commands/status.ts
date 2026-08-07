@@ -5,11 +5,12 @@
 import { buildCommand } from "@stricli/core";
 import type { BoomContext } from "../context.ts";
 import { boomStatus } from "../engine/overview.ts";
+import { jsonFlag } from "./flags.ts";
 
 export const statusCommand = buildCommand<{ json?: boolean }, [], BoomContext>({
   docs: { brief: "One-screen dashboard: config, drift, last sync, fleet, lock, and secret health" },
   parameters: {
-    flags: { json: { kind: "boolean", optional: true, brief: "Emit a structured JSON report" } },
+    flags: { json: jsonFlag },
   },
   async func(flags) {
     this.process.exitCode = await boomStatus(this, flags.json);

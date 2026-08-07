@@ -20,7 +20,7 @@ import type { ComposedSection } from "./compose.ts";
 import { hasBoomfile, loadConfig } from "./load.ts";
 import { parseRemoteRef } from "./remote.ts";
 
-export function modulesCacheDir(env: Env): string {
+function modulesCacheDir(env: Env): string {
   return join(stateHome(env), "boom", "modules");
 }
 
@@ -35,7 +35,7 @@ function moduleSlug(ref: string): string {
   return ref.replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "") || "module";
 }
 
-export interface ResolvedModule {
+interface ResolvedModule {
   readonly ref: string;
   readonly dir?: string; // the resolved local directory (present on success)
   readonly cloned?: boolean; // a fresh clone happened this call (for `boom module` reporting)

@@ -24,7 +24,7 @@ import { notify } from "../lib/notify.ts";
 import { boomStateDir } from "../lib/paths.ts";
 import { runArgv } from "../lib/proc.ts";
 import { fetchLatestVersion } from "../lib/release.ts";
-import { VERSION } from "../lib/version.ts";
+import { compareVersions, VERSION } from "../lib/version.ts";
 import { machineSummary, writeMachineSummary } from "./fleet.ts";
 import { displace, journalWrite } from "./journal.ts";
 import { runWorkItems, type WorkItem } from "./registry.ts";
@@ -41,19 +41,6 @@ function timerLabel(cmd: string): string {
 }
 function timerArgs(cmd: string, self: string): string[] {
   return [self, ...cmd.trim().split(/\s+/)];
-}
-
-// Is `latest` a strictly greater semver than `current`? Both are dot-numeric release strings
-// (no pre-release suffixes ship), so a component-wise numeric compare suffices.
-export function isNewer(latest: string, current: string): boolean {
-  const a = latest.split(".").map(Number);
-  const b = current.split(".").map(Number);
-  for (let i = 0; i < Math.max(a.length, b.length); i++) {
-    const x = a[i] ?? 0;
-    const y = b[i] ?? 0;
-    if (x !== y) return x > y;
-  }
-  return false;
 }
 
 // Any field configured? Gates the header so an absent or all-off `[boom]` table stays silent.
@@ -289,7 +276,7 @@ async function applyUpgrade(settings: BoomSettings, ctx: ReconcileCtx): Promise<
     report.skip("upgrade check skipped (couldn't reach GitHub)");
     return;
   }
-  if (!isNewer(latest, VERSION)) {
+  if (compareVersions(latest, VERSION) <= 0) {
     report.skip(`boom is current (v${VERSION})`);
     return;
   }

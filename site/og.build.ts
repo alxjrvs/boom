@@ -24,7 +24,17 @@ const C = {
 const TAU = Math.PI * 2;
 
 // ---- master mark (locked hex tunnel) — verbatim params from index.html ----
-const P = { n: 6, M: [0.5, 0.5], V: [0.64, 0.37], rm: 0.44, rd: 0.08, sq: 0.9, rot: -0.16 };
+// M/V are annotated as fixed-length tuples (the file's own `[number, number][]` idiom): under
+// noUncheckedIndexedAccess a bare `number[]` makes every `P.M[0]` possibly-undefined.
+const P = {
+  n: 6,
+  M: [0.5, 0.5] as [number, number],
+  V: [0.64, 0.37] as [number, number],
+  rm: 0.44,
+  rd: 0.08,
+  sq: 0.9,
+  rot: -0.16,
+};
 
 // one hexagon ring: 6 vertices at radius r about (cx,cy), twisted by `rot`,
 // x-squished by P.sq — identical to index.html hexPts().

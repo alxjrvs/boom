@@ -14,9 +14,9 @@ import type { BoomContext } from "../context.ts";
 import { pathExists } from "../lib/fs.ts";
 import type { Env } from "../lib/paths.ts";
 import { bandsReporter } from "../lib/reporter.ts";
-import { VERSION } from "../lib/version.ts";
+import { compareVersions, VERSION } from "../lib/version.ts";
 
-export interface MachineSummary {
+interface MachineSummary {
   readonly host: string;
   readonly os: string;
   readonly boom: string; // boom version that last synced this machine
@@ -24,7 +24,7 @@ export interface MachineSummary {
   readonly date: string; // YYYY-MM-DD of the last sync (date, not time, to bound repo churn)
 }
 
-export function machinesDir(repo: string): string {
+function machinesDir(repo: string): string {
   return join(repo, ".boom", "machines");
 }
 
@@ -105,7 +105,7 @@ export async function boomFleet(ctx: BoomContext, json = false): Promise<number>
 
   const newest = machines
     .map((m) => m.boom)
-    .sort(cmpVersion)
+    .sort(compareVersions)
     .at(-1);
   const self = fleetHost(ctx.env);
   report.header("Fleet");
@@ -114,7 +114,7 @@ export async function boomFleet(ctx: BoomContext, json = false): Promise<number>
     const line = `${m.host}${here} — boom v${m.boom}, ${m.os}, synced ${m.date}`;
     if (m.verdict === "fail") report.warn(`${line} — last sync had failures`);
     else if (m.verdict === "warn") report.warn(`${line} — last sync had warnings`);
-    else if (newest && cmpVersion(m.boom, newest) < 0) report.warn(`${line} — behind v${newest}`);
+    else if (newest && compareVersions(m.boom, newest) < 0) report.warn(`${line} — behind v${newest}`);
     else report.ok(line);
   }
   return finish();
@@ -147,7 +147,7 @@ export async function fleetDrift(ctx: BoomContext, json = false): Promise<number
   }
   const newest = machines
     .map((m) => m.boom)
-    .sort(cmpVersion)
+    .sort(compareVersions)
     .at(-1);
   const self = fleetHost(ctx.env);
   let flagged = 0;
@@ -159,7 +159,7 @@ export async function fleetDrift(ctx: BoomContext, json = false): Promise<number
     } else if (m.verdict === "warn") {
       report.warn(`${m.host}${here} — last sync had warnings (v${m.boom}, ${m.date})`);
       flagged++;
-    } else if (newest && cmpVersion(m.boom, newest) < 0) {
+    } else if (newest && compareVersions(m.boom, newest) < 0) {
       report.warn(`${m.host}${here} — behind v${newest} (on v${m.boom}, synced ${m.date})`);
       flagged++;
     }
@@ -220,19 +220,6 @@ export async function fleetDiff(
   if (diffs === 0) report.ok("identical — same boom, os, verdict, and sync date");
   else report.ok(`${diffs} field(s) differ`);
   return finish();
-}
-
-// Component-wise numeric semver compare (release strings only, no pre-release suffixes ship) —
-// the same shape settings.ts/isNewer uses, kept local so fleet has no cross-module coupling.
-function cmpVersion(a: string, b: string): number {
-  const pa = a.split(".").map(Number);
-  const pb = b.split(".").map(Number);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const x = pa[i] ?? 0;
-    const y = pb[i] ?? 0;
-    if (x !== y) return x - y;
-  }
-  return 0;
 }
 
 // Build this machine's summary from a completed reconcile's tally. Kept here (next to the reader)

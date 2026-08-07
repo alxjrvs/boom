@@ -10,6 +10,7 @@ import { detectOs } from "../config/profile.ts";
 import type { BoomContext } from "../context.ts";
 import { pathExists } from "../lib/fs.ts";
 import { remoteReachableAsync } from "../lib/git.ts";
+import { AGENT_KEYCHAIN_ITEM, agentTokenPresent } from "../lib/keychain.ts";
 import { boomStateDir } from "../lib/paths.ts";
 import { captureArgvAsync, hasCommand, lastLine } from "../lib/proc.ts";
 import { bandsReporter, type Reporter } from "../lib/reporter.ts";
@@ -29,8 +30,6 @@ const TOOLS: ReadonlyArray<{ cmd: string; why: string }> = [
   { cmd: "op", why: "1Password secrets (hooks/mcp)" },
   { cmd: "claude", why: "code + mcp commands" },
 ];
-
-const KEYCHAIN_ITEM = "op-claude-agent";
 
 // `configOnly` (the `--config` flag) is the folded-in `boom validate`: parse + schema-check
 // the boomfile and overlays alone, as a read-only CI gate — no tools/keychain/state checks,
@@ -174,12 +173,8 @@ export async function doctor(
 
   if (detectOs(ctx.env) === "darwin") {
     report.header("1Password agent");
-    const p = Bun.spawnSync(["security", "find-generic-password", "-s", KEYCHAIN_ITEM, "-w"], {
-      stdout: "ignore",
-      stderr: "ignore",
-    });
-    if (p.exitCode === 0) report.ok(`${KEYCHAIN_ITEM} service-account token present in keychain`);
-    else report.warn(`${KEYCHAIN_ITEM} keychain item missing — provision it (op-agent provision)`);
+    if (agentTokenPresent()) report.ok(`${AGENT_KEYCHAIN_ITEM} service-account token present in keychain`);
+    else report.warn(`${AGENT_KEYCHAIN_ITEM} keychain item missing — provision it (op-agent provision)`);
   }
 
   report.header("State");

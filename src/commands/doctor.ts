@@ -5,6 +5,7 @@
 import { buildCommand } from "@stricli/core";
 import type { BoomContext } from "../context.ts";
 import { doctor } from "../engine/doctor.ts";
+import { jsonFlag } from "./flags.ts";
 
 export const doctorCommand = buildCommand<
   { json?: boolean; config?: boolean; fix?: boolean; secrets?: boolean },
@@ -31,7 +32,7 @@ export const doctorCommand = buildCommand<
         optional: true,
         brief: "Audit op:// secret references in the config",
       },
-      json: { kind: "boolean", optional: true, brief: "Emit a structured JSON report" },
+      json: jsonFlag,
     },
   },
   async func(flags) {

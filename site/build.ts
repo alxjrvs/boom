@@ -12,16 +12,17 @@
 // Output HTML is written next to index.html and is git-ignored — a build artifact,
 // regenerated on every deploy.
 
-import { marked } from "marked";
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { marked } from "marked";
 
 const SITE = import.meta.dir; // .../site
 const ROOT = resolve(SITE, ".."); // repo root
 
 // Version for the header pill — read from package.json so generated doc pages stay in
 // lockstep with the release (the hand-authored landing hardcodes the same pill).
-const VERSION = (JSON.parse(readFileSync(resolve(ROOT, "package.json"), "utf8")) as { version: string }).version;
+const VERSION = (JSON.parse(readFileSync(resolve(ROOT, "package.json"), "utf8")) as { version: string })
+  .version;
 
 // --- lift the shared chrome out of the landing page (single source of truth) ---
 const index = readFileSync(resolve(SITE, "index.html"), "utf8");

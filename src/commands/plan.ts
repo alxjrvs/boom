@@ -6,7 +6,7 @@
 import { buildCommand } from "@stricli/core";
 import type { BoomContext } from "../context.ts";
 import { reconcile } from "../engine/reconcile.ts";
-import { str } from "./flags.ts";
+import { jsonFlag, onlyFlag, profileFlag, verboseFlag } from "./flags.ts";
 
 export const planCommand = buildCommand<
   { fix?: boolean; only?: string[]; profile?: string[]; json?: boolean; verbose?: boolean },
@@ -21,26 +21,10 @@ export const planCommand = buildCommand<
         optional: true,
         brief: "Preview a drift-repair sync: show which conflicting files an overwrite would replace",
       },
-      only: {
-        kind: "parsed",
-        parse: str,
-        variadic: true,
-        optional: true,
-        brief: "Limit to these section names",
-      },
-      profile: {
-        kind: "parsed",
-        parse: str,
-        variadic: true,
-        optional: true,
-        brief: "Activate a profile (repeatable)",
-      },
-      json: { kind: "boolean", optional: true, brief: "Emit a structured JSON report" },
-      verbose: {
-        kind: "boolean",
-        optional: true,
-        brief: "Show every step, including already-in-place items (default: only pending changes)",
-      },
+      only: onlyFlag,
+      profile: profileFlag,
+      json: jsonFlag,
+      verbose: verboseFlag,
     },
   },
   async func(flags) {

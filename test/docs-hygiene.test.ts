@@ -8,8 +8,11 @@
 // cycle, and loading man.ts first lands cli.ts's route map in a temporal-dead-zone read of
 // manCommand. Importing cli.ts first evaluates it fully, exactly as cli-extra.test.ts does.
 import { expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import pkg from "../package.json" with { type: "json" };
 import { app } from "../src/cli.ts";
+import { commandNames } from "../src/commands/catalog.ts";
 import { manPage } from "../src/commands/man.ts";
 
 // The verb-set marketing strings boom retired: the pre-boom `apply/…` set, and both
@@ -40,4 +43,18 @@ test("the man page has no dangling SEE ALSO refs and no stale framing", () => {
   expect(m).not.toContain("workspace manager");
   expect(m).not.toContain("machine reconciler");
   expect(m).toContain("github.com/alxjrvs/boom");
+});
+
+// SPEC.md enumerates the route map by hand. Set *equality*, not containment, so both directions
+// of drift fail: adding a route without naming it in SPEC, and leaving a name in SPEC after its
+// route is gone. The <!-- commands:begin/end --> markers give the assertion an unambiguous region
+// and are invisible in the marked-rendered Pages output.
+test("SPEC.md's command list equals the route map's", () => {
+  const spec = readFileSync(join(import.meta.dir, "..", "SPEC.md"), "utf8");
+  const region = /<!-- commands:begin -->([\s\S]*?)<!-- commands:end -->/.exec(spec);
+  expect(region, "SPEC.md is missing the commands:begin/end markers").not.toBeNull();
+  const listed = [...(region?.[1] ?? "").matchAll(/`([^`]+)`/g)].map((m) => m[1] as string);
+  expect(new Set(listed)).toEqual(new Set(commandNames()));
+  // A duplicate would satisfy the Set comparison while the prose still read wrong.
+  expect(listed).toHaveLength(commandNames().length);
 });

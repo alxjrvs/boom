@@ -14,31 +14,25 @@ import { latestRelease, REPO, type Release } from "../lib/release.ts";
 import { bandsReporter, type Reporter } from "../lib/reporter.ts";
 import { VERSION } from "../lib/version.ts";
 
-// The Bun `--target` suffixes boom ships. These are exactly the targets release.yml
-// cross-compiles and ci.yml smoke-builds; the lockstep is guarded by a test that greps
-// both workflows (test/upgrade.test.ts), so a renamed asset can't silently break
-// `boom upgrade` / install.sh.
-export const RELEASE_TARGETS = [
-  "bun-darwin-arm64",
-  "bun-darwin-x64",
-  "bun-linux-x64",
-  "bun-linux-arm64",
-] as const;
+// `process.platform/arch` → the Bun `--target` suffix boom ships for it (the same suffix
+// install.sh maps `uname` to). These are exactly the targets release.yml cross-compiles and
+// ci.yml smoke-builds; the lockstep is guarded by a test that greps both workflows
+// (test/upgrade.test.ts), so a renamed asset can't silently break `boom upgrade` / install.sh.
+//
+// One table, two exports derived from it — the host lookup and the target list used to be a
+// switch and an array spelling the same four strings, either of which could gain a target the
+// other didn't.
+const RELEASE_TARGET_BY_HOST = {
+  "darwin/arm64": "bun-darwin-arm64",
+  "darwin/x64": "bun-darwin-x64",
+  "linux/x64": "bun-linux-x64",
+  "linux/arm64": "bun-linux-arm64",
+} as const;
 
-// process.platform/arch → the release-asset suffix install.sh maps `uname` to.
+export const RELEASE_TARGETS = Object.values(RELEASE_TARGET_BY_HOST);
+
 export function releaseTargetFor(platform: string, arch: string): string | undefined {
-  switch (`${platform}/${arch}`) {
-    case "darwin/arm64":
-      return "bun-darwin-arm64";
-    case "darwin/x64":
-      return "bun-darwin-x64";
-    case "linux/x64":
-      return "bun-linux-x64";
-    case "linux/arm64":
-      return "bun-linux-arm64";
-    default:
-      return undefined;
-  }
+  return (RELEASE_TARGET_BY_HOST as Record<string, string | undefined>)[`${platform}/${arch}`];
 }
 
 // Stage the downloaded bytes beside the running binary (same directory → same filesystem,

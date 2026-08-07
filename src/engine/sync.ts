@@ -23,7 +23,7 @@ import type { Reporter } from "../lib/reporter.ts";
 import { commitLocalChanges } from "./commit.ts";
 import type { Verb } from "./types.ts";
 
-export interface SyncOptions {
+interface SyncOptions {
   // Commit local changes before pulling instead of the default autostash — so they
   // land as a real commit, replayed on top of the rebase rather than left uncommitted.
   readonly commit?: boolean;

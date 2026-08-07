@@ -9,7 +9,7 @@
 // before cli.ts has assigned `routes`.
 import { routes } from "../cli.ts";
 
-export interface CommandInfo {
+interface CommandInfo {
   readonly name: string;
   readonly brief: string;
 }
@@ -57,10 +57,10 @@ export function commandNames(): readonly string[] {
 // can offer a second level without a hand-maintained table. A route map exposes
 // getAllEntries; a leaf command does not — that `in` check is the one-level-deeper form
 // of index.ts asking the route map itself what it routes.
-export interface SubcommandInfo extends CommandInfo {
+interface SubcommandInfo extends CommandInfo {
   readonly flags: readonly FlagInfo[];
 }
-export interface SubcommandGroup {
+interface SubcommandGroup {
   readonly parent: string;
   readonly children: readonly SubcommandInfo[];
 }

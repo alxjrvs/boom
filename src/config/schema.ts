@@ -1,6 +1,7 @@
 // The boomfile.toml schema (nested-by-section). This typed contract is the source of
-// truth shared by the loader and the reconcile engine. Within a section, resources run
-// by phase:  link → copy → secret → dir → pkg → osx_default → launchd → run → check → hook.
+// truth shared by the loader and the reconcile engine. Within a section, resources run by phase:
+//   link → copy → tmpl → secret → dir → pkg → osx_default → launchd → systemd → run → check → hook
+// — the order engine/registry.ts's table executes and SPEC.md states.
 import * as v from "valibot";
 
 // A Unix permission bitmask as an octal string ("644", "0700"). Validated here at the
@@ -20,7 +21,7 @@ const ModeSchema = v.pipe(
 // placed under it, preserving the path structure below the glob's static prefix. Neither
 // form renders content: a file whose text must differ per machine is a `tmpl`, which reads
 // the same `${env:VAR}`/`${host}`/`${os}` vocabulary plus `${NAME}` from `[vars]`.
-export const FileSchema = v.strictObject({
+const FileSchema = v.strictObject({
   src: v.string(),
   dst: v.string(),
   mode: v.optional(ModeSchema),
@@ -64,7 +65,7 @@ export const FileSchema = v.strictObject({
 // but must not reclaim. Spelled to match `dir`'s `remove_on_uninstall` rather than a bare
 // `uninstall`. Rejected on brew/mise below — the `v.check` rides on the *object* because the
 // constraint is cross-field (the key's legality depends on `manager`).
-export const PkgSchema = v.pipe(
+const PkgSchema = v.pipe(
   v.strictObject({
     manager: v.picklist(["brew", "mise", "apt", "dnf", "cargo", "npm", "pipx", "gem", "flatpak", "gh"]),
     file: v.optional(v.string()),
@@ -83,7 +84,7 @@ export const PkgSchema = v.pipe(
 // *and* uninstall" is one entry, not a duplicated pair.
 const VerbSchema = v.picklist(["sync", "verify", "uninstall"]);
 
-export const RunSchema = v.strictObject({
+const RunSchema = v.strictObject({
   on: v.union([VerbSchema, v.array(VerbSchema)]),
   cmd: v.string(),
   // Optional wall-clock cap (seconds). A hung `run` step would otherwise block the whole
@@ -111,7 +112,7 @@ export const RunSchema = v.strictObject({
 // just strings — so a hook receives them already typed instead of re-parsing "true"/"5".
 // This is the public extension contract; widening it now (pre-1.0) avoids a breaking change
 // once hooks proliferate.
-export const HookSchema = v.strictObject({
+const HookSchema = v.strictObject({
   name: v.string(),
   with: v.optional(v.record(v.string(), v.unknown())),
 });
@@ -120,7 +121,7 @@ export const HookSchema = v.strictObject({
 // `type` is optional: TOML already types the value (`true`→bool, `3`→int, `0.5`→float,
 // `"x"`→string), so it's inferred from the value and only needs stating to override an edge
 // case (force a float for an integer-valued float, or a string for a numeric string).
-export const OsxDefaultSchema = v.strictObject({
+const OsxDefaultSchema = v.strictObject({
   domain: v.string(),
   key: v.string(),
   type: v.optional(v.picklist(["bool", "int", "float", "string"])),
@@ -130,7 +131,7 @@ export const OsxDefaultSchema = v.strictObject({
 // A standalone directory to ensure exists (with an optional mode) — the declarative form of
 // a `run` + `mkdir -p`/`chmod`. `remove_on_uninstall = true` opts into removing it on
 // uninstall *only if empty* (dirs may hold user data, so the default is to leave it).
-export const DirSchema = v.strictObject({
+const DirSchema = v.strictObject({
   path: v.string(),
   mode: v.optional(ModeSchema),
   remove_on_uninstall: v.optional(v.boolean()),
@@ -142,7 +143,7 @@ export const DirSchema = v.strictObject({
 // so `check` converges drift like every other resource instead of only reporting it.
 // `missing_file` picks how a nonexistent file is treated (default `fail` — a guardrail that
 // silently stops guarding when its file vanishes is worse than useless).
-export const CheckSchema = v.strictObject({
+const CheckSchema = v.strictObject({
   path: v.string(),
   present: v.optional(v.array(v.string())),
   absent: v.optional(v.array(v.string())),
@@ -163,7 +164,7 @@ export const CheckSchema = v.strictObject({
 // it is left alone by default and only displaced (backed up, recoverably) under
 // `boom source --fix`. `mode` defaults to 0600 (a secret nobody else can read). The declarative
 // counterpart to `tmpl`, for secrets.
-export const SecretSchema = v.pipe(
+const SecretSchema = v.pipe(
   v.strictObject({
     dst: v.string(),
     ref: v.optional(v.string()),
@@ -184,7 +185,7 @@ export const SecretSchema = v.pipe(
 // machine-specific overlay files. An unknown `${NAME}` is a hard failure (a silently-unresolved
 // placeholder in a config is worse than a loud error), whereas a literal shell `${FOO:-bar}`
 // (anything but a bare identifier) is left verbatim.
-export const TmplSchema = v.strictObject({
+const TmplSchema = v.strictObject({
   src: v.string(),
   dst: v.string(),
   mode: v.optional(ModeSchema),
@@ -193,7 +194,7 @@ export const TmplSchema = v.strictObject({
 // A macOS LaunchAgent: link a plist into ~/Library/LaunchAgents and own its launchctl
 // lifecycle (load -w on sync, unload on uninstall). OS-gated to darwin. `dst` defaults to
 // ~/Library/LaunchAgents/<basename(src)>.
-export const LaunchdSchema = v.strictObject({
+const LaunchdSchema = v.strictObject({
   src: v.string(),
   dst: v.optional(v.string()),
 });
@@ -205,7 +206,7 @@ export const LaunchdSchema = v.strictObject({
 // unit text is generated here, so an unchanged stanza re-renders byte-identical → a no-op
 // sync. `timer` is a systemd OnCalendar expression ("daily", "*-*-* 04:00:00"); with it set,
 // the timer (not the service) is what gets enabled. `env` becomes `Environment=K=V` lines.
-export const SystemdSchema = v.strictObject({
+const SystemdSchema = v.strictObject({
   name: v.string(),
   description: v.optional(v.string()),
   exec: v.string(),
@@ -225,13 +226,13 @@ const OsSchema = v.picklist(["darwin", "linux"]);
 // exactly the one-element list, so every existing boomfile parses unchanged.
 const anyOfSchema = <T extends v.GenericSchema>(s: T) => v.optional(v.union([s, v.array(s)]));
 
-export const WhenSchema = v.strictObject({
+const WhenSchema = v.strictObject({
   os: anyOfSchema(OsSchema),
   host: anyOfSchema(v.string()),
   profile: anyOfSchema(v.string()),
 });
 
-export const SectionSchema = v.strictObject({
+const SectionSchema = v.strictObject({
   name: v.string(),
   when: v.optional(WhenSchema),
   link: v.optional(v.array(FileSchema)),
@@ -259,7 +260,7 @@ const IntervalSchema = v.pipe(
 // (macOS-only). `cmd` is a boom subcommand line ("verify", "code fetch"); one array entry
 // replaces the old bespoke `verify_schedule` / `code_fetch_schedule` keys and lets any boom
 // command be scheduled without growing a new schema key each time.
-export const ScheduleSchema = v.strictObject({
+const ScheduleSchema = v.strictObject({
   cmd: v.string(),
   every: IntervalSchema,
 });
@@ -267,7 +268,7 @@ export const ScheduleSchema = v.strictObject({
 // The top-level `[boom]` table: machine-global, self-wiring behaviors folded into the
 // reconcile boom already runs — so a consumer stops hand-rolling `run`/plist boilerplate for
 // boom-invoking-boom. Every field is opt-in; an absent `[boom]` table changes nothing.
-export const BoomSettingsSchema = v.strictObject({
+const BoomSettingsSchema = v.strictObject({
   // Regenerate ~/.claude/skills/boom/SKILL.md from the running binary on every sync, so the
   // self-describing skill can never lag a `boom upgrade`.
   skill_on_sync: v.optional(v.boolean()),

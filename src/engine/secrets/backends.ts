@@ -25,10 +25,10 @@ export type SecretResult =
 // A full `Secret`/`ReconcileCtx` still satisfies both structurally, so the `secret` resource
 // passes its own values through unchanged; the narrowing is what lets a non-resource caller
 // (askpass) resolve a bare ref without fabricating a fake destination.
-export type SecretSource = Pick<Secret, "ref" | "template" | "backend">;
-export type SecretCtx = Pick<ReconcileCtx, "env" | "repo">;
+type SecretSource = Pick<Secret, "ref" | "template" | "backend">;
+type SecretCtx = Pick<ReconcileCtx, "env" | "repo">;
 
-export interface SecretBackend {
+interface SecretBackend {
   // Short id (op/env/pass/age/sops) — used in spinner + freshness messages.
   readonly name: string;
   // Human label for the underlying tool, folded into the "not installed" failure so a missing

@@ -8,30 +8,7 @@ import { doctor } from "../engine/doctor.ts";
 import { reconcile } from "../engine/reconcile.ts";
 import type { LinkMode } from "../engine/types.ts";
 import { confirm } from "../lib/confirm.ts";
-import { str } from "./flags.ts";
-
-const onlyFlag = {
-  kind: "parsed",
-  parse: str,
-  variadic: true,
-  optional: true,
-  brief: "Limit to these section names",
-} as const;
-const profileFlag = {
-  kind: "parsed",
-  parse: str,
-  variadic: true,
-  optional: true,
-  brief: "Activate a profile (repeatable)",
-} as const;
-const jsonFlag = { kind: "boolean", optional: true, brief: "Emit a structured JSON report" } as const;
-// Off by default: quiet output shows only what changed + what needs attention + the summary.
-// --verbose restores the per-item firehose (every ✓, every already-in-place skip).
-const verboseFlag = {
-  kind: "boolean",
-  optional: true,
-  brief: "Show every step, including already-in-place items (default: only changes + attention)",
-} as const;
+import { jsonFlag, onlyFlag, profileFlag, str, verboseFlag } from "./flags.ts";
 
 type VerifyFlags = { only?: string[]; json?: boolean; profile?: string[]; verbose?: boolean; ci?: boolean };
 type SyncFlags = {

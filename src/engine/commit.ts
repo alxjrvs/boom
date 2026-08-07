@@ -5,9 +5,9 @@
 import { addAll, commitStaged, isClean } from "../lib/git.ts";
 import type { Env } from "../lib/paths.ts";
 
-export const DEFAULT_COMMIT_MESSAGE = "boom: local changes";
+const DEFAULT_COMMIT_MESSAGE = "boom: local changes";
 
-export type CommitOutcome =
+type CommitOutcome =
   | { readonly kind: "clean" }
   | { readonly kind: "committed"; readonly message: string }
   | { readonly kind: "failed"; readonly stderr: string };

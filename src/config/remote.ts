@@ -17,7 +17,7 @@ import {
   writeConfigBreadcrumb,
 } from "./load.ts";
 
-export interface ParsedRemoteRef {
+interface ParsedRemoteRef {
   readonly url: string;
   readonly ref?: string;
 }

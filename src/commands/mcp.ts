@@ -6,10 +6,10 @@
 // of being parsed as boom's own flags — no pre-Stricli passthrough needed.
 import { buildCommand, buildRouteMap } from "@stricli/core";
 import type { BoomContext } from "../context.ts";
+import { AGENT_KEYCHAIN_ITEM } from "../lib/keychain.ts";
 import { hasCommand } from "../lib/proc.ts";
 import { str } from "./flags.ts";
 
-const KEYCHAIN_ITEM = "op-claude-agent";
 // Resolve `op` from PATH rather than hardcoding /opt/homebrew (Apple-Silicon-only):
 // Intel macs install it under /usr/local/bin and Linux elsewhere, and boom ships a
 // Linux binary. The agent wrapper runs under `sh -c`, so a bare name resolves there.
@@ -20,8 +20,12 @@ const OP_BIN = "op";
 // env-file and `$@` (after a shift) are the server argv — passed as *separate* `sh`
 // positionals by buildMcpAddArgv, so a path with a space or a `;` in a server arg is
 // never re-parsed by the shell (the hazard the non-agent argv path already avoids).
+//
+// This is the one `find-generic-password` in boom that is *not* lib/keychain.ts's probe, and it
+// can't be: it is text handed to the MCP client to run later, in another process, so the literal
+// has to survive into the generated argv. Only the item name is shared.
 const AGENT_WRAPPER =
-  `export OP_SERVICE_ACCOUNT_TOKEN="$(security find-generic-password -s ${KEYCHAIN_ITEM} -w)"; ` +
+  `export OP_SERVICE_ACCOUNT_TOKEN="$(security find-generic-password -s ${AGENT_KEYCHAIN_ITEM} -w)"; ` +
   `ef="$1"; shift; exec ${OP_BIN} run --env-file="$ef" -- "$@"`;
 
 export interface McpAdd {

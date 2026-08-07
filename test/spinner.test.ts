@@ -17,7 +17,10 @@ function sink() {
 
 test("spin: draws a labelled line and returns the work's value on an interactive TTY", async () => {
   const s = sink();
-  const r = new Reporter(s.stream, s.stream, true, false, false, true, true, false);
+  const r = new Reporter(
+    { out: s.stream, err: s.stream },
+    { color: true, surface: "bands", interactive: true },
+  );
   const value = await r.spin("brew bundle", async () => {
     await Promise.resolve();
     return 42;
@@ -30,7 +33,7 @@ test("spin: draws a labelled line and returns the work's value on an interactive
 
 test("spin: is a pure pass-through on a non-interactive stream (no animation in captured output)", async () => {
   const s = sink();
-  const r = new Reporter(s.stream, s.stream, true, false, false, true, false, false);
+  const r = new Reporter({ out: s.stream, err: s.stream }, { color: true, surface: "bands" });
   const value = await r.spin("brew bundle", async () => 7);
   expect(value).toBe(7);
   expect(s.read()).toBe(""); // nothing drawn — piped/CI runs stay clean
@@ -38,7 +41,10 @@ test("spin: is a pure pass-through on a non-interactive stream (no animation in 
 
 test("spin: still clears the spinner and rethrows if the work throws", async () => {
   const s = sink();
-  const r = new Reporter(s.stream, s.stream, true, false, false, true, true, false);
+  const r = new Reporter(
+    { out: s.stream, err: s.stream },
+    { color: true, surface: "bands", interactive: true },
+  );
   let threw = false;
   try {
     await r.spin("mise install", async () => {
@@ -53,7 +59,10 @@ test("spin: still clears the spinner and rethrows if the work throws", async () 
 
 test("spin: prints a persistent label line under --verbose (streaming commands' in-flight signal)", async () => {
   const s = sink();
-  const r = new Reporter(s.stream, s.stream, true, false, true, true, true, false);
+  const r = new Reporter(
+    { out: s.stream, err: s.stream },
+    { color: true, verbose: true, surface: "bands", interactive: true },
+  );
   const value = await r.spin("git fetch", async () => 1);
   expect(value).toBe(1);
   expect(s.read()).toContain("git fetch…"); // a persistent line, not an erased animation
@@ -68,7 +77,10 @@ test("spin: prints a persistent label line under --verbose (streaming commands' 
 
 test("spin: mayPrompt yields the terminal — a persistent line, no in-place animation to erase a prompt", async () => {
   const s = sink();
-  const r = new Reporter(s.stream, s.stream, true, false, false, true, true, false);
+  const r = new Reporter(
+    { out: s.stream, err: s.stream },
+    { color: true, surface: "bands", interactive: true },
+  );
   const value = await r.spin("brew bundle", async () => 5, { mayPrompt: true });
   expect(value).toBe(5);
   expect(s.read()).toContain("brew bundle…");
@@ -79,14 +91,20 @@ test("spin: mayPrompt yields the terminal — a persistent line, no in-place ani
 
 test("spin: mayPrompt says a password may be wanted (the tool's own context is silenced)", async () => {
   const s = sink();
-  const r = new Reporter(s.stream, s.stream, true, false, false, true, true, false);
+  const r = new Reporter(
+    { out: s.stream, err: s.stream },
+    { color: true, surface: "bands", interactive: true },
+  );
   await r.spin("brew bundle", async () => 0, { mayPrompt: true });
   expect(s.read()).toContain("may ask for your password");
 });
 
 test("spin: mayPrompt false keeps the animation (an askpass shim means nothing will prompt)", async () => {
   const s = sink();
-  const r = new Reporter(s.stream, s.stream, true, false, false, true, true, false);
+  const r = new Reporter(
+    { out: s.stream, err: s.stream },
+    { color: true, surface: "bands", interactive: true },
+  );
   await r.spin("brew bundle", async () => 0, { mayPrompt: false });
   expect(s.read()).toContain("\x1b[K"); // animated in place, as before
   expect(s.read()).not.toContain("may ask for your password");
@@ -94,7 +112,7 @@ test("spin: mayPrompt false keeps the animation (an askpass shim means nothing w
 
 test("spin: mayPrompt stays a silent pass-through when non-interactive (no tty to prompt on)", async () => {
   const s = sink();
-  const r = new Reporter(s.stream, s.stream, true, false, false, true, false, false);
+  const r = new Reporter({ out: s.stream, err: s.stream }, { color: true, surface: "bands" });
   expect(await r.spin("apt install", async () => 3, { mayPrompt: true })).toBe(3);
   expect(s.read()).toBe("");
 });
