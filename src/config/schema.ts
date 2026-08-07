@@ -51,6 +51,21 @@ export const RunSchema = v.strictObject({
   // reconcile indefinitely; with this set, boom kills the step and reports a timeout
   // failure. Omit for no limit (the historical behavior).
   timeout: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
+  // Idempotence guards. A `run` step otherwise fires on every reconcile, which is why real
+  // boomfiles hand-roll `foo list | grep -q bar || foo add bar` into `cmd`; hoisting the
+  // predicate into the schema makes "already done" declarative and keeps the report honest
+  // (a skipped step says so instead of pretending to converge). `unless` is a shell
+  // *predicate* — exit 0 means "already satisfied, skip" — not a second step to run; it is
+  // the same conditionally-executed-shell shape `check.repair` already carries, and it
+  // inherits that resource's dry-run discipline (never spawned by a preview). `creates` is a
+  // path (`~`-expanded; relative resolves against the repo, matching the step's own cwd):
+  // skip when it exists. Both set ⇒ skip when *either* is satisfied (OR).
+  //
+  // Gotcha: the guards gate every verb the step binds to — there is no verb-specific branch,
+  // because the engine is one loop. On an `on = "uninstall"` step `creates` therefore reads
+  // "skip when the path exists", which is backwards for a teardown; use `unless` there.
+  unless: v.optional(v.string()),
+  creates: v.optional(v.string()),
 });
 
 // A hook's `with` inputs carry arbitrary TOML values (numbers, bools, arrays, tables) — not
@@ -160,12 +175,21 @@ export const SystemdSchema = v.strictObject({
   env: v.optional(v.record(v.string(), v.string())),
 });
 
+const OsSchema = v.picklist(["darwin", "linux"]);
+
 // A section/overlay gate: runs only when every specified constraint matches the
 // host. `os`/`host` auto-match the machine; `profile` requires `--profile <name>`.
+//
+// Each axis takes a scalar *or* a list: a list is any-of **within** an axis, while separate
+// axes still AND. That is the only shape that expresses "the laptops" or "work or personal"
+// without duplicating the whole section per value — and a bare scalar stays valid, meaning
+// exactly the one-element list, so every existing boomfile parses unchanged.
+const anyOfSchema = <T extends v.GenericSchema>(s: T) => v.optional(v.union([s, v.array(s)]));
+
 export const WhenSchema = v.strictObject({
-  os: v.optional(v.picklist(["darwin", "linux"])),
-  host: v.optional(v.string()),
-  profile: v.optional(v.string()),
+  os: anyOfSchema(OsSchema),
+  host: anyOfSchema(v.string()),
+  profile: anyOfSchema(v.string()),
 });
 
 export const SectionSchema = v.strictObject({

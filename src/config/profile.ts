@@ -24,13 +24,23 @@ export function profileContext(env: Env, explicit: readonly string[]): ProfileCo
   return { os: detectOs(env), host: env.BOOM_HOST ?? hostname(), profiles: new Set(explicit) };
 }
 
+// A `when` axis is any-of: an unset axis constrains nothing, a list matches if *any* member
+// does, a scalar is the one-element list. Axes are still ANDed by sectionApplies — the two
+// combinators sit apart so that stays obvious rather than hiding inside a chain of `if`s.
+const anyOf = (want: string | readonly string[] | undefined, have: string): boolean =>
+  want === undefined || (Array.isArray(want) ? want.includes(have) : want === have);
+
+const anyActive = (want: string | readonly string[] | undefined, active: ReadonlySet<string>): boolean =>
+  want === undefined
+    ? true
+    : Array.isArray(want)
+      ? want.some((p) => active.has(p))
+      : active.has(want as string);
+
 export function sectionApplies(section: Section, pc: ProfileContext): boolean {
   const w = section.when;
   if (!w) return true;
-  if (w.os && w.os !== pc.os) return false;
-  if (w.host && w.host !== pc.host) return false;
-  if (w.profile && !pc.profiles.has(w.profile)) return false;
-  return true;
+  return anyOf(w.os, pc.os) && anyOf(w.host, pc.host) && anyActive(w.profile, pc.profiles);
 }
 
 // Overlay file basenames sourced (if present) after the base boomfile.toml, in order.

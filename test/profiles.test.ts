@@ -53,6 +53,53 @@ link = [{ src = ".b", dst = "~/.b" }]
   expect(await pathExists(join(sb.home, ".b"))).toBe(true);
 });
 
+test("section when.os accepts a list (any-of)", async () => {
+  const sb = await sandbox({ BOOM_OS: "linux" });
+  await writeFile(join(sb.repo, ".a"), "a");
+  await writeFile(join(sb.repo, ".b"), "b");
+  await writeFile(
+    join(sb.repo, "boomfile.toml"),
+    `[[section]]
+name = "mac only"
+when = { os = ["darwin"] }
+link = [{ src = ".a", dst = "~/.a" }]
+
+[[section]]
+name = "either"
+when = { os = ["darwin", "linux"] }
+link = [{ src = ".b", dst = "~/.b" }]
+`,
+  );
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  expect(await pathExists(join(sb.home, ".a"))).toBe(false); // a one-element list still excludes
+  expect(await pathExists(join(sb.home, ".b"))).toBe(true); // any-of within the axis
+});
+
+test("when axes still AND while a list is any-of", async () => {
+  const boomfile = `[[section]]
+name = "gated"
+when = { os = ["linux"], profile = ["work", "home"] }
+link = [{ src = ".g", dst = "~/.g" }]
+`;
+  const noProfile = await sandbox({ BOOM_OS: "linux" });
+  await writeFile(join(noProfile.repo, ".g"), "g");
+  await writeFile(join(noProfile.repo, "boomfile.toml"), boomfile);
+  await reconcile("sync", noProfile.ctx, {});
+  expect(await pathExists(join(noProfile.home, ".g"))).toBe(false); // neither profile active
+
+  const oneProfile = await sandbox({ BOOM_OS: "linux" });
+  await writeFile(join(oneProfile.repo, ".g"), "g");
+  await writeFile(join(oneProfile.repo, "boomfile.toml"), boomfile);
+  await reconcile("sync", oneProfile.ctx, { profiles: ["home"] });
+  expect(await pathExists(join(oneProfile.home, ".g"))).toBe(true); // any-of satisfied
+
+  const wrongOs = await sandbox({ BOOM_OS: "darwin" });
+  await writeFile(join(wrongOs.repo, ".g"), "g");
+  await writeFile(join(wrongOs.repo, "boomfile.toml"), boomfile);
+  await reconcile("sync", wrongOs.ctx, { profiles: ["home"] });
+  expect(await pathExists(join(wrongOs.home, ".g"))).toBe(false); // axes still AND
+});
+
 test("section when.profile runs only when --profile names it", async () => {
   const base = `[[section]]
 name = "work"

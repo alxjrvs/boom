@@ -140,7 +140,9 @@ message = "git identity not configured"
 
 [[section]]
 name = "LaunchAgents"
-when = { os = "darwin" }
+# A `when` value may be a scalar or a list: a list is any-of *within* an axis, while separate
+# axes still AND — this section needs a darwin machine AND one of the two profiles active.
+when = { os = ["darwin"], profile = ["work", "personal"] }
 
 # `launchd` links a plist into ~/Library/LaunchAgents and owns its launchctl lifecycle
 # (load -w on sync, unload on uninstall) — no copy-pasted `launchctl unload; load -w` dance.
@@ -150,21 +152,29 @@ src = "launchd/com.example.agent.plist"
 [[section]]
 name = "lefthook"
 
-# `run.on` accepts a list, so a step firing on more than one verb is one entry.
+# `run.on` accepts a list, so a step firing on more than one verb is one entry. `creates` is
+# the idempotence guard: skip the step when this path already exists (repo-relative, since a
+# `run` step executes from the dotfiles repo — `~` and absolute paths work too).
 [[section.run]]
 on = "sync"
 cmd = "lefthook install"
+creates = ".git/hooks/pre-commit"
 
 [[section]]
 name = "op-agent"
+when = { os = "darwin" }   # a bare scalar is still valid — the one-element list
 
 [[section.link]]
 src = "hooks/op-agent.sh"
 dst = "~/.local/bin/op-agent"
 
+# A `run` step fires on every reconcile unless a guard says otherwise. `unless` is a *predicate*,
+# not a second step: exit 0 means "already provisioned", so this one converges once and then
+# goes quiet.
 [[section.run]]
 on = "sync"
 cmd = "op-agent provision"
+unless = "op-agent status >/dev/null 2>&1"
 
 [[section.run]]
 on = "verify"
