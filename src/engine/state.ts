@@ -74,13 +74,22 @@ export async function removeManifestEntries(env: Env, dsts: readonly string[]): 
 }
 
 export async function writeManifest(env: Env, entries: readonly ManifestEntry[]): Promise<void> {
+  // Collapse duplicate destinations last-wins BEFORE the insert. `manifest.dst` is a PRIMARY KEY
+  // (db.ts), so a repeated dst threw a raw SQLiteError out of the reconcile: the replace
+  // transaction rolled back to the STALE prior set and the run never committed, and the next run
+  // then reaped against ownership that no longer described the machine. Compose-time last-wins
+  // (config/compose.ts) is the real fix; this is the floor for the duplicate compose cannot see —
+  // two glob entries expanding onto one concrete dst at run time. Same Map-keyed-on-dst idiom as
+  // reconcile's mergeManifest, kept local because state.ts must not import from reconcile.ts.
+  const byDst = new Map<string, ManifestEntry>();
+  for (const e of entries) byDst.set(e.dst, e);
   withDb(env, (db) => {
     const replace = db.transaction((es: readonly ManifestEntry[]) => {
       db.run("DELETE FROM manifest");
       const ins = db.query("INSERT INTO manifest (dst, kind, src) VALUES (?, ?, ?)");
       for (const e of es) ins.run(e.dst, e.kind, e.src);
     });
-    replace(entries);
+    replace([...byDst.values()]);
   });
 }
 

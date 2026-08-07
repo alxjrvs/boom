@@ -5,7 +5,7 @@ import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { composeConfig } from "../src/config/compose.ts";
+import { type ComposeNotifier, composeConfig } from "../src/config/compose.ts";
 import { BoomConfigError, loadConfig } from "../src/config/load.ts";
 import { profileContext } from "../src/config/profile.ts";
 
@@ -15,9 +15,14 @@ const ENV = { HOME: "/nonexistent-home", BOOM_OS: "linux", BOOM_HOST: "testhost"
 
 // The `notify` stub is a plain object literal on purpose: widening the port (a `note` alongside
 // `warn`) should cost one line here, not an edit to every test in the file.
-function notifier(): { notify: { warn(m: string): void }; warns: string[] } {
+function notifier(): { notify: ComposeNotifier; warns: string[]; notes: string[] } {
   const warns: string[] = [];
-  return { notify: { warn: (m: string) => void warns.push(m) }, warns };
+  const notes: string[] = [];
+  return {
+    notify: { warn: (m: string) => void warns.push(m), note: (m: string) => void notes.push(m) },
+    warns,
+    notes,
+  };
 }
 
 async function repoWith(files: Record<string, string>): Promise<string> {
@@ -29,9 +34,19 @@ async function repoWith(files: Record<string, string>): Promise<string> {
   return repo;
 }
 
-async function compose(repo: string): ReturnType<typeof composeConfig> {
+async function compose(
+  repo: string,
+  opts: { profiles?: string[]; notify?: ComposeNotifier } = {},
+): ReturnType<typeof composeConfig> {
   const config = await loadConfig(repo);
-  return composeConfig(ENV, repo, config, profileContext(ENV, []), notifier().notify);
+  const pc = profileContext(ENV, opts.profiles ?? []);
+  return composeConfig(ENV, repo, config, pc, opts.notify ?? notifier().notify);
+}
+
+// Every `link` dst declared anywhere in the composition, in composed order — the shape most of
+// the precedence assertions below are about.
+function linkDsts(sections: readonly { link?: { dst: string }[] }[]): string[] {
+  return sections.flatMap((s) => (s.link ?? []).map((l) => l.dst));
 }
 
 test("compose: an overlay's [vars] win over the base's", async () => {
@@ -115,4 +130,126 @@ test("compose: an unresolvable module warns through `notify` and is skipped", as
   const c = await composeConfig(ENV, repo, config, profileContext(ENV, []), notify);
   expect(c.sections).toHaveLength(1);
   expect(warns.join("\n")).toContain("module ./missing");
+});
+
+// --- precedence: duplicate destinations resolve last-wins -----------------------------------
+
+test("compose: duplicate dst — the LAST declaration wins and the loser is dropped", async () => {
+  const repo = await repoWith({
+    "boomfile.toml":
+      'use = ["./mod"]\n[[section]]\nname = "base"\nlink = [{ src = "repo/zshrc", dst = "~/.zshrc" }]\n',
+    "mod/boomfile.toml": '[[section]]\nname = "shared"\nlink = [{ src = "mod/zshrc", dst = "~/.zshrc" }]\n',
+  });
+  const c = await compose(repo);
+  expect(linkDsts(c.sections)).toEqual(["~/.zshrc"]); // exactly one survivor
+  expect(c.sections.find((s) => s.name === "base")?.link?.[0]?.src).toBe("repo/zshrc");
+  expect(c.sections.find((s) => s.name === "shared")?.link).toEqual([]);
+});
+
+test("compose: duplicate dst across kinds — a base `copy` beats a module `link`", async () => {
+  const repo = await repoWith({
+    "boomfile.toml":
+      'use = ["./mod"]\n[[section]]\nname = "base"\ncopy = [{ src = "repo/npmrc", dst = "~/.npmrc" }]\n',
+    "mod/boomfile.toml": '[[section]]\nname = "shared"\nlink = [{ src = "mod/npmrc", dst = "~/.npmrc" }]\n',
+  });
+  const c = await compose(repo);
+  // Both kinds own their destination, so they share one keyspace — same file, same manifest
+  // primary key, one winner. (The kinds that own nothing are partitioned out; see below.)
+  expect(c.sections.find((s) => s.name === "shared")?.link).toEqual([]);
+  expect(c.sections.find((s) => s.name === "base")?.copy).toHaveLength(1);
+});
+
+test("compose: an override emits a note naming both sides", async () => {
+  const repo = await repoWith({
+    "boomfile.toml":
+      'use = ["./mod"]\n[[section]]\nname = "base"\ncopy = [{ src = "repo/zshrc", dst = "~/.zshrc" }]\n',
+    "mod/boomfile.toml": '[[section]]\nname = "shared"\nlink = [{ src = "mod/zshrc", dst = "~/.zshrc" }]\n',
+  });
+  const { notify, notes } = notifier();
+  await compose(repo, { notify });
+  expect(notes).toHaveLength(1);
+  expect(notes[0]).toContain("~/.zshrc");
+  expect(notes[0]).toContain("link from ./mod");
+  expect(notes[0]).toContain("copy in boomfile.toml");
+});
+
+test("compose: a glob `src` is never keyed", async () => {
+  const repo = await repoWith({
+    "boomfile.toml":
+      'use = ["./mod"]\n[[section]]\nname = "base"\nlink = [{ src = "repo/*.lua", dst = "~/.config/nvim" }]\n',
+    "mod/boomfile.toml":
+      '[[section]]\nname = "shared"\nlink = [{ src = "mod/*.lua", dst = "~/.config/nvim" }]\n',
+  });
+  const c = await compose(repo);
+  // A glob's `dst` is a DIRECTORY the matches land under, not a destination — both survive.
+  expect(linkDsts(c.sections)).toEqual(["~/.config/nvim", "~/.config/nvim"]);
+});
+
+test("compose: a section emptied by dedupe is kept, so `--only` and `when` still resolve", async () => {
+  const repo = await repoWith({
+    "boomfile.toml":
+      'use = ["./mod"]\n[[section]]\nname = "base"\nlink = [{ src = "repo/zshrc", dst = "~/.zshrc" }]\n',
+    "mod/boomfile.toml": '[[section]]\nname = "shared"\nlink = [{ src = "mod/zshrc", dst = "~/.zshrc" }]\n',
+  });
+  const c = await compose(repo);
+  expect(c.sections.map((s) => s.name)).toEqual(["shared", "base"]);
+});
+
+// The destructive path the gate exists for: a winner that never runs must not take the
+// destination away from a loser that does — nobody would declare it and reapOrphans would delete
+// the file. Both directions are asserted, so the gate can't be "fixed" by simply disabling it.
+test("compose: a gated-out section is never a dedupe winner", async () => {
+  const files = {
+    "boomfile.toml":
+      'use = ["./mod"]\n[[section]]\nname = "work"\nwhen = { profile = "work" }\nlink = [{ src = "repo/npmrc", dst = "~/.npmrc" }]\n',
+    "mod/boomfile.toml": '[[section]]\nname = "shared"\nlink = [{ src = "mod/npmrc", dst = "~/.npmrc" }]\n',
+  };
+
+  const repo = await repoWith(files);
+  const off = notifier();
+  const without = await compose(repo, { notify: off.notify });
+  // No `--profile work`: the gated section never runs, so the module keeps the destination.
+  expect(without.sections.find((s) => s.name === "shared")?.link).toHaveLength(1);
+  expect(without.sections.find((s) => s.name === "work")?.link).toHaveLength(1);
+  expect(off.notes).toEqual([]);
+
+  const on = notifier();
+  const active = await compose(repo, { profiles: ["work"], notify: on.notify });
+  expect(active.sections.find((s) => s.name === "shared")?.link).toEqual([]);
+  expect(active.sections.find((s) => s.name === "work")?.link).toHaveLength(1);
+  expect(on.notes).toHaveLength(1);
+});
+
+// The same destructive path, reached by kind rather than by gating: `secret` never pushes to
+// `ctx.declared`, and `launchd` doesn't either off macOS (ENV pins BOOM_OS=linux here). A winner
+// that owns nothing must not evict the loser that does, or reapOrphans deletes the file.
+test("compose: a kind that owns no destination never evicts one that does", async () => {
+  const repo = await repoWith({
+    "boomfile.toml":
+      'use = ["./mod"]\n[[section]]\nname = "base"\nsecret = [{ dst = "~/.netrc", ref = "env:NETRC" }]\nlaunchd = [{ src = "repo/a.plist", dst = "~/.npmrc" }]\n',
+    "mod/boomfile.toml":
+      '[[section]]\nname = "shared"\ncopy = [{ src = "mod/netrc", dst = "~/.netrc" }]\nlink = [{ src = "mod/npmrc", dst = "~/.npmrc" }]\n',
+  });
+  const { notify, notes } = notifier();
+  const c = await compose(repo, { notify });
+  expect(c.sections.find((s) => s.name === "shared")?.copy).toHaveLength(1);
+  expect(c.sections.find((s) => s.name === "shared")?.link).toHaveLength(1);
+  expect(c.sections.find((s) => s.name === "base")?.secret).toHaveLength(1);
+  expect(notes).toEqual([]);
+});
+
+// …but a non-owning kind still resolves against ITSELF, which is the duplicate that actually
+// happens: two layers rendering the same secret would otherwise both run, last write silently
+// winning after the first had already touched the file.
+test("compose: two secrets at one dst still resolve last-wins", async () => {
+  const repo = await repoWith({
+    "boomfile.toml":
+      'use = ["./mod"]\n[[section]]\nname = "base"\nsecret = [{ dst = "~/.netrc", ref = "env:BASE" }]\n',
+    "mod/boomfile.toml": '[[section]]\nname = "shared"\nsecret = [{ dst = "~/.netrc", ref = "env:MOD" }]\n',
+  });
+  const { notify, notes } = notifier();
+  const c = await compose(repo, { notify });
+  expect(c.sections.find((s) => s.name === "shared")?.secret).toEqual([]);
+  expect(c.sections.find((s) => s.name === "base")?.secret).toHaveLength(1);
+  expect(notes[0]).toContain("~/.netrc — secret from ./mod overridden by secret in boomfile.toml");
 });

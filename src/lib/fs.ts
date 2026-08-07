@@ -21,6 +21,17 @@ async function moveAcross(src: string, dst: string): Promise<void> {
 
 type Env = Record<string, string | undefined>;
 
+// The glob metacharacters Bun.Glob honors. A plain path contains none, so a single-file entry
+// never pays the scan cost or the directory-dst semantics.
+export const GLOB_MAGIC = /[*?[\]{}]/;
+
+// Lives here rather than in the filesystem resource because the *composer* needs the same test:
+// a glob `src` makes `dst` a DIRECTORY that every match lands under, not a destination — so two
+// glob entries sharing a `dst` are not a duplicate and must never be keyed against each other.
+export function isGlobPattern(s: string): boolean {
+  return GLOB_MAGIC.test(s);
+}
+
 export function expandTilde(p: string, env: Env): string {
   const home = env.HOME ?? "";
   if (p === "~") return home;

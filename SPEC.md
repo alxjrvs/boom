@@ -188,6 +188,20 @@ silently dropped. `boom module search <term>` / `add <name>` browse a curated re
 packs and splice a ref into `use`. A top-level `[vars]` table (a name→string map) supplies the
 values `tmpl` resources interpolate.
 
+**Duplicate file destinations resolve last-wins** across `[modules…, base, overlays…]` — and only
+among the sections that *apply to this run*. `link`, `copy`, `tmpl` and (on macOS) `launchd` are
+keyed on their expanded `dst` alone (a module `link` and a base `copy` to the same path are one
+conflict, not two declarations), the loser is dropped at compose time rather than run and then
+fought over, and each override is reported as a `CONFIG` note. A `secret` — and a `launchd` off
+macOS — is keyed per kind instead, so it still beats a duplicate of *itself* but never overrides a
+kind of a different name. Both gates exist for the same reason: only a kind that takes ownership of
+the destination may take it away from another, because a winner that declares nothing leaves the
+file declared by nobody — and orphan reaping deletes exactly that. A winner hidden behind `when`
+would do the same, which is why gating is resolved before keying.
+Keying happens before the repo is walked, so it cannot see glob expansion: two glob `src` entries
+are never keyed against each other and can still collide on a concrete `dst` at run time, which
+the manifest write collapses last-wins as a second line of defense.
+
 ### `[boom]` — machine-global self-wiring
 
 A single top-level `[boom]` table folds boom-invoking-boom behaviors into the reconcile
