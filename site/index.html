@@ -29,7 +29,7 @@
 <meta name="twitter:image:alt" content="The BOOMTUBE card drawn as an equation: a boomfile.toml page feeds the Kirby boom-tube portal and a terminal comes out the far side — declarative dev-machine setup, the file goes in, the machine comes out.">
 <script type="application/ld+json">
 {"@context":"https://schema.org","@graph":[
-{"@type":"SoftwareApplication","name":"BoomTube","description":"Declarative dev-machine setup: one typed boomfile.toml declares your whole machine — shell, packages, macOS defaults, secrets. Sync, prove, and roll back any change. One self-contained binary, zero runtime dependencies.","applicationCategory":"DeveloperApplication","operatingSystem":"macOS, Linux","url":"https://alxjrvs.github.io/boom/","downloadUrl":"https://github.com/alxjrvs/boom","softwareVersion":"0.22.0","image":"https://alxjrvs.github.io/boom/og.png","sameAs":["https://github.com/alxjrvs/boom"],"author":{"@type":"Person","name":"alxjrvs"},"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}},
+{"@type":"SoftwareApplication","name":"BoomTube","description":"Declarative dev-machine setup: one typed boomfile.toml declares your whole machine — shell, packages, macOS defaults, secrets. Sync, prove, and roll back any change. One self-contained binary, zero runtime dependencies.","applicationCategory":"DeveloperApplication","operatingSystem":"macOS, Linux","url":"https://alxjrvs.github.io/boom/","downloadUrl":"https://github.com/alxjrvs/boom","softwareVersion":"0.23.0","image":"https://alxjrvs.github.io/boom/og.png","sameAs":["https://github.com/alxjrvs/boom"],"author":{"@type":"Person","name":"alxjrvs"},"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}},
 {"@type":"WebSite","name":"BoomTube","url":"https://alxjrvs.github.io/boom/","inLanguage":"en"}
 ]}
 </script>
@@ -402,7 +402,7 @@
       <a href="https://github.com/alxjrvs/boom">GitHub</a>
     </nav>
     <div class="bar-sp"></div>
-    <span class="bar-ver" aria-label="Version 0.22.0">v0.22.0</span>
+    <span class="bar-ver" aria-label="Version 0.23.0">v0.23.0</span>
     <button class="toggle" id="theme" type="button" aria-pressed="false">Light</button>
   </div>
 </header>
@@ -513,11 +513,11 @@
     <div class="powers">
       <div class="panel power lead-m">
         <h3>One file — the whole machine</h3>
-        <p>Links, packages, macOS defaults, run steps, hooks — all declared in one typed <code>boomfile.toml</code>. It's validated up front, so a typo fails loudly at load instead of halfway through a run.</p>
+        <p>Links, packages, macOS defaults, run steps, hooks — all declared in one typed <code>boomfile.toml</code>. It's validated up front, so a typo fails loudly at load instead of halfway through a run. Pull in someone else's sections with <code>use</code> and the module ships the files and hooks it declares — no vendoring.</p>
       </div>
       <div class="panel power lead-m">
         <h3>Nothing it can't take back</h3>
-        <p>Every run that changes something is journaled, and whatever it displaces is backed up first. <code>boom rollback</code> replays that in reverse.</p>
+        <p>Every run that changes something is journaled — undo record first, write second — and whatever it displaces is backed up before it moves. <code>boom rollback</code> replays that in reverse, and never claims an undo it didn't perform: a directory you've since filled is left standing and reported, not blown away.</p>
       </div>
       <div class="panel power lead-m">
         <h3>Just a binary</h3>
@@ -553,12 +553,14 @@
           <div class="pstep"><span class="i">01</span>link</div>
           <div class="pstep"><span class="i">02</span>copy</div>
           <div class="pstep"><span class="i">03</span>tmpl <span class="note">[vars]</span></div>
-          <div class="pstep"><span class="i">04</span>dir</div>
-          <div class="pstep"><span class="i">05</span>pkg <span class="note">brew · mise · cargo · …</span></div>
-          <div class="pstep"><span class="i">06</span>osx_default</div>
-          <div class="pstep"><span class="i">07</span>systemd <span class="note">/ launchd</span></div>
-          <div class="pstep"><span class="i">08</span>run</div>
-          <div class="pstep"><span class="i">09</span>hook</div>
+          <div class="pstep"><span class="i">04</span>secret <span class="note">op · env · pass · age</span></div>
+          <div class="pstep"><span class="i">05</span>dir</div>
+          <div class="pstep"><span class="i">06</span>pkg <span class="note">brew · mise · gh · …</span></div>
+          <div class="pstep"><span class="i">07</span>osx_default</div>
+          <div class="pstep"><span class="i">08</span>launchd <span class="note">/ systemd</span></div>
+          <div class="pstep"><span class="i">09</span>run <span class="note">unless · creates</span></div>
+          <div class="pstep"><span class="i">10</span>check</div>
+          <div class="pstep"><span class="i">11</span>hook</div>
         </div>
         <div class="balloon">
           <h4>Can't say it declaratively? Write a hook.</h4>
@@ -572,7 +574,7 @@
   <section id="boomfile" style="--band:var(--solar);--on:var(--ink)">
     <div class="sec-head">
       <h2 class="disp">It's all one file!</h2>
-      <p class="sub">Typed, validated TOML — a list of sections, each declaring resources that run in phase order. Gate any section to an OS, a host, or any of several named profiles.</p>
+      <p class="sub">Typed, validated TOML — a list of sections, each declaring resources that run in phase order. Gate any section to an OS, a host, or any of several named profiles. Overlay files and <code>use</code>d modules stack onto it — and when two layers name the same destination, the <b>last one wins</b>, dropped before the run instead of fought over during it.</p>
     </div>
     <div class="bfgrid">
       <div class="panel print lead-c">
@@ -587,14 +589,14 @@
 
 <span class="k-sec">[[section]]</span>
 <span class="k-key">name</span> <span class="k-pun">=</span> <span class="k-str">"macOS"</span>
-<span class="k-key">when</span> <span class="k-pun">=</span> { <span class="k-key">os</span> = <span class="k-str">"darwin"</span> }   <span class="k-cmt"># gate by machine</span></pre>
+<span class="k-key">when</span> <span class="k-pun">=</span> { <span class="k-key">os</span> = <span class="k-str">"darwin"</span>, <span class="k-key">profile</span> = [<span class="k-str">"work"</span>, <span class="k-str">"home"</span>] }  <span class="k-cmt"># any of, per axis</span></pre>
       </div>
       <div class="panel legend lead-c">
         <h3>What a section can hold</h3>
         <ul>
           <li><b>link · copy · tmpl</b> — symlink, copy, or render a template with <code>[vars]</code> (a glob <code>src</code> fans out; per-machine without a hook)</li>
-          <li><b>secret</b> — render a 0600 secret, never journaled in plaintext (1Password, env, pass, age/sops)</li>
-          <li><b>pkg</b> — a Brewfile, mise tool versions, an apt/dnf/cargo/npm/pipx/gem/flatpak list, or gh CLI extensions</li>
+          <li><b>secret</b> — render a 0600 secret, never journaled in plaintext (1Password, env, pass, age/sops); a file BoomTube didn't render is left alone until <code>--fix</code></li>
+          <li><b>pkg</b> — a Brewfile, mise tool versions, an apt/dnf/cargo/npm/pipx/gem/flatpak list, or gh CLI extensions — each entry says whether <code>uninstall</code> reclaims it</li>
           <li><b>osx_default · launchd · systemd</b> — macOS defaults + agents, or generated systemd user units on Linux</li>
           <li><b>dir · check</b> — ensure a directory exists; assert (and repair) file content</li>
           <li><b>run</b> — a shell step tied to a verb, skippable with <code>unless</code>/<code>creates</code></li>
@@ -623,7 +625,7 @@
       <div class="rrow"><h3>Code portals</h3><p>Open portals to your repos — symlink them all into one dir for agents, or spin up a separate workspace for each. <code>boom code …</code></p></div>
       <div class="rrow"><h3>Prove &amp; recover</h3><p>Validated on every load; gate CI with <code>verify --ci</code>, doctor the install, then roll back any journaled run. <code>boom doctor · rollback</code></p></div>
     </div>
-    <p class="churn"><b>Still taking shape.</b> This is the map, not the manual — the <a href="spec.html">docs</a> carry the exact reference, every flag and verb.</p>
+    <p class="churn"><b>Still taking shape.</b> This is the map, not the manual — the <a href="spec.html">docs</a> carry the exact reference, every flag and verb. Coming up from an older release? The <a href="https://github.com/alxjrvs/boom/blob/main/docs/MIGRATING-0.23.md">v0.23 migration note</a> says plainly what changed underneath you.</p>
   </section>
 
   <!-- QUICK START -->
@@ -723,7 +725,7 @@ pkg = [{ manager = <span class="s">"brew"</span> }]</pre>
         <a href="spec.html">Docs</a>
         <span class="wm-ink" aria-label="BoomTube"><span class="a" aria-hidden="true">B</span><span class="b" aria-hidden="true">o</span><span class="c" aria-hidden="true">o</span><span class="d" aria-hidden="true">m</span></span>
       </div>
-      <div class="meta">v0.22.0 · TypeScript on Bun · @stricli/core · valibot · smol-toml · early</div>
+      <div class="meta">v0.23.0 · TypeScript on Bun · @stricli/core · valibot · smol-toml · early</div>
     </div>
   </div>
 </footer>
