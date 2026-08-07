@@ -3,7 +3,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BoomConfigError, loadConfig, resolveConfigDir } from "../src/config/load.ts";
+import { BoomConfigError, loadConfig, loadOverlayFile, resolveConfigDir } from "../src/config/load.ts";
 
 const sandbox = () => mkdtemp(join(tmpdir(), "boom-cfg-"));
 
@@ -35,6 +35,54 @@ test("loadConfig rejects an unknown key (strict schema catches typos)", async ()
   const dir = await sandbox();
   // `pgk` is a typo for `pkg`; a non-strict object would silently drop it.
   await writeFile(join(dir, "boomfile.toml"), `[[section]]\nname = "x"\npgk = []\n`);
+  await expect(loadConfig(dir)).rejects.toBeInstanceOf(BoomConfigError);
+});
+
+test("loadOverlayFile parses an overlay with no [[section]] into an empty list", async () => {
+  const dir = await sandbox();
+  // A vars-only OVERLAY is legal config. The `[]` default (not a bare v.optional) is what keeps
+  // every `config.section.…` reader from having to handle undefined.
+  const file = join(dir, "boomfile.testhost.toml");
+  await writeFile(file, `[vars]\nEMAIL = "me@example.com"\n`);
+  const cfg = await loadOverlayFile(file);
+  expect(cfg?.section).toEqual([]);
+  expect(cfg?.vars?.EMAIL).toBe("me@example.com");
+});
+
+test("loadConfig REJECTS a base boomfile with no [[section]]", async () => {
+  const dir = await sandbox();
+  // The inverse of the test above, and the one that matters: `section` is optional for an
+  // overlay ONLY. A sectionless base is an empty/truncated/commented-out file, not a config
+  // that declares nothing — accepting it would let orphan reaping delete every managed
+  // destination and exit 0. It must fail at load, naming the key.
+  await writeFile(join(dir, "boomfile.toml"), `[vars]\nEMAIL = "me@example.com"\n`);
+  await expect(loadConfig(dir)).rejects.toBeInstanceOf(BoomConfigError);
+  await expect(loadConfig(dir)).rejects.toThrow(/section/);
+});
+
+test("loadConfig REJECTS a zero-byte base boomfile", async () => {
+  const dir = await sandbox();
+  // The literal shape of the field report: an editor truncates the file mid-write and a
+  // scheduled sync lands on it.
+  await writeFile(join(dir, "boomfile.toml"), "");
+  await expect(loadConfig(dir)).rejects.toThrow(/section/);
+});
+
+test("loadOverlayFile returns undefined for an absent overlay", async () => {
+  const dir = await sandbox();
+  expect(await loadOverlayFile(join(dir, "boomfile.nosuch.toml"))).toBeUndefined();
+});
+
+test("loadOverlayFile still rejects a typo'd [[sections]] (the overlay schema stays strict)", async () => {
+  const dir = await sandbox();
+  const file = join(dir, "boomfile.testhost.toml");
+  await writeFile(file, `[[sections]]\nname = "x"\n`);
+  await expect(loadOverlayFile(file)).rejects.toBeInstanceOf(BoomConfigError);
+});
+
+test("loadConfig still rejects a typo'd [[sections]] even though section is optional", async () => {
+  const dir = await sandbox();
+  await writeFile(join(dir, "boomfile.toml"), `[[sections]]\nname = "x"\n`);
   await expect(loadConfig(dir)).rejects.toBeInstanceOf(BoomConfigError);
 });
 

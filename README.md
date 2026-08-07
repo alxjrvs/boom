@@ -138,6 +138,8 @@ sections that run in phase order
 # Optional: compose shared, vetted sections from other boom repos before your own (a git
 # remote, or a path relative to this repo). `boom module search|add` browse a curated registry;
 # a module may itself `use` further modules — they compose recursively (cycles are broken).
+# A module's paths resolve against the module's own directory, so a module ships its dotfiles.
+# `use` belongs here, in the base file — it is rejected in an overlay (see below).
 use = ["myorg/boom-base", "./modules/node-dev"]
 
 # Optional: named values `tmpl` templates interpolate as ${NAME} (per-machine via overlays).
@@ -196,7 +198,12 @@ Imperative escapes are `run` steps (a shell command) or a **hook** — a
 `hooks/<name>.ts` module exporting `sync`/`verify`/`uninstall` that receives a typed
 `HookApi`. That's the extension point for anything the declarative resources can't
 express. Multi-machine setups gate sections with `when`, layer overlay files
-(`boomfile.<os|host|profile>.toml`), or compose shared `use` modules.
+(`boomfile.<os|host|profile>.toml`), or compose shared `use` modules. An overlay may carry
+`[vars]` and `[boom]` as well as sections — they merge over the base last-wins per key, and a
+`[vars]`-only overlay is the lightest way to differentiate a machine. Two things to know: a
+`[boom].schedule` in an overlay **replaces** the base's timer list (it's an array, not a table),
+and `use` in an overlay is an error — modules compose *before* your own sections, so declaring
+one in the file that loads *last* would invert that; put it in `boomfile.toml`.
 
 A top-level `[boom]` table folds boom's own self-wiring into the reconcile — refresh the
 Claude skill, nudge/auto-upgrade when a newer boom ships, record a fleet summary,

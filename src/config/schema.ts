@@ -249,7 +249,27 @@ export const BoomfileSchema = v.strictObject({
   // typically differentiated per machine via a `boomfile.<profile>.toml` overlay — the whole
   // point of `tmpl` over N overlay files is that only these values change, not the template.
   vars: v.optional(v.record(v.string(), v.string())),
+  // REQUIRED, and it must stay that way — see OverlaySchema below. A base boomfile.toml with no
+  // `[[section]]` is not "a config that declares nothing", it is a config that failed to load
+  // (empty file, half-written file, commented-out sections). Accepting it hands reconcile an
+  // empty `declared` set, and orphan reaping then removes every destination in the prior
+  // manifest and exits 0 — a silent wipe of the machine. Loud failure here is the guard.
   section: v.array(SectionSchema),
+});
+
+// The schema for an OVERLAY (`boomfile.<os|host|profile>.toml`) — the base schema with `section`
+// made optional, and ONLY there. An overlay legitimately declares nothing but `[vars]`/`[boom]`:
+// it is a per-machine *modification* of a base that was already validated, so "no sections" is a
+// real, intended shape. The base file has no such reading, which is why this is a second schema
+// rather than a widening of BoomfileSchema — one file's harmless default is the other's data loss.
+//
+// Spread over `.entries` (not `v.partial`): `v.partial` yields a bare `v.optional`, so
+// `overlay.section` would be `Section[] | undefined` at every reader. The `[]` DEFAULT keeps
+// `v.InferOutput` non-optional. `strictObject` is preserved, so a typo'd `[[sections]]` in an
+// overlay is still an unknown top-level key and still fails.
+export const OverlaySchema = v.strictObject({
+  ...BoomfileSchema.entries,
+  section: v.optional(v.array(SectionSchema), []),
 });
 
 export type When = v.InferOutput<typeof WhenSchema>;
@@ -268,3 +288,4 @@ export type Schedule = v.InferOutput<typeof ScheduleSchema>;
 export type Section = v.InferOutput<typeof SectionSchema>;
 export type BoomSettings = v.InferOutput<typeof BoomSettingsSchema>;
 export type Boomfile = v.InferOutput<typeof BoomfileSchema>;
+export type Overlay = v.InferOutput<typeof OverlaySchema>;

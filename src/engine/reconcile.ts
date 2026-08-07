@@ -3,10 +3,10 @@
 // sync it opens a transaction journal (+ backups) so the run is rollback-able and
 // resumable, and persists the manifest of owned destinations.
 import { join } from "node:path";
-import { loadConfig, loadOptionalConfigFile, NO_CONFIG_REPO_MSG, resolveConfigDir } from "../config/load.ts";
-import { resolveModuleSections } from "../config/modules.ts";
-import { overlayFiles, profileContext, sectionApplies } from "../config/profile.ts";
-import type { Boomfile, Section } from "../config/schema.ts";
+import { type Composition, composeConfig } from "../config/compose.ts";
+import { loadConfig, NO_CONFIG_REPO_MSG, resolveConfigDir } from "../config/load.ts";
+import { profileContext, sectionApplies } from "../config/profile.ts";
+import type { Boomfile } from "../config/schema.ts";
 import type { BoomContext } from "../context.ts";
 import { colorEnabled } from "../lib/color.ts";
 import { displayPath, filesEqual, linkTarget, pathExists } from "../lib/fs.ts";
@@ -109,7 +109,12 @@ async function reapOrphans(ctx: ReconcileCtx, prior: readonly ManifestEntry[]): 
       continue;
     }
     const target = await linkTarget(entry.dst);
-    if (!target?.startsWith(`${ctx.repo}/`)) continue; // only links into our repo
+    if (target === undefined) continue; // not a symlink — nothing to reap
+    // Prefer an exact match against the source the manifest recorded: it is strictly more precise
+    // AND origin-independent, so a link a *module* shipped (whose target points into the module's
+    // own dir, not the config repo) is still reaped when that module leaves `use`. The
+    // startsWith fallback exists only for pre-TSV legacy rows, which carry `src: ""`.
+    if (entry.src ? target !== entry.src : !target.startsWith(`${ctx.repo}/`)) continue;
     await reap(entry.dst, disp, `→ ${target} (no longer declared)`);
   }
 }
@@ -225,6 +230,20 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
     }
     const priorManifest = await readManifest(ctx.env);
 
+    // Compose `use` modules + the base repo + the overlay files that match this machine into ONE
+    // ordered, origin-stamped section list plus the merged `[vars]`/`[boom]` tables. Above the
+    // askpass block and the rctx literal deliberately: both of those now read from the
+    // composition (`sudo_askpass` can come from an overlay, and `vars` must carry the overlay's
+    // per-machine values). Module resolution has no askpass dependency, so the reorder is safe.
+    const pc = profileContext(ctx.env, opts.profiles ?? []);
+    let composition: Composition;
+    try {
+      composition = await composeConfig(ctx.env, repo, config, pc, report);
+    } catch (e) {
+      report.fail((e as Error).message);
+      return finish();
+    }
+
     // `[boom].sudo_askpass` — put the vault-backed askpass shim in every spawned tool's
     // environment, so a tool that shells out to `sudo` on its own (Homebrew does, for any cask
     // with a launchctl/pkgutil stanza) resolves the password from the vault instead of parking on
@@ -232,7 +251,7 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
     // doesn't build that sudo argv, the tool does. See engine/secrets/askpass.ts.
     // Mutating runs only — nothing a `verify` spawns escalates, and a dry run writes nothing.
     let childEnv = ctx.env;
-    const askpassRef = config.boom?.sudo_askpass;
+    const askpassRef = composition.boom?.sudo_askpass;
     if (askpassRef && mutating) {
       const shim = await installAskpass(askpassRef, process.execPath, ctx.env);
       childEnv = { ...ctx.env, SUDO_ASKPASS: shim };
@@ -249,7 +268,7 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
       update: opts.update ?? false,
       verbose,
       env: childEnv,
-      vars: config.vars ?? {},
+      vars: composition.vars,
       report,
       declared: [],
       journal,
@@ -257,33 +276,13 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
       dirty: new Set<string>(),
     };
 
-    // Compose `use` modules (shared config repos) BEFORE this repo's own sections, so the repo
-    // can override a module. A module that won't resolve (offline, typo, invalid) is warned and
-    // skipped — one bad module never sinks the reconcile. Merge overlay files
-    // (boomfile.<os|host|profile>.toml) onto the base afterwards, then gate each section by its
-    // `when` (host/OS/profile) and the --only filter.
-    const pc = profileContext(ctx.env, opts.profiles ?? []);
-    const moduleSections = config.use
-      ? await resolveModuleSections(ctx.env, repo, config.use, (ref, why) =>
-          report.warn(`module ${ref}: ${why} — skipped`),
-        )
-      : [];
-    const sections: Section[] = [...moduleSections, ...config.section];
-    try {
-      for (const name of overlayFiles(pc)) {
-        const overlay = await loadOptionalConfigFile(join(repo, name));
-        if (overlay) sections.push(...overlay.section);
-      }
-    } catch (e) {
-      report.fail((e as Error).message);
-      return finish();
-    }
-
     // Eager: a dry run's plan lines all read "would …", but the run-level banner still states
     // outright that nothing changed — print it even when quiet mode holds section headers back.
     if (dryRun) report.header(`${verb} — dry run (no changes)`, true);
     const only = opts.only && opts.only.length > 0 ? new Set(opts.only) : undefined;
-    for (const section of sections) {
+    // Composed order is precedence order (modules → base → overlays); each section still gates on
+    // its own `when` (host/OS/profile) and the --only filter.
+    for (const section of composition.sections) {
       if (!sectionApplies(section, pc)) continue;
       if (only && !only.has(section.name)) continue;
       report.header(section.name);
@@ -314,7 +313,7 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
     if (!only) {
       report.category = "SELF-WIRING";
       try {
-        await applyBoomSettings(config.boom, rctx);
+        await applyBoomSettings(composition.boom, rctx);
       } catch (e) {
         report.fail(`boom settings: ${(e as Error).message}`);
       }
