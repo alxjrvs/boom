@@ -93,3 +93,17 @@ jobs:
           for t in bun-darwin-arm64 bun-darwin-x64 bun-linux-x64 bun-linux-arm64; do
             bun build src/index.ts --compile --target="$t" --outfile "build/boom-$t"
           done
+
+  ci-gate:
+    # The single required check. Branch protection points here and nowhere else:
+    # requiring each job individually strands a required check in "pending" the
+    # moment one is conditional — `version-guard` already is (PRs only), so on a
+    # push it reports `skipped`, which is not a failure. Only a real `failure` or
+    # `cancelled` fails the gate. Keep `needs` in sync when adding a job.
+    if: always()
+    needs: [check, version-guard, cross-compile]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any dependency failed
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
