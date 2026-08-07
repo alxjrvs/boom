@@ -208,6 +208,13 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
         if (prior && !prior.committed) runId = prior.runId;
       }
       journal = new Journal(ctx.env, runId);
+      // Derived here, CREATED lazily by backupTo (lib/fs.ts) on the first displace — which is
+      // also where its 0700 mode is set. Deliberately nothing eager here: most runs displace
+      // nothing and would be left with an empty directory, and re-permissioning a path that
+      // does not exist yet throws ENOENT inside a try/finally that has no catch, taking every
+      // mutating sync down with it. Create-then-own or nothing — so if you ever do add an eager
+      // mkdir here it must carry `{ recursive: true, mode: 0o700 }`; the tree can hold a
+      // displaced secret's plaintext.
       backupRoot = join(backupsDir(ctx.env), runId);
     }
     const priorManifest = await readManifest(ctx.env);

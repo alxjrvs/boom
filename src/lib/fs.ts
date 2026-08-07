@@ -70,9 +70,15 @@ export async function ensureSymlink(src: string, dst: string): Promise<void> {
 
 // Move `dst` into the per-run backup tree (preserving its path) and return the backup
 // location, so a later rollback can restore a file that an overwrite displaced.
+// `mode: 0o700` is load-bearing, not hygiene: the tree can hold a displaced *secret*, and
+// `rename` preserves that file's 0600 while the directories above it would otherwise land at
+// 0755 and expose its name and path. The gotcha that makes this one argument sufficient:
+// `mode` applies to every directory a `recursive` mkdir creates, and this call is what
+// lazily creates `backupsDir(env)` and the run's `<run-id>` root as intermediates — so the
+// run root needs no second chmod, and there is deliberately no eager mkdir upstream to own it.
 export async function backupTo(dst: string, backupRoot: string): Promise<string> {
   const target = join(backupRoot, dst);
-  await mkdir(dirname(target), { recursive: true });
+  await mkdir(dirname(target), { recursive: true, mode: 0o700 });
   await moveAcross(dst, target);
   return target;
 }

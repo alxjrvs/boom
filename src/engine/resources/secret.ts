@@ -3,9 +3,15 @@
 // The op-native counterpart to `copy` — `ref` is a single `op://vault/item/field` reference
 // (`op read`), `template` a repo-relative file whose embedded `op://…` references are filled
 // in (`op inject`). Two disciplines set it apart from `copy`:
-//   • the plaintext is NEVER journaled or backed up (the undo is a plain remove — a rollback
-//     deletes the rendered secret rather than restoring a copy of it from the backup tree,
-//     which would leave plaintext on disk outside the vault);
+//   • the plaintext boom RENDERS is never journaled or backed up — a fresh render's undo is a
+//     plain remove, so a rollback deletes the rendered secret rather than restoring a copy of
+//     it from the backup tree, which would leave plaintext on disk outside the vault. A file
+//     boom did NOT render is the user's, so displacing it into the backup tree leaks nothing
+//     boom introduced and is what makes `--fix` recoverable. Accepted cost: secrets carry no
+//     ownership record, so a `--fix` over boom's own PRIOR render (bytes since rotated) does
+//     put that older plaintext under `…/backups/<run-id>/` for the retained window — which is
+//     why that tree is created 0700 (lib/fs.ts `backupTo`). An ownership ledger would remove
+//     the residual; destroying an unknown file to avoid it would be worse;
 //   • the file is written 0600 by default (a secret only its owner can read).
 // Secrets are deliberately kept out of the owned-destinations manifest, so orphan reaping never
 // auto-deletes one — dropping a secret from the config leaves the rendered file in place;
@@ -14,6 +20,7 @@ import { writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { Secret } from "../../config/schema.ts";
 import { chmod, displayPath, expandTilde, mkdir, pathExists, rm, stat } from "../../lib/fs.ts";
+import { displace, type UndoToken } from "../journal.ts";
 import { getBackend, type SecretResult } from "../secrets/backends.ts";
 import type { ReconcileCtx } from "../types.ts";
 
@@ -27,12 +34,13 @@ function render(entry: Secret, ctx: ReconcileCtx): Promise<SecretResult> {
   return ctx.report.spin(`secret (${backend.name})`, () => backend.read(entry, ctx));
 }
 
-// Write the rendered secret with a restrictive mode. Remove any prior file first so writeFile's
-// `mode` applies on creation (mode is honored only when the file is created), then chmod to
-// pin it exactly regardless of umask.
+// Write the rendered secret with a restrictive mode. This function only WRITES: the caller has
+// already decided — and journalled — what happens to anything at `dst`, and by the time we get
+// here nothing is in the way. So there is deliberately no `rm` (it would destroy a file boom
+// never owned, with no journal row and no backup). `writeFile`'s `mode` is honored only when it
+// creates the file, so the trailing `chmod` is what actually pins the mode regardless of umask.
 async function writeSecret(dst: string, value: string, mode: number): Promise<void> {
   await mkdir(dirname(dst), { recursive: true });
-  await rm(dst, { force: true });
   await writeFile(dst, value, { mode });
   await chmod(dst, mode);
 }
@@ -46,9 +54,17 @@ export async function reconcileSecret(entry: Secret, ctx: ReconcileCtx): Promise
   switch (ctx.verb) {
     case "sync": {
       // A dry-run plan states intent without resolving anything, so it never needs the backend's
-      // tool present (or a reachable vault).
+      // tool present (or a reachable vault). It still stats `dst`, because which of the three
+      // branches below a real run would take is exactly what a plan is for — a plan that always
+      // says "would be rendered" hides the skip that `--fix` exists to unblock.
       if (ctx.dryRun) {
-        report.plan(`${disp} would be rendered from ${entry.ref ?? entry.template}`);
+        if (!(await pathExists(dst))) {
+          report.plan(`${disp} would be rendered from ${entry.ref ?? entry.template}`);
+        } else if (ctx.linkMode === "overwrite") {
+          report.plan(`${disp} would overwrite an existing file`);
+        } else {
+          report.plan(`${disp} would be left alone (boom source --fix replaces it)`);
+        }
         return;
       }
       const backend = getBackend(entry);
@@ -61,11 +77,31 @@ export async function reconcileSecret(entry: Secret, ctx: ReconcileCtx): Promise
         report.fail(`${disp} — ${r.err}`);
         return;
       }
+      // Never destroy a file boom doesn't own. Secrets carry no ownership record, so boom cannot
+      // distinguish its own earlier render from something the user put here — under the safe
+      // default it therefore leaves it alone and names the flag that overrides. This gate is the
+      // SKIP ARM ONLY: it deliberately has no overwrite branch of its own, so an `--fix` run
+      // falls THROUGH to the content-equality check below. Giving it one would make that check
+      // unreachable whenever a file exists, and every `boom source --fix` on a converged machine
+      // would displace the current, unchanged secret into that run's backup tree and re-render
+      // it — one fresh copy of boom-rendered plaintext per run, on a flag the orphan warning
+      // tells people to run. New plaintext persistence on the steady-state path is exactly what
+      // this file's header discipline exists to prevent.
+      const conflict = await pathExists(dst);
+      if (conflict && ctx.linkMode !== "overwrite") {
+        report.skip(`${disp} exists — left alone (boom source --fix replaces it)`);
+        return;
+      }
       // Already the intended content? Skip the rewrite (and the journal churn) — the same
       // change-gate `copy` uses. But still enforce the mode: a secret whose content is current
       // yet whose permissions drifted looser (a prior umask, a manual chmod) must be tightened,
       // or the 0600 guarantee is silently broken. Re-chmod without rewriting the plaintext.
-      if ((await pathExists(dst)) && (await Bun.file(dst).text()) === r.value) {
+      // Reachable only when the user asked for `--fix` or nothing was in the way — a foreign
+      // file whose bytes happen to equal the secret used to get chmod'ed to 0600 under the
+      // DEFAULT, which is a mutation of someone else's file. It still runs under `overwrite`
+      // on purpose: that is what makes `--fix` over boom's own current render a no-op instead
+      // of a plaintext-copying displace.
+      if (conflict && (await Bun.file(dst).text()) === r.value) {
         if (((await stat(dst)).mode & 0o777) === mode) {
           report.skip(`${disp} already current`);
         } else {
@@ -74,10 +110,14 @@ export async function reconcileSecret(entry: Secret, ctx: ReconcileCtx): Promise
         }
         return;
       }
-      // Journal a remove-only undo: rollback deletes the rendered secret. We deliberately do NOT
-      // displace the prior file into the backup tree — that would persist its plaintext on disk.
+      // A fresh render journals a remove-only undo: rollback deletes it, and boom's own
+      // plaintext never reaches the backup tree. An overwrite (only reachable under `--fix`,
+      // and only for content that actually differs) displaces first, so the file being replaced
+      // is recoverable — that file is the user's, not something boom put there. The `done` row
+      // lands BEFORE the write in both branches, so a crash mid-write is still reversible.
       await ctx.journal?.intent("secret", dst);
-      await ctx.journal?.done("secret", dst, { kind: "remove" });
+      const undo: UndoToken = conflict ? await displace(dst, ctx.backupRoot) : { kind: "remove" };
+      await ctx.journal?.done("secret", dst, undo);
       await writeSecret(dst, r.value, mode);
       report.ok(`${disp} rendered (0${mode.toString(8)})`);
       return;
@@ -91,7 +131,11 @@ export async function reconcileSecret(entry: Secret, ctx: ReconcileCtx): Promise
       // than its owner before even looking at content freshness.
       const curMode = (await stat(dst)).mode & 0o777;
       if (curMode !== mode) {
-        report.warn(`${disp} mode 0${curMode.toString(8)}, expected 0${mode.toString(8)} — run: boom source`);
+        // --fix, not a plain source: after this layer a plain `boom source` leaves an existing
+        // file alone, so it would never reach the chmod that fixes this.
+        report.warn(
+          `${disp} mode 0${curMode.toString(8)}, expected 0${mode.toString(8)} — run: boom source --fix`,
+        );
         return;
       }
       // Without the backend's tool (missing, or offline) we can still confirm the file is present
@@ -108,7 +152,10 @@ export async function reconcileSecret(entry: Secret, ctx: ReconcileCtx): Promise
         return;
       }
       if ((await Bun.file(dst).text()) === r.value) report.skip(`${disp} (secret current)`);
-      else report.warn(`${disp} secret stale — run: boom source`);
+      // Same reason as the mode warning above: refreshing a stale secret now means replacing a
+      // file that already exists, which only `--fix` does. The not-rendered warning at the top
+      // of this arm stays on plain `boom source` — a first render clobbers nothing.
+      else report.warn(`${disp} secret stale — run: boom source --fix`);
       return;
     }
     case "uninstall": {

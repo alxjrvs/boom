@@ -104,9 +104,11 @@ export const CheckSchema = v.strictObject({
 // filled in — exactly one is required. `backend` picks the resolver (op/env/pass/age/sops); when
 // absent it's inferred from the ref scheme (`op://`→op, `env:`→env, `pass:`→pass) or a file
 // extension (`.age`→age, `.sops.*`/`.enc`→sops), defaulting to op so every existing `op://…`
-// boomfile keeps working untouched. The plaintext is never journaled or backed up (that would
-// defeat the point), so a secret's undo is a plain remove, and `mode` defaults to 0600 (a secret
-// nobody else can read). The declarative counterpart to `copy` + `expand`, for secrets.
+// boomfile keeps working untouched. boom never journals or backs up the plaintext IT renders —
+// a fresh render's undo is a plain remove — but a pre-existing file at `dst` is the user's, so
+// it is left alone by default and only displaced (backed up, recoverably) under
+// `boom source --fix`. `mode` defaults to 0600 (a secret nobody else can read). The declarative
+// counterpart to `copy` + `expand`, for secrets.
 export const SecretSchema = v.pipe(
   v.strictObject({
     dst: v.string(),

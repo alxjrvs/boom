@@ -167,6 +167,7 @@ pkg = [
 name = "Secrets"
 # Render a secret to a 0600 file at sync time — never journaled in plaintext. The backend is
 # inferred from the ref scheme (op://, env:, pass:, *.age, *.sops) or set with `backend = …`.
+# A pre-existing file at `dst` is left alone (skipped) unless you run `boom source --fix`.
 secret = [{ dst = "~/.config/gh/token", ref = "op://Private/GitHub/token" }]
 
 [[section]]

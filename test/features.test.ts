@@ -2,7 +2,7 @@
 // checkpoints, boom.lock, drift notifications, adopt, and doctor --fix. Each is exercised
 // against a fully sandboxed $HOME + state dir (never the real machine), like engine.test.ts.
 import { expect, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, stat, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "@stricli/core";
@@ -28,12 +28,14 @@ import {
   listRuns,
   newRunId,
   pruneRuns,
+  readRun,
   setRunLabel,
 } from "../src/engine/journal.ts";
 import { boomLock, readLock, writeLock } from "../src/engine/lock.ts";
 import { boomStatus } from "../src/engine/overview.ts";
 import { reconcile } from "../src/engine/reconcile.ts";
-import { checkpoint, rollbackTo } from "../src/engine/rollback.ts";
+import { checkpoint, rollback, rollbackTo } from "../src/engine/rollback.ts";
+import { backupsDir } from "../src/engine/state.ts";
 import { pathExists } from "../src/lib/fs.ts";
 import { headSha } from "../src/lib/git.ts";
 import { notifyArgv } from "../src/lib/notify.ts";
@@ -180,6 +182,77 @@ test("secret env backend: needs no tool — sync writes the env value at 0600 ev
   expect(((await stat(tok)).mode & 0o777).toString(8)).toBe("600");
   // The plaintext must never leak into the reconcile's own output — only file content carries it.
   expect(sb.out()).not.toContain("s3cr3t-value");
+  // Rotation is now deliberately gated. With a file already at dst, boom cannot tell its own
+  // earlier render from something the user put there, so a plain `boom source` leaves it alone
+  // and only `--fix` rewrites it. Pinning the behavior change: scheduled syncs stop rotating.
+  sb.env.MY_SECRET = "rotated-value";
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  expect(await Bun.file(tok).text()).toBe("s3cr3t-value");
+  expect(await reconcile("sync", sb.ctx, { linkMode: "overwrite" })).toBe(0);
+  expect(await Bun.file(tok).text()).toBe("rotated-value");
+});
+
+// --- secret: never destroy a file boom doesn't own -----------------------------------------
+
+const SECRET_BOOMFILE =
+  '[[section]]\nname = "s"\nsecret = [{ dst = "~/.tok", ref = "env:MY_SECRET", backend = "env" }]\n';
+
+test("secret: a pre-existing foreign file survives the default (skip) sync", async () => {
+  const sb = await sandbox(SECRET_BOOMFILE, { emptyPath: true });
+  sb.env.MY_SECRET = "s3cr3t-value";
+  const tok = join(sb.home, ".tok");
+  await writeFile(tok, "USER-OWNED");
+  // verbose: report.skip is quiet-suppressed by default, so the new line only shows here.
+  expect(await reconcile("sync", sb.ctx, { verbose: true })).toBe(0);
+  expect(await readFile(tok, "utf8")).toBe("USER-OWNED");
+  expect(sb.out()).toContain("boom source --fix");
+  expect(sb.out()).not.toContain("s3cr3t-value");
+  // Nothing was journalled for that destination: boom did not touch it, so there is no undo.
+  expect((await readRun(sb.env))?.done.some((r) => r.dst === tok)).toBe(false);
+});
+
+test("secret: --fix replaces a foreign file and rollback puts it back", async () => {
+  const sb = await sandbox(SECRET_BOOMFILE, { emptyPath: true });
+  sb.env.MY_SECRET = "s3cr3t-value";
+  const tok = join(sb.home, ".tok");
+  await writeFile(tok, "USER-OWNED");
+  expect(await reconcile("sync", sb.ctx, { linkMode: "overwrite" })).toBe(0);
+  expect(await readFile(tok, "utf8")).toBe("s3cr3t-value");
+  expect(((await stat(tok)).mode & 0o777).toString(8)).toBe("600");
+  const row = (await readRun(sb.env))?.done.find((r) => r.dst === tok);
+  expect(row?.undo.kind).toBe("restore");
+  const from = row?.undo.kind === "restore" ? row.undo.from : "";
+  expect(await readFile(from, "utf8")).toBe("USER-OWNED");
+  expect(await rollback(sb.ctx)).toBe(0);
+  expect(await readFile(tok, "utf8")).toBe("USER-OWNED");
+});
+
+test("secret: a foreign file whose bytes match the secret is not chmod'ed under the default", async () => {
+  const sb = await sandbox(SECRET_BOOMFILE, { emptyPath: true });
+  sb.env.MY_SECRET = "s3cr3t-value";
+  const tok = join(sb.home, ".tok");
+  // Bytes identical to the resolved secret by coincidence — the file is still the user's, so
+  // the mode-tightening branch must not reach it and re-permission it to 0600.
+  await writeFile(tok, "s3cr3t-value");
+  await chmod(tok, 0o644);
+  expect(await reconcile("sync", sb.ctx, { verbose: true })).toBe(0);
+  expect(((await stat(tok)).mode & 0o777).toString(8)).toBe("644");
+  expect(sb.out()).toContain("--fix");
+});
+
+test("secret: `--fix` over an already-current secret writes nothing and backs up nothing", async () => {
+  const sb = await sandbox(SECRET_BOOMFILE, { emptyPath: true });
+  sb.env.MY_SECRET = "s3cr3t-value";
+  const tok = join(sb.home, ".tok");
+  // Boom renders it itself first — so the file at dst on the second run is boom's own render.
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  // The steady state a converged machine is routinely told to run. It must be a pure no-op:
+  // if the conflict gate carried its own overwrite arm, this run would displace the unchanged
+  // secret into the backup tree and re-render it — a fresh plaintext copy, every single run.
+  expect(await reconcile("sync", sb.ctx, { linkMode: "overwrite", verbose: true })).toBe(0);
+  const run = await readRun(sb.env);
+  expect(run?.done.some((r) => r.dst === tok)).toBe(false);
+  expect(await pathExists(join(backupsDir(sb.env), run?.runId ?? "MISSING"))).toBe(false);
 });
 
 test("secret env backend: a missing env var is a clean reported failure, not a crash", async () => {
