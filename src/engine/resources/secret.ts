@@ -161,6 +161,12 @@ export async function reconcileSecret(entry: Secret, ctx: ReconcileCtx): Promise
       if (!(await pathExists(dst))) return;
       if (ctx.dryRun) report.note(`would remove ${disp}`);
       else {
+        // Deliberately a plain rm, NOT journalRemove — the one resource that must not route
+        // through it. Every other uninstall arm now displaces into the run's backup tree so
+        // rollback can restore it; doing that here would write the rendered plaintext to disk
+        // under `backups/<run-id>/` and leave it there, which is exactly the persistence this
+        // file's header discipline exists to prevent. A secret is re-renderable from its
+        // backend, so it needs no backup: `boom source` puts it back.
         await rm(dst, { force: true });
         report.ok(`${disp} removed`);
       }
