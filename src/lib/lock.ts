@@ -101,3 +101,16 @@ export function acquireLock(env: Env): () => void {
     }
   };
 }
+
+// Run `body` holding the exclusive run lock, releasing it even if `body` throws. The shared
+// spelling of "this mutates the machine or the managed config repo, so it must not overlap
+// another run" — lifted out of rollback.ts, which had the only copy, so the other mutating
+// entry points (`source reset`, `source push`, `source set`) could stop being the exceptions.
+export async function withLock<T>(env: Env, body: () => Promise<T>): Promise<T> {
+  const release = acquireLock(env);
+  try {
+    return await body();
+  } finally {
+    release();
+  }
+}

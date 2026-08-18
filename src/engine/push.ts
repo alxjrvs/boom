@@ -8,10 +8,26 @@
 import { requireConfigBreadcrumb } from "../config/load.ts";
 import type { BoomContext } from "../context.ts";
 import { pushAsync } from "../lib/git.ts";
+import { LockHeldError, withLock } from "../lib/lock.ts";
 import { bandsReporter } from "../lib/reporter.ts";
 import { commitLocalChanges } from "./commit.ts";
 
+// `source push` commits into the managed clone and pushes it — a mutation of the same shared
+// working tree a sync rebases, so it takes the same lock every other mutating path now holds.
+// Unlocked, a push landing mid-sync commits whatever the rebase happened to have staged.
 export async function pushConfigRepo(ctx: BoomContext, message?: string): Promise<number> {
+  try {
+    return await withLock(ctx.env, () => pushUnlocked(ctx, message));
+  } catch (e) {
+    if (e instanceof LockHeldError) {
+      ctx.process.stderr.write(`boom: ${e.message}\n`);
+      return 1;
+    }
+    throw e;
+  }
+}
+
+async function pushUnlocked(ctx: BoomContext, message?: string): Promise<number> {
   // One Reporter voice across the source subcommands; hard failures return 1, not 2.
   // Resolve the config repo before opening the reporter, so a "no config linked" error doesn't
   // leave a dangling setup band above requireConfigBreadcrumb's own message.
