@@ -1,72 +1,13 @@
-// The module registry: a curated index of vetted module packs, so `boom module search`/`add`
-// can discover shared config instead of hand-copying a `use = [...]` ref. This is a *baked-in*
-// index — no network, no fetch — the honest MVP of a registry: the packs ship in the binary and
-// the whole surface is offline-deterministic. A remote/fetched index (a published JSON the CLI
-// pulls and caches) is the follow-up; when it lands, this static array becomes the fallback.
+// The `use` splicer: add a module ref to a boomfile's top-level `use` array with a textual
+// edit, so comments and formatting survive.
 //
-// Each entry's `ref` is exactly what would go in `use = [...]` — a `github:owner/repo` ref the
-// existing module resolver (config/modules.ts) already understands.
-
-interface RegistryPack {
-  readonly name: string;
-  readonly ref: string;
-  readonly description: string;
-  readonly tags?: readonly string[];
-}
-
-// The curated packs. Kept small and legible on purpose — each earns its place, and the refs
-// are plausible `github:alxjrvs/boom-mod-<name>` addresses the resolver clones on `boom source`.
-export const REGISTRY: readonly RegistryPack[] = [
-  {
-    name: "node-dev",
-    ref: "github:alxjrvs/boom-mod-node-dev",
-    description: "Node.js toolchain: mise-managed node, pnpm/bun, and a sane npm config",
-    tags: ["node", "javascript", "typescript", "web"],
-  },
-  {
-    name: "rust",
-    ref: "github:alxjrvs/boom-mod-rust",
-    description: "Rust toolchain via rustup, cargo essentials, and a tuned cargo config",
-    tags: ["rust", "cargo", "systems"],
-  },
-  {
-    name: "python-dev",
-    ref: "github:alxjrvs/boom-mod-python-dev",
-    description: "Python toolchain: mise-managed python, uv, ruff, and a starter virtualenv layout",
-    tags: ["python", "uv", "ruff"],
-  },
-  {
-    name: "sane-macos-defaults",
-    ref: "github:alxjrvs/boom-mod-sane-macos-defaults",
-    description: "Opinionated macOS system defaults: faster key repeat, Finder sanity, no press-and-hold",
-    tags: ["macos", "osx", "defaults", "desktop"],
-  },
-  {
-    name: "cli-essentials",
-    ref: "github:alxjrvs/boom-mod-cli-essentials",
-    description: "Everyday CLI kit: ripgrep, fd, fzf, bat, eza, jq, and their dotfiles",
-    tags: ["cli", "shell", "terminal", "tools"],
-  },
-];
-
-// Case-insensitive substring match over name, description, and tags. An empty term matches
-// everything (a bare `boom module search` lists the whole registry).
-export function searchRegistry(term: string): RegistryPack[] {
-  const q = term.trim().toLowerCase();
-  if (!q) return [...REGISTRY];
-  return REGISTRY.filter(
-    (p) =>
-      p.name.toLowerCase().includes(q) ||
-      p.description.toLowerCase().includes(q) ||
-      (p.tags ?? []).some((t) => t.toLowerCase().includes(q)),
-  );
-}
-
-// Exact (case-insensitive) name lookup — what `boom module add <name>` resolves against.
-export function findPack(name: string): RegistryPack | undefined {
-  const q = name.trim().toLowerCase();
-  return REGISTRY.find((p) => p.name.toLowerCase() === q);
-}
+// This file used to also carry a "curated registry" of five packs that `boom module search`
+// listed and `boom module add <name>` resolved. Every one of their refs
+// (`github:alxjrvs/boom-mod-*`) pointed at a repository that does not exist — the file's own
+// comment called them "plausible" addresses — while README and SPEC called the list "curated"
+// and "vetted". So the one discovery feature boom shipped resolved nothing, and `module add`
+// spliced a permanently-dead ref into the user's boomfile, which they then committed and
+// pushed to every machine they own. The registry is gone; `module add` now takes a real ref.
 
 // Insert a `use` ref into raw boomfile text with the *least-destructive* textual edit, so
 // comments and formatting survive (re-serializing the parsed TOML would drop both):

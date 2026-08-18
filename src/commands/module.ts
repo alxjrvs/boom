@@ -1,15 +1,20 @@
 // `boom module` — the declarative-composition surface. Bare `boom module` (the route map's
 // `defaultCommand`) inspects the `use` modules this config composes: each ref, whether it
-// resolves, and where. `search`/`add` operate the curated module registry (config/registry.ts):
-// discover a vetted pack, then splice its ref into your boomfile's top-level `use`. A nested
-// route map so the whole module story is one namespace; the sync-it-in step is `boom source`.
+// resolves, and where. `add <ref>` splices a module ref into the boomfile's top-level `use`.
+// A nested route map so the whole module story is one namespace; the sync-it-in step is
+// `boom source`.
+//
+// There was a `search` here, over a "curated registry" of five packs. All five refs pointed at
+// repositories that do not exist, so the command listed things that could never resolve and
+// `add <name>` spliced a dead ref into the user's committed config. Both are gone; `add` now
+// takes the ref itself, which is the half that always worked.
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { buildCommand, buildRouteMap } from "@stricli/core";
 import { parse as parseToml } from "smol-toml";
 import { CONFIG_FILE, loadConfig, NO_CONFIG_REPO_MSG, resolveConfigDir } from "../config/load.ts";
 import { resolveModule } from "../config/modules.ts";
-import { findPack, insertUseRef, searchRegistry } from "../config/registry.ts";
+import { insertUseRef } from "../config/registry.ts";
 import type { BoomContext } from "../context.ts";
 import { bandsReporter, type Reporter } from "../lib/reporter.ts";
 import { jsonFlag, str } from "./flags.ts";
@@ -69,53 +74,30 @@ const listCommand = buildCommand<{ update?: boolean; json?: boolean }, [], BoomC
   },
 });
 
-// `boom module search [term]` — filter the curated registry by name/description/tags. Testable
-// core split out so a sandbox can drive it without going through the Stricli command shell.
-function runModuleSearch(ctx: BoomContext, term: string, json?: boolean): number {
-  const report = bandsReporter(ctx.process, ctx.env, "module", { json, setup: "SEARCHING THE REGISTRY…" });
-  const matches = searchRegistry(term);
-  if (matches.length === 0) {
-    return json
-      ? report.finishJson(ctx.process.stdout, false)
-      : report.finish({ ok: `module: no packs match "${term}" (try a broader term)` });
-  }
-  report.header("Registry");
-  for (const p of matches) {
-    report.ok(`${p.name} — ${p.description}`);
-    report.note(`use = ["${p.ref}"]${p.tags?.length ? `  ·  ${p.tags.join(", ")}` : ""}`);
-  }
-  return json
-    ? report.finishJson(ctx.process.stdout, false)
-    : report.finish({
-        ok: `module: ${matches.length} pack(s) found — \`boom module add <name>\` to use one`,
-      });
+// A ref shape `resolveModule` could plausibly take: a path (`./mod`, `/mod`, `~/mod`), a
+// `scheme:owner/repo` form, or a git URL. Shape only — resolution and the clone are
+// `boom source`'s job, and a path ref is legitimately allowed not to exist yet. This exists so a
+// bare word (the old registry pack name) isn't written into the config as if it were a ref.
+function looksLikeModuleRef(ref: string): boolean {
+  const r = ref.trim();
+  if (!r) return false;
+  if (/^[./~]/.test(r)) return true; // path ref
+  if (/^[a-z][\w+.-]*:/i.test(r)) return true; // github:owner/repo, https://…, git@…:
+  return /^[\w.-]+\/[\w.-]+/.test(r); // bare owner/repo
 }
 
-const searchCommand = buildCommand<{ json?: boolean }, [string?], BoomContext>({
-  docs: { brief: "Search the curated module registry by name, description, or tag" },
-  parameters: {
-    flags: { json: jsonFlag },
-    positional: {
-      kind: "tuple",
-      parameters: [{ parse: str, placeholder: "term", brief: "substring to match", optional: true }],
-    },
-  },
-  func(flags, term) {
-    this.process.exitCode = runModuleSearch(this, term ?? "", flags.json);
-  },
-});
-
-// `boom module add <name>` — resolve <name> in the registry and splice its ref into the
-// boomfile's top-level `use`. Idempotent (an already-present ref is a skip, not a duplicate).
-// Testable core, like runModuleSearch.
-async function runModuleAdd(ctx: BoomContext, name: string, json?: boolean): Promise<number> {
+// `boom module add <ref>` — splice a module ref into the boomfile's top-level `use`. Idempotent
+// (an already-present ref is a skip, not a duplicate). Testable core, split out so a sandbox can
+// drive it without going through the Stricli command shell.
+async function runModuleAdd(ctx: BoomContext, ref: string, json?: boolean): Promise<number> {
   const report = bandsReporter(ctx.process, ctx.env, "module", { json, setup: "ADDING MODULE…" });
   const finish = (msgs: Parameters<Reporter["finish"]>[0]): number =>
     json ? report.finishJson(ctx.process.stdout, false) : report.finish(msgs);
 
-  const pack = findPack(name);
-  if (!pack) {
-    report.fail(`no registry pack named "${name}" — run \`boom module search\` to see what's available`);
+  if (!looksLikeModuleRef(ref)) {
+    report.fail(
+      `"${ref}" is not a module ref — expected github:owner/repo, a git URL, or a path (./mod, ~/mod)`,
+    );
     return finish({ ok: "module done", fail: (f) => `module: ${f} failure(s)` });
   }
 
@@ -141,41 +123,37 @@ async function runModuleAdd(ctx: BoomContext, name: string, json?: boolean): Pro
     return finish({ ok: "module done", fail: (f) => `module: ${f} failure(s)` });
   }
 
-  report.header("Registry");
-  const { text: next, added } = insertUseRef(text, parsed, pack.ref);
+  report.header("Modules");
+  const { text: next, added } = insertUseRef(text, parsed, ref);
   if (!added) {
-    report.ok(`${pack.ref} already in use — nothing to do`);
+    report.ok(`${ref} already in use — nothing to do`);
     return finish({ ok: "module: already up to date" });
   }
   await writeFile(file, next);
-  report.ok(`added \`${pack.ref}\` to use — run \`boom source\` to apply`);
-  return finish({ ok: "module: 1 pack added" });
+  report.ok(`added \`${ref}\` to use — run \`boom source\` to apply`);
+  return finish({ ok: "module: 1 module added" });
 }
 
 const addCommand = buildCommand<{ json?: boolean }, [string], BoomContext>({
-  docs: { brief: "Add a registry pack's ref to your boomfile's `use` (then `boom source` to apply)" },
+  docs: { brief: "Add a module ref to your boomfile's `use` (then `boom source` to apply)" },
   parameters: {
     flags: { json: jsonFlag },
     positional: {
       kind: "tuple",
-      parameters: [{ parse: str, placeholder: "name", brief: "registry pack name (see `module search`)" }],
+      parameters: [{ parse: str, placeholder: "ref", brief: "github:owner/repo, a git URL, or a path" }],
     },
   },
-  async func(flags, name) {
-    this.process.exitCode = await runModuleAdd(this, name, flags.json);
+  async func(flags, ref) {
+    this.process.exitCode = await runModuleAdd(this, ref, flags.json);
   },
 });
 
 export const moduleRouteMap = buildRouteMap({
   routes: {
-    // `list` is the default so bare `boom module` keeps its original behavior; `search`/`add`
-    // operate the curated registry.
+    // `list` is the default so bare `boom module` keeps its original behavior.
     list: listCommand,
-    search: searchCommand,
     add: addCommand,
   },
   defaultCommand: "list",
-  docs: {
-    brief: "Inspect composed `use` modules (bare, or `list`); or discover the registry (search | add)",
-  },
+  docs: { brief: "Inspect composed `use` modules (bare, or `list`), or add one (`add <ref>`)" },
 });
