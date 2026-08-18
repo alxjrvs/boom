@@ -193,12 +193,23 @@ async function applyTimer(ctx: ReconcileCtx, sched: Schedule): Promise<void> {
 
   const logDir = join(boomStateDir(ctx.env), "logs");
   const log = join(logDir, `${label}.log`);
+  // Carry the PATH boom itself is running with into the timer. launchd gives an agent a minimal
+  // PATH — not the user's — so a scheduled `boom code fetch` could not find `gh`, `git`'s
+  // credential helper, or anything else installed by a version manager, and failed on every
+  // HTTPS remote while reporting only into its own log. `boom source` runs from a real shell, so
+  // its PATH is the one the user means.
+  //
+  // A snapshot, deliberately: it is recorded in the plist, and `verify` compares the plist
+  // byte-for-byte against a fresh render — so a PATH that later changes shows up as timer drift
+  // ("timer missing/outdated — sync installs it") rather than rotting invisibly.
+  const timerEnv = ctx.env.PATH ? { PATH: ctx.env.PATH } : undefined;
   const plist = renderAgentPlist({
     label,
     programArgs: timerArgs(sched.cmd, self),
     startInterval: parseInterval(sched.every),
     stdoutPath: log,
     stderrPath: log,
+    ...(timerEnv ? { environment: timerEnv } : {}),
   });
 
   if (ctx.verb === "verify") {
