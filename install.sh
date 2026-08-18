@@ -38,9 +38,11 @@ curl -fsSL -o "$tmp" "$base/$asset"
 
 # Verify the download against the release's published SHA256SUMS before trusting the
 # binary — the curl-pipe bootstrap is otherwise the one install path with no integrity
-# check (`boom upgrade` already verifies this same manifest). A checksum tool is present
-# on stock macOS (shasum) and virtually every Linux (sha256sum); if neither exists we warn
-# and proceed rather than block the install, and BOOM_SKIP_VERIFY=1 opts out explicitly.
+# check (`boom upgrade` already verifies this same manifest). Every path that cannot actually
+# verify — manifest unfetchable, no entry for this asset, hash mismatch, no checksum tool —
+# refuses to install. BOOM_SKIP_VERIFY=1 is the single, explicit opt-out; nothing else
+# degrades to "installed it anyway", because a silent downgrade is indistinguishable from
+# a successful verification to the person running the one-liner.
 verify_sha256() {
   want="$1" file="$2"
   if command -v sha256sum > /dev/null 2>&1; then
@@ -48,8 +50,12 @@ verify_sha256() {
   elif command -v shasum > /dev/null 2>&1; then
     got="$(shasum -a 256 "$file" | awk '{print $1}')"
   else
-    echo "boom: warning — no sha256 tool found; skipping checksum verification" >&2
-    return 0
+    # Same reasoning as the fetch failure below: silently returning "verified" when nothing was
+    # verified is the one outcome this function must not produce. Stock macOS ships `shasum` and
+    # virtually every Linux ships `sha256sum`, so reaching this is rare and worth stopping for.
+    echo "boom: no sha256 tool (sha256sum/shasum) — cannot verify the download." >&2
+    echo "boom: install one, or set BOOM_SKIP_VERIFY=1 to install without verification." >&2
+    exit 1 # not `return 1` — the caller reports that as "checksum mismatch", which this is not
   fi
   [ "$got" = "$want" ]
 }
@@ -68,7 +74,13 @@ elif curl -fsSL -o "$tmp.sums" "$base/SHA256SUMS" 2> /dev/null; then
   fi
   echo "boom: checksum verified"
 else
-  echo "boom: warning — could not fetch SHA256SUMS; installing without verification" >&2
+  # Fatal, not a warning. This branch is reached by *any* failure to fetch the manifest —
+  # including a transient 5xx — so as a warning it meant anyone able to fail one request could
+  # downgrade every curl-pipe install to unverified, silently, which is the whole integrity
+  # check defeated by the easiest thing to cause. Opting out has to be a deliberate act.
+  echo "boom: could not fetch SHA256SUMS — refusing to install unverified." >&2
+  echo "boom: retry, or set BOOM_SKIP_VERIFY=1 to install without verification." >&2
+  exit 1
 fi
 
 mv "$tmp" "$BIN/boom"

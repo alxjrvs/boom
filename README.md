@@ -351,7 +351,10 @@ equivalent to shell access. Pin to a tag or SHA (`boom source set owner/repo@v1.
 you want a fixed, reviewed state instead of tracking a moving branch. boom does no
 credential handling of its own: git/SSH auth is whatever already works in your shell.
 Downloaded release binaries are checksum-verified against the release's `SHA256SUMS`
-(both `install.sh` and `boom upgrade`).
+(both `install.sh` and `boom upgrade`). Verification is not best-effort: if the manifest
+can't be fetched, has no entry for the asset, doesn't match, or no `sha256sum`/`shasum` is
+available, the install **fails** rather than proceeding unverified. `BOOM_SKIP_VERIFY=1`
+is the single explicit opt-out.
 
 ## Develop
 
