@@ -86,9 +86,12 @@ const statusCommand = buildCommand<Record<never, never>, [], BoomContext>({
 });
 
 // `boom source push` — the one "save my edits remotely" command: commit any local changes,
-// then push. No separate commit verb; `-m` names the commit message.
-const pushCommand = buildCommand<{ message?: string }, [], BoomContext>({
-  docs: { brief: "Commit local config-repo changes and push them upstream" },
+// then open a pull request for them. No separate commit verb; `-m` names the commit message.
+// On a GitHub clone sitting on its default branch this publishes a branch and opens a PR
+// rather than pushing that branch directly (see engine/push.ts for why, and for the fallback
+// to a plain push everywhere else). `--direct` is the escape hatch back to the plain push.
+const pushCommand = buildCommand<{ message?: string; direct?: boolean; merge?: boolean }, [], BoomContext>({
+  docs: { brief: "Commit local config-repo changes and open a pull request for them" },
   parameters: {
     flags: {
       message: {
@@ -97,11 +100,25 @@ const pushCommand = buildCommand<{ message?: string }, [], BoomContext>({
         optional: true,
         brief: 'Commit message for local changes (default: "boom: local changes")',
       },
+      direct: {
+        kind: "boolean",
+        optional: true,
+        brief: "Push the current branch straight up instead of opening a pull request",
+      },
+      merge: {
+        kind: "boolean",
+        optional: true,
+        brief: "Ask GitHub to merge the pull request once its required checks pass",
+      },
     },
     aliases: { m: "message" },
   },
   async func(flags) {
-    this.process.exitCode = await pushConfigRepo(this, flags.message);
+    this.process.exitCode = await pushConfigRepo(this, {
+      message: flags.message,
+      direct: flags.direct,
+      merge: flags.merge,
+    });
   },
 });
 

@@ -48,8 +48,8 @@ A `boom` invocation does one of two things:
    --autostash`s, so any uncommitted local edits ride along and land back on top;
    `source --commit` commits local edits first instead of autostashing them, so
    they replay as a real commit on the rebase. `boom source push` commits local
-   config-repo changes and pushes them (`src/engine/commit.ts`), sharing its commit logic with
-   `source --commit` so the default message/behavior can't drift between the two.
+   config-repo changes and opens a pull request for them (`src/engine/commit.ts`), sharing its
+   commit logic with `source --commit` so the default message/behavior can't drift.
 
 2. **Discovered subcommands** — built-ins are the `@stricli` route map, in `src/cli.ts` order:
    <!-- commands:begin -->
@@ -107,8 +107,28 @@ The config-repo git verbs live under one namespace: `boom source status` is the 
 "how does my clone stand against origin?" (behind / unpushed / dirty, exit 0 in sync / 2
 on drift) — the same summary the `verify` path shows, over a shared `repoDrift` helper, but
 without also walking the whole machine; `boom source push` commits any local
-config-repo changes and pushes the managed clone's commits upstream (`-m`/`--message`
-sets the commit message); `boom source reset` is the
+config-repo changes and gets them upstream (`-m`/`--message` sets the commit message).
+
+`push` takes the safe route by default. On a GitHub clone sitting on its default branch it
+publishes HEAD as `boom/<subject-slug>-<sha>` and opens a pull request against that branch
+rather than pushing it directly — a direct push is refused outright by any repo that
+protects its default branch, and a repo that runs CI on its config wants that CI to have
+seen the change before it is live. `--direct` forces the historical plain push, and boom
+falls back to it on its own — saying why — when there is no PR to open: a non-GitHub
+origin, no `gh` on PATH, an unset `origin/HEAD`, or a clone already checked out on a
+feature branch. `--merge` additionally asks GitHub to land the PR once its required checks
+pass, which is a request rather than a merge: nothing unverified gets in.
+
+The clone's working tree never moves in PR mode. That tree is the target of every dotfile
+symlink on the machine, so checking out the PR branch would swap the user's live config out
+from under them until it merged; boom pushes the *ref* (`git push origin HEAD:refs/heads/…`)
+and leaves HEAD on the default branch, one commit ahead of origin. The next `sync` rebases,
+recognizes its own patch in the squashed merge, and drops it. The branch name embeds HEAD's
+short sha, so it is derived from the commit rather than a clock — re-running after a failed
+`gh` call reuses the ref it already pushed instead of opening a second near-identical PR,
+and the push is never forced.
+
+`boom source reset` is the
 other direction — fetches, then hard-resets to the upstream tip (or the pinned `@ref`
 for a detached clone) and clears untracked files, discarding local changes back to what
 a fresh re-clone would leave. Like `linkRemoteConfigRepo`, `boom source reset` refuses
@@ -432,6 +452,7 @@ src/
     diff.ts                boom source diff (read-only: working-tree diff vs HEAD + untracked)
     status.ts              boom source status (read-only drift vs origin, shared reportRepoDrift)
     push.ts reset.ts       boom source push / boom source reset
+    pr.ts                  the GitHub half of source push (slug, branch name, gh)
     overview.ts            boom status (read-only dashboard composing the existing readers)
     init.ts                boom init (greenfield: adopt → git init + commit → remote → breadcrumb)
     fleet.ts               boom fleet (list · drift · diff) over .boom/machines/<host>.json

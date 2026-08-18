@@ -166,3 +166,47 @@ export function repoDrift(dir: string, env: Env): RepoDrift | undefined {
   if (behind === undefined) return undefined;
   return { behind, unpushed: hasUnpushedCommits(dir, env), dirty: !isClean(dir, env) };
 }
+
+// ---- branch/PR plumbing (`boom source push`) -------------------------------
+
+// The branch HEAD is on, or undefined when detached (a clone pinned to @tag/@sha).
+// Detached is a legitimate state here, not an error: the caller reads undefined as
+// "not on a branch" and declines to open a PR rather than failing.
+export function currentBranch(dir: string, env: Env): string | undefined {
+  const r = captureArgv(["git", "symbolic-ref", "--quiet", "--short", "HEAD"], env, { cwd: dir });
+  return r.code === 0 && r.stdout.length > 0 ? r.stdout : undefined;
+}
+
+// The remote's default branch, read from the origin/HEAD symref `git clone` records —
+// no network call, and no assumption that it is named `main`. Undefined when the symref
+// is absent (a repo made by `git init` + `git remote add` rather than cloned), which the
+// caller treats as "can't tell" and falls back to a direct push.
+export function defaultBranch(dir: string, env: Env): string | undefined {
+  const r = captureArgv(["git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"], env, {
+    cwd: dir,
+  });
+  if (r.code !== 0 || r.stdout.length === 0) return undefined;
+  return r.stdout.startsWith("origin/") ? r.stdout.slice("origin/".length) : r.stdout;
+}
+
+export function remoteUrl(dir: string, env: Env): string | undefined {
+  const r = captureArgv(["git", "remote", "get-url", "origin"], env, { cwd: dir });
+  return r.code === 0 && r.stdout.length > 0 ? r.stdout : undefined;
+}
+
+export function headSubject(dir: string, env: Env): string | undefined {
+  const r = captureArgv(["git", "log", "-1", "--pretty=%s"], env, { cwd: dir });
+  return r.code === 0 && r.stdout.length > 0 ? r.stdout : undefined;
+}
+
+// Publish HEAD as a *remote* branch without checking one out. This is the whole trick
+// behind PR mode: the clone's working tree is what every dotfile symlink points at, so
+// checking out a branch would swap the user's live config out from under them until the
+// PR merged. Pushing the ref instead leaves the tree exactly where it was.
+//
+// Never forced. The branch name embeds HEAD's short sha, so a name that already exists
+// is by construction the same commit and re-pushing is a no-op; a true collision could
+// only be someone else's ref, which we must not overwrite.
+export function pushHeadToBranchAsync(dir: string, branch: string, env: Env): Promise<CaptureResult> {
+  return captureArgvAsync(["git", "push", "origin", `HEAD:refs/heads/${branch}`], env, { cwd: dir });
+}
