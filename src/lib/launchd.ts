@@ -46,6 +46,12 @@ interface AgentPlist {
   // run leaves a trace instead of vanishing.
   readonly stdoutPath?: string;
   readonly stderrPath?: string;
+  // Environment for the job. launchd does NOT give an agent the user's shell environment — it
+  // hands it a minimal PATH — so a scheduled command that shells out to a tool installed
+  // anywhere but /usr/bin simply cannot find it, and says so only in a log nobody reads.
+  // Emitted as EnvironmentVariables; omitted entirely when empty, so plists that need nothing
+  // stay byte-identical to what earlier versions wrote (no churn on upgrade).
+  readonly environment?: Readonly<Record<string, string>>;
 }
 
 // Render a minimal, well-formed LaunchAgent plist. Deterministic (no timestamps) so an
@@ -72,6 +78,17 @@ export function renderAgentPlist(opts: AgentPlist): string {
     lines.push("  <key>StandardOutPath</key>", `  <string>${xml(opts.stdoutPath)}</string>`);
   if (opts.stderrPath)
     lines.push("  <key>StandardErrorPath</key>", `  <string>${xml(opts.stderrPath)}</string>`);
+  // Sorted, so the rendered plist is a pure function of its inputs — verify compares the file
+  // byte-for-byte against a fresh render, and object key order would otherwise make an
+  // unchanged config look like drift on some runs and not others.
+  const envKeys = Object.keys(opts.environment ?? {}).sort();
+  if (envKeys.length > 0) {
+    lines.push("  <key>EnvironmentVariables</key>", "  <dict>");
+    for (const k of envKeys) {
+      lines.push(`    <key>${xml(k)}</key>`, `    <string>${xml(opts.environment?.[k] ?? "")}</string>`);
+    }
+    lines.push("  </dict>");
+  }
   lines.push("</dict>", "</plist>", "");
   return lines.join("\n");
 }

@@ -39,6 +39,42 @@ test("renderAgentPlist XML-escapes argv and includes log paths when given", () =
   expect(p).toContain("<string>/l/x.log</string>");
 });
 
+test("renderAgentPlist carries an environment, sorted, and omits the key when empty", () => {
+  // launchd hands an agent a minimal PATH, not the user's — so a scheduled command that shells
+  // out to a version-manager-installed tool cannot find it. Without EnvironmentVariables the
+  // failure is silent by construction: it goes to the agent's own log and nowhere else.
+  const p = renderAgentPlist({
+    label: "com.x",
+    programArgs: ["/b/boom", "code", "fetch"],
+    startInterval: 900,
+    environment: { PATH: "/opt/mise/shims:/usr/bin", LANG: "en_US.UTF-8" },
+  });
+  expect(p).toContain("<key>EnvironmentVariables</key>");
+  expect(p).toContain("<key>PATH</key>");
+  expect(p).toContain("<string>/opt/mise/shims:/usr/bin</string>");
+  // Sorted: LANG before PATH, so the render is a pure function of its inputs and verify's
+  // byte-comparison can't see object key order as drift.
+  expect(p.indexOf("<key>LANG</key>")).toBeLessThan(p.indexOf("<key>PATH</key>"));
+
+  // Absent and empty both render nothing, so plists needing no env stay byte-identical to what
+  // earlier versions wrote — an upgrade must not churn every live timer.
+  const none = renderAgentPlist({ label: "com.x", programArgs: ["/b"], startInterval: 60 });
+  const empty = renderAgentPlist({ label: "com.x", programArgs: ["/b"], startInterval: 60, environment: {} });
+  expect(none).not.toContain("EnvironmentVariables");
+  expect(empty).toBe(none);
+});
+
+test("renderAgentPlist XML-escapes environment keys and values", () => {
+  const p = renderAgentPlist({
+    label: "com.x",
+    programArgs: ["/b"],
+    startInterval: 60,
+    environment: { "A&B": "<v>" },
+  });
+  expect(p).toContain("<key>A&amp;B</key>");
+  expect(p).toContain("<string>&lt;v&gt;</string>");
+});
+
 test("plistLabel extracts the Label, or undefined when absent", () => {
   const p = renderAgentPlist({ label: "com.boomtube.verify", programArgs: ["/b"], startInterval: 60 });
   expect(plistLabel(p)).toBe("com.boomtube.verify");
