@@ -30,14 +30,24 @@ export function lockPath(repo: string): string {
 // The formula names a Brewfile declares (`brew "x"` lines). Casks are intentionally skipped —
 // `brew list --versions` doesn't report them uniformly, and a cask's version is the app's, not
 // a reproducibility knob boom can act on. Comments / other stanzas (`tap`, `mas`) are ignored.
-async function brewFormulae(repo: string, file: string): Promise<string[]> {
-  const text = await Bun.file(join(repo, file)).text();
+// Split out as a pure function so the parse is testable without a Brewfile on disk — it is the
+// half that actually had the bug, and an empty result here is silently indistinguishable from
+// "no formulae declared" everywhere downstream.
+export function parseBrewFormulae(text: string): string[] {
   const out: string[] = [];
   for (const line of text.split("\n")) {
-    const m = line.match(/^\s*brew\s+"([^"]+)"/);
-    if (m?.[1]) out.push(m[1]);
+    // Both quote styles: a Brewfile is Ruby, and `brew 'x'` is as valid as `brew "x"`. Matching
+    // only double quotes silently yielded an EMPTY formula list for a single-quoted Brewfile —
+    // which then wrote an empty lockfile and made `lock --check` permanently, falsely green.
+    const m = line.match(/^\s*brew\s+(?:"([^"]+)"|'([^']+)')/);
+    const name = m?.[1] ?? m?.[2];
+    if (name) out.push(name);
   }
   return out;
+}
+
+async function brewFormulae(repo: string, file: string): Promise<string[]> {
+  return parseBrewFormulae(await Bun.file(join(repo, file)).text());
 }
 
 // Capture installed brew formula versions for the declared set. `brew list --versions <name>`
@@ -152,6 +162,29 @@ function reportDrift(
   }
   const extra = Object.keys(now).filter((n) => !(n in locked));
   if (extra.length > 0) report.note(`${manager}: ${extra.length} installed but unlocked (run \`boom lock\`)`);
+}
+
+// Fold lockfile drift into a verify run. This is what makes `boom.lock` load-bearing rather
+// than decorative: before it, NO verb read the file — its only consumer was a `boom status` line
+// reporting that it existed, so `boom lock --check` was a thing you had to remember to run by
+// hand, and a drifted machine verified clean. Now a repo that has opted into pinning gets the
+// drift on the same warning tier (exit 2) as every other kind of drift verify reports.
+//
+// Returns false when there is no lockfile, which is the common case and deliberately silent:
+// a repo that never ran `boom lock` should pay nothing for this, and `resolveLock` shells out
+// to `brew list --versions` / `mise ls`, so it is not free.
+export async function auditLockDrift(
+  repo: string,
+  config: Boomfile,
+  ctx: BoomContext,
+  report: Reporter,
+): Promise<boolean> {
+  const locked = await readLock(repo);
+  if (!locked) return false;
+  const now = await resolveLock(repo, config, ctx, report);
+  reportDrift("brew", locked.brew, now.brew, report);
+  reportDrift("mise", locked.mise, now.mise, report);
+  return true;
 }
 
 // --- command entry -----------------------------------------------------------------------

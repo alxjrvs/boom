@@ -13,6 +13,7 @@ import { acquireLock } from "../lib/lock.ts";
 import { backupsDir } from "../lib/paths.ts";
 import { bandsReporter, REPORT_SCHEMA_VERSION } from "../lib/reporter.ts";
 import { displace, Journal, newRunId, pruneRuns, readRun } from "./journal.ts";
+import { auditLockDrift } from "./pinning.ts";
 import { finalizeResources, reconcileSection } from "./registry.ts";
 import { installAskpass } from "./secrets/askpass.ts";
 import { applyBoomSettings } from "./settings.ts";
@@ -335,6 +336,22 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
         await applyBoomSettings(composition.boom, rctx);
       } catch (e) {
         report.fail(`boom settings: ${(e as Error).message}`);
+      }
+    }
+
+    // Lockfile drift, verify only. A repo with a `boom.lock` has opted into pinning, so a
+    // drifted package is drift like any other and belongs in the same warning tier — otherwise
+    // `boom lock --check` is a thing you have to remember to run, and the scheduled `boom verify`
+    // that exists to catch drift reports a drifted machine as clean. A no-op (and no `brew list`
+    // spawn) when the repo has no lockfile. Guarded like a resource: never unwinds the run.
+    if (verb === "verify" && !only) {
+      try {
+        report.category = "PINNING";
+        if (await auditLockDrift(repo, config, ctx, report)) {
+          report.note("re-pin with: boom lock");
+        }
+      } catch (e) {
+        report.fail(`lock audit: ${(e as Error).message}`);
       }
     }
 

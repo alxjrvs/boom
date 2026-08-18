@@ -32,7 +32,7 @@ import {
   setRunLabel,
 } from "../src/engine/journal.ts";
 import { boomStatus } from "../src/engine/overview.ts";
-import { boomLock, readLock, writeLock } from "../src/engine/pinning.ts";
+import { boomLock, parseBrewFormulae, readLock, writeLock } from "../src/engine/pinning.ts";
 import { reconcile } from "../src/engine/reconcile.ts";
 import { checkpoint, rollback, rollbackTo } from "../src/engine/rollback.ts";
 import { linkTarget, pathExists } from "../src/lib/fs.ts";
@@ -611,6 +611,32 @@ test("lock --check warns when there is no boom.lock yet", async () => {
   const sb = await sandbox('[[section]]\nname = "x"\n', { emptyPath: true });
   expect(await boomLock(sb.ctx, true)).toBe(2);
   expect(sb.out()).toContain("no boom.lock yet");
+});
+
+test("lock reads single-quoted Brewfile entries, not just double-quoted", () => {
+  // A Brewfile is Ruby, so `brew 'x'` is as valid as `brew "x"`. Matching only double quotes
+  // yielded an EMPTY formula list — which wrote an empty lockfile and made `--check` green
+  // forever, the one failure a drift check must never have.
+  expect(parseBrewFormulae(`brew 'ripgrep'\nbrew "fd"\ntap 'x/y'\ncask "vlc"\n# brew "nope"\n`)).toEqual([
+    "ripgrep",
+    "fd",
+  ]);
+});
+
+test("verify folds boom.lock drift into its own warning tier", async () => {
+  // boom.lock had no reader: its only consumer was a `boom status` line saying the file existed,
+  // so a machine that had drifted off its pins verified clean and you had to remember to run
+  // `boom lock --check` by hand.
+  const sb = await sandbox('[[section]]\nname = "x"\n', { emptyPath: true });
+
+  // No lockfile → verify is silent about pinning and stays clean.
+  expect(await reconcile("verify", sb.ctx, {})).toBe(0);
+  expect(sb.out()).not.toContain("locked");
+
+  // A lockfile naming something that isn't installed is drift verify must surface.
+  await writeLock(sb.repo, { brew: { "definitely-not-installed": "9.9.9" }, mise: {} });
+  expect(await reconcile("verify", sb.ctx, {})).toBe(2);
+  expect(sb.out()).toContain("definitely-not-installed");
 });
 
 // --- drift notifications ------------------------------------------------------------------
