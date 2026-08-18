@@ -5,6 +5,7 @@
 // recovery hazard the old NDJSON log had.
 import type { Database } from "bun:sqlite";
 import { rm } from "node:fs/promises";
+import { join } from "node:path";
 import { backupTo, pathExists } from "../lib/fs.ts";
 import { backupsDir, type Env } from "../lib/paths.ts";
 import { openDb, withDb } from "./db.ts";
@@ -54,12 +55,18 @@ export async function displace(
 // backupRoot falls back to `rm(dst, { force: true })`, so a caller that skipped the guard on a
 // verify or dry run would DELETE the destination. Inside the helper, "a documented no-op
 // outside a mutating sync" is structurally true for every caller present and future.
+// Where `displace` WILL put the file at `dst`, computed without touching the disk. Mirrors
+// backupTo's `join(backupRoot, dst)` exactly — if that ever stops being a pure join, this must
+// change with it, or an intent row will name a path the backup never lands at.
+function plannedUndo(dst: string, backupRoot: string | undefined): UndoToken {
+  return backupRoot ? { kind: "restore", from: join(backupRoot, dst) } : { kind: "remove" };
+}
+
 export async function journalWrite(op: string, file: string, ctx: ReconcileCtx): Promise<void> {
   if (!ctx.journal) return;
-  await ctx.journal.intent(op, file);
-  const undo: UndoToken = (await pathExists(file))
-    ? await displace(file, ctx.backupRoot)
-    : { kind: "remove" };
+  const exists = await pathExists(file);
+  await ctx.journal.intent(op, file, exists ? plannedUndo(file, ctx.backupRoot) : { kind: "remove" });
+  const undo: UndoToken = exists ? await displace(file, ctx.backupRoot) : { kind: "remove" };
   await ctx.journal.done(op, file, undo);
 }
 
@@ -81,7 +88,7 @@ export async function journalRemove(
     await rm(file, { recursive, force: true });
     return;
   }
-  await ctx.journal.intent(op, file);
+  await ctx.journal.intent(op, file, plannedUndo(file, ctx.backupRoot));
   await ctx.journal.done(op, file, await displace(file, ctx.backupRoot, recursive));
 }
 
@@ -120,8 +127,19 @@ export class Journal {
     this.db.run("INSERT OR IGNORE INTO runs (run_id, committed) VALUES (?, 0)", [runId]);
   }
 
-  intent(op: string, dst: string): Promise<void> {
-    this.db.run("INSERT INTO ops (run_id, t, op, dst) VALUES (?, 'intent', ?, ?)", [this.runId, op, dst]);
+  // `plan` is the undo token this mutation is ABOUT to become — written now, before the
+  // displace, so the intent row is self-sufficient. Without it an intent recorded only "we
+  // were about to touch this path": `displace` had already moved the original into the backup
+  // tree, and a crash before `done` left that file with no row naming where it went, so
+  // rollback restored nothing and reported a clean run. The token is knowable in advance
+  // because `backupTo`'s destination is a pure `join(backupRoot, dst)`.
+  intent(op: string, dst: string, plan?: UndoToken): Promise<void> {
+    this.db.run("INSERT INTO ops (run_id, t, op, dst, undo) VALUES (?, 'intent', ?, ?, ?)", [
+      this.runId,
+      op,
+      dst,
+      plan ? JSON.stringify(plan) : null,
+    ]);
     return Promise.resolve();
   }
   done(op: string, dst: string, undo: UndoToken): Promise<void> {
@@ -273,7 +291,10 @@ export async function firstOsxUndo(
 export async function readRun(
   env: Env,
   runId?: string,
-): Promise<{ runId: string; committed: boolean; done: DoneRecord[]; sides: SideRecord[] } | undefined> {
+): Promise<
+  | { runId: string; committed: boolean; done: DoneRecord[]; orphans: DoneRecord[]; sides: SideRecord[] }
+  | undefined
+> {
   return withDb(env, (db) => {
     const id = runId ?? latestRunId(db);
     if (!id) return undefined;
@@ -288,10 +309,31 @@ export async function readRun(
         undo: string;
       }[]
     ).map((r) => ({ op: r.op, dst: r.dst, undo: JSON.parse(r.undo) as UndoToken }));
+    // Intents with no matching `done` — the run died in the window between "original displaced
+    // into the backup tree" and "row written that says where it went". These used to be
+    // invisible (every reader filtered `t = 'done'`), so an interrupted run reported zero ops
+    // and rollback silently restored nothing.
+    //
+    // The completing `done` must come AFTER the intent (`d.id > i.id`), not merely share its
+    // (op, dst). Without that, a destination touched twice in one run has its second, genuinely
+    // orphaned intent masked by the FIRST write's done row — the interrupted mutation then goes
+    // unreported again, which is the whole bug this exists to fix. Rare (the change-gate makes
+    // reconcile idempotent, and `--resume` re-skips what is already correct) but reachable: a
+    // hook may call `api.journalWrite` on a path a resource already wrote.
+    const orphans = (
+      db
+        .query(
+          `SELECT op, dst, undo FROM ops i WHERE run_id = ? AND t = 'intent' AND undo IS NOT NULL
+             AND NOT EXISTS (SELECT 1 FROM ops d WHERE d.run_id = i.run_id AND d.t = 'done'
+                             AND d.op = i.op AND d.dst = i.dst AND d.id > i.id)
+           ORDER BY id`,
+        )
+        .all(id) as { op: string; dst: string; undo: string }[]
+    ).map((r) => ({ op: r.op, dst: r.dst, undo: JSON.parse(r.undo) as UndoToken }));
     const sides = db
       .query("SELECT op, label FROM sides WHERE run_id = ? ORDER BY id")
       .all(id) as SideRecord[];
-    return { runId: id, committed: runRow.committed === 1, done, sides };
+    return { runId: id, committed: runRow.committed === 1, done, orphans, sides };
   });
 }
 
@@ -314,7 +356,15 @@ export async function listRuns(env: Env): Promise<RunSummary[]> {
       committed: number;
       label: string | null;
     }[];
-    const opsN = db.query("SELECT COUNT(*) AS n FROM ops WHERE run_id = ? AND t = 'done'");
+    // `done` rows plus recoverable orphaned intents. Counting only `done` made an interrupted
+    // run — the one case `rollback --list` exists to surface — report "0 op(s)", which reads as
+    // "nothing to undo" precisely when there is something half-applied to undo.
+    const opsN = db.query(
+      `SELECT (SELECT COUNT(*) FROM ops WHERE run_id = ?1 AND t = 'done')
+            + (SELECT COUNT(*) FROM ops i WHERE i.run_id = ?1 AND i.t = 'intent' AND i.undo IS NOT NULL
+                 AND NOT EXISTS (SELECT 1 FROM ops d WHERE d.run_id = i.run_id AND d.t = 'done'
+                                 AND d.op = i.op AND d.dst = i.dst AND d.id > i.id)) AS n`,
+    );
     const sidesN = db.query("SELECT COUNT(*) AS n FROM sides WHERE run_id = ?");
     return runs.map((r) => ({
       runId: r.run_id,
