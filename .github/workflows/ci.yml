@@ -50,6 +50,40 @@ jobs:
       - name: Smoke — example boomfile validates
         run: BOOM_CONFIG=examples/dotfiles ./build/boom doctor --config
 
+      # The docs generator runs only in pages.yml, which triggers on push to main — so a break
+      # here used to merge green and fail AFTER landing, leaving the site serving a stale build.
+      # It is ~1s and `marked` is already in the lockfile, so there is no reason not to gate it.
+      - name: Smoke — docs site builds
+        run: bun run site/build.ts
+
+      # Reconcile for real, with the COMPILED binary. Every other engine test runs under plain
+      # `bun`, but the engine loads user code through runtime `import()` of on-disk paths
+      # (hooks, discovered commands) — the one thing `bun build --compile` changes and the one
+      # thing the suite structurally cannot see. $HOME and the state dir are redirected into
+      # $RUNNER_TEMP so this never touches the runner's real home.
+      - name: Smoke — compiled binary reconciles a fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          fix="$RUNNER_TEMP/fixture"; home="$RUNNER_TEMP/fake-home"
+          mkdir -p "$fix/hooks" "$home"
+          printf 'z\n' > "$fix/.zshrc"
+          cat > "$fix/boomfile.toml" <<'TOML'
+          [[section]]
+          name = "smoke"
+          link = [{ src = ".zshrc", dst = "~/.zshrc" }]
+          hook = [{ name = "probe" }]
+          TOML
+          cat > "$fix/hooks/probe.ts" <<'TS'
+          export function sync(api) { api.ok("HOOK-RAN-OK"); }
+          export function verify(api) { api.ok("HOOK-RAN-OK"); }
+          TS
+          run() { env HOME="$home" XDG_STATE_HOME="$RUNNER_TEMP/state" BOOM_CONFIG="$fix" "$PWD/build/boom" "$@"; }
+          run source | tee "$RUNNER_TEMP/out.txt"
+          grep -q 'HOOK-RAN-OK' "$RUNNER_TEMP/out.txt"   # the hook was import()ed inside the binary
+          test -L "$home/.zshrc"                          # and the link actually landed
+          run verify                                      # converged machine verifies clean (exit 0)
+
   version-guard:
     # Every PR must move package.json's version exactly one semver step from main —
     # patch (x.y.z+1), minor (x.y+1.0), or major (x+1.0.0) — or leave it unchanged.
