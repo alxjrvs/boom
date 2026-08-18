@@ -158,17 +158,6 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
   // Open on the grey setup band (bands mode only; a no-op in --json), before any section.
   report.setup(SETUP_COPY[verb]);
   const dryRun = opts.dryRun ?? false;
-  await syncConfigRepo(repo, ctx.env, report, verb, dryRun, {
-    commit: opts.commit,
-    commitMessage: opts.commitMessage,
-  });
-  let config: Boomfile;
-  try {
-    config = await loadConfig(repo);
-  } catch (e) {
-    report.fail((e as Error).message);
-    return finish();
-  }
 
   // `mutating` is narrower than "changes the machine": it also gates the journal, the backup
   // tree and the askpass shim, none of which any verb but sync opens. The LOCK is a different
@@ -179,6 +168,12 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
   const mutating = verb === "sync" && !dryRun;
   const writes = !dryRun && verb !== "verify";
 
+  // Taken BEFORE syncConfigRepo, which is itself a mutation of shared state: the sync verb's
+  // `git pull --rebase --autostash` rewrites the managed clone's working tree and, on failure,
+  // runs `git rebase --abort`. Two unserialized runs — the daily scheduled sync overlapping a
+  // manual one — meant the second process's abort could tear down the FIRST one's in-flight
+  // rebase and pop its autostash. The lock used to start after this call, so the one git
+  // operation that rewrites the config repo was the one thing it did not cover.
   // A live holder is a clean failure; a stale lock from a crashed run is reclaimed
   // (see lib/lock.ts).
   let releaseLock: (() => void) | undefined;
@@ -193,6 +188,17 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
 
   let journal: Journal | undefined;
   try {
+    await syncConfigRepo(repo, ctx.env, report, verb, dryRun, {
+      commit: opts.commit,
+      commitMessage: opts.commitMessage,
+    });
+    let config: Boomfile;
+    try {
+      config = await loadConfig(repo);
+    } catch (e) {
+      report.fail((e as Error).message);
+      return finish();
+    }
     let backupRoot: string | undefined;
     // `writes`, not `mutating`: uninstall is the most destructive verb boom has and it used to
     // run with NO journal and NO backup tree, so every removal was unrecorded and permanent —

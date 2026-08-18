@@ -22,6 +22,7 @@ import {
   resetHard,
   unpushedCommits,
 } from "../lib/git.ts";
+import { LockHeldError, withLock } from "../lib/lock.ts";
 import { bandsReporter } from "../lib/reporter.ts";
 
 interface ResetOptions {
@@ -30,7 +31,22 @@ interface ResetOptions {
   readonly dryRun?: boolean;
 }
 
+// `source reset` hard-resets and cleans the managed clone. Held under the run lock: it can
+// otherwise wipe the working tree out from under a sync that is mid-way through reading `src`
+// files out of it, turning every remaining placement into a "source missing" failure.
 export async function resetConfigRepo(ctx: BoomContext, opts: ResetOptions = {}): Promise<number> {
+  try {
+    return await withLock(ctx.env, () => resetUnlocked(ctx, opts));
+  } catch (e) {
+    if (e instanceof LockHeldError) {
+      ctx.process.stderr.write(`boom: ${e.message}\n`);
+      return 1;
+    }
+    throw e;
+  }
+}
+
+async function resetUnlocked(ctx: BoomContext, opts: ResetOptions = {}): Promise<number> {
   // Bands voice, like every `boom source` subcommand; hard failures (and an abort) return 1,
   // keeping exit-2 reserved for the verify/status warning tier. All outcome paths close through
   // finish() so the run always ends on a `▎ RESET...COMPLETE!` / `...FAILED!` verdict band.

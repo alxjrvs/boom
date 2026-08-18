@@ -4,7 +4,7 @@ import { rm, rmdir } from "node:fs/promises";
 import { detectOs } from "../config/profile.ts";
 import type { BoomContext } from "../context.ts";
 import { displayPath, pathExists, restoreFrom } from "../lib/fs.ts";
-import { acquireLock } from "../lib/lock.ts";
+import { withLock } from "../lib/lock.ts";
 import { captureArgv, cleanEnv } from "../lib/proc.ts";
 import { bandsReporter, type Reporter } from "../lib/reporter.ts";
 import { findRunByLabel, listRuns, pruneHorizon, readRun, setRunLabel, type UndoToken } from "./journal.ts";
@@ -17,14 +17,7 @@ import { removeManifestEntries } from "./state.ts";
 //
 // Typed on BoomContext rather than Env deliberately: all three call sites already hold a ctx,
 // and this file imports no `Env` today — reading `ctx.env` here keeps it that way.
-async function underRunLock<T>(ctx: BoomContext, body: () => Promise<T>): Promise<T> {
-  const release = acquireLock(ctx.env);
-  try {
-    return await body();
-  } finally {
-    release();
-  }
-}
+const underRunLock = <T>(ctx: BoomContext, body: () => Promise<T>): Promise<T> => withLock(ctx.env, body);
 
 // One-line preview of what reversing a record would do (for --dry-run). An exhaustive switch
 // with a `never` default, not an if/else chain: adding a fifth UndoToken kind must be a compile
