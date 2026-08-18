@@ -971,3 +971,51 @@ test("tmpl: mode is applied and dryRun writes nothing", async () => {
   expect(await readFile(dst, "utf8")).toBe("k=abc\n");
   expect(await mode(dst)).toBe("600");
 });
+
+test("tmpl: a prototype-chain name is an undefined var, not Object.prototype's member", async () => {
+  // `${toString}` resolved through `name in ctx.vars`, which walks the prototype chain, so it
+  // rendered "function toString() { [native code] }" into the destination and reported success —
+  // silently defeating this resource's "an unknown ${NAME} is a hard failure" guarantee.
+  const sb = await tmplSandbox(`greeting = "howdy"`, `hi ${ph("greeting")} ${ph("toString")}\n`);
+  const dst = join(sb.home, ".conf");
+
+  expect(await reconcile("sync", sb.ctx, {})).toBe(1); // undefined var → failure, as for any other name
+  expect(await pathExists(dst)).toBe(false); // and nothing is written
+  expect(sb.out()).toContain(ph("toString"));
+  expect(sb.out()).not.toContain("native code");
+});
+
+test("tmpl: mode drift on an unchanged render is seen by verify and repaired by sync", async () => {
+  const sb = await tmplSandbox(
+    `token = "abc"`,
+    `k=${ph("token")}\n`,
+    `tmpl = [{ src = "conf.tmpl", dst = "~/.conf", mode = "600" }]`,
+  );
+  const dst = join(sb.home, ".conf");
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  expect(await mode(dst)).toBe("600");
+
+  await chmod(dst, 0o777); // content still current; only the mode drifted
+  expect(await reconcile("verify", sb.ctx, {})).toBe(2); // warning tier — was silently 0
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  expect(await mode(dst)).toBe("600"); // repaired — the change-gate used to return first
+  expect(await reconcile("verify", sb.ctx, {})).toBe(0);
+});
+
+test("copy: mode drift on an unchanged file is seen by verify and repaired by sync", async () => {
+  // link's verify has always checked mode; copy compared content only, so a copied
+  // ~/.ssh/config left world-writable stayed that way and `--fix` could not repair it.
+  const sb = await sandbox(
+    `[[section]]\nname = "S"\ncopy = [{ src = "cfg", dst = "~/.cfg", mode = "600" }]\n`,
+  );
+  await writeFile(join(sb.repo, "cfg"), "k=v\n");
+  const dst = join(sb.home, ".cfg");
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  expect(await mode(dst)).toBe("600");
+
+  await chmod(dst, 0o777);
+  expect(await reconcile("verify", sb.ctx, {})).toBe(2);
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  expect(await mode(dst)).toBe("600");
+  expect(await reconcile("verify", sb.ctx, {})).toBe(0);
+});

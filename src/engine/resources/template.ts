@@ -14,7 +14,7 @@
 //     so real shell config survives.
 import { dirname, join } from "node:path";
 import type { Tmpl } from "../../config/schema.ts";
-import { chmod, displayPath, expandTilde, mkdir, pathExists, rm } from "../../lib/fs.ts";
+import { chmod, displayPath, expandTilde, mkdir, pathExists, rm, stat } from "../../lib/fs.ts";
 import { displace, type UndoToken } from "../journal.ts";
 import type { ReconcileCtx } from "../types.ts";
 import { renderTemplate } from "./filesystem.ts";
@@ -30,7 +30,11 @@ const VAR = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
 // left in place — the caller turns a non-empty `missing` into a reported failure.
 function renderTmpl(text: string, ctx: ReconcileCtx, missing: Set<string>): string {
   return renderTemplate(text, ctx).replace(VAR, (whole, name: string) => {
-    if (name in ctx.vars) return ctx.vars[name] as string;
+    // `Object.hasOwn`, never `in`: `in` walks the prototype chain, so `${toString}` /
+    // `${constructor}` / `${valueOf}` would resolve to Object.prototype's members and render
+    // native function source into the destination — reported as a *success*, silently
+    // defeating this resource's "an unknown ${NAME} is a hard failure" guarantee.
+    if (Object.hasOwn(ctx.vars, name)) return ctx.vars[name] as string;
     missing.add(name);
     return whole;
   });
@@ -71,6 +75,19 @@ export async function reconcileTmpl(entry: Tmpl, ctx: ReconcileCtx): Promise<voi
       // Change-gate: an already-rendered dst is skipped (no rewrite, no journal churn, no fresh
       // backup of an unchanged file), mirroring copy/secret.
       if ((await pathExists(dst)) && (await Bun.file(dst).text()) === content) {
+        // Content is current — but still enforce the declared mode. A rendered file whose
+        // permissions drifted looser (a prior umask, a manual chmod) would otherwise never be
+        // repaired: the change-gate returns before the chmod below, so `--fix` is a no-op and
+        // `verify` is blind. Re-chmod without rewriting, the same branch `secret` takes.
+        if (wantMode !== undefined && ((await stat(dst)).mode & 0o777) !== wantMode) {
+          if (ctx.dryRun) {
+            report.plan(`${disp} mode would be set to 0${wantMode.toString(8)}`);
+            return;
+          }
+          await chmod(dst, wantMode);
+          report.ok(`${disp} mode set to 0${wantMode.toString(8)}`);
+          return;
+        }
         report.skip(`${disp} already up to date`);
         return;
       }
@@ -98,8 +115,19 @@ export async function reconcileTmpl(entry: Tmpl, ctx: ReconcileCtx): Promise<voi
         report.warn(`${disp} template not rendered`);
         return;
       }
-      if ((await Bun.file(dst).text()) === content) report.skip(`${disp} (template current)`);
-      else report.warn(`${disp} template stale`);
+      if ((await Bun.file(dst).text()) !== content) {
+        report.warn(`${disp} template stale`);
+        return;
+      }
+      // Content current — check the declared mode too, so verify can see the drift sync repairs.
+      if (wantMode !== undefined) {
+        const perms = (await stat(dst)).mode & 0o777;
+        if (perms !== wantMode) {
+          report.warn(`${disp} mode ${perms.toString(8)}, expected ${wantMode.toString(8)}`);
+          return;
+        }
+      }
+      report.skip(`${disp} (template current)`);
       return;
     }
     case "uninstall": {
