@@ -60,7 +60,7 @@ A `boom` invocation does one of two things:
    That list is asserted **equal** to `commandNames()` by `test/docs-hygiene.test.ts`, so adding
    a route without naming it here (or naming one that no longer routes) fails CI. `source`,
    `fleet`, `module`, `code` and `mcp` are themselves
-   nested route maps (`fleet drift|diff`, `module search|add`). `boom init` is the greenfield
+   nested route maps (`fleet drift|diff`, `module list|add`). `boom init` is the greenfield
    cold-start (adopt → `git init` + commit → create remote → push → breadcrumb). User commands
    resolve at runtime from `<config>/commands/<name>.ts`.
    The route map is the **single registry, with no hardcoded dispatch anywhere**: `mcp`
@@ -219,8 +219,8 @@ repo-relative paths against the **module's own directory**, so a module ships th
 declares; its `[vars]` are the weakest layer (a nested module is weaker still, and the base
 repo always wins a collision). Because modules compose *before* the base and an overlay loads
 *last*, `use` in an overlay would invert that order — so it is rejected at load rather than
-silently dropped. `boom module search <term>` / `add <name>` browse a curated registry of vetted
-packs and splice a ref into `use`. A top-level `[vars]` table (a name→string map) supplies the
+silently dropped. `boom module add <ref>` splices a module ref into `use` (idempotently), taking
+the ref itself — `github:owner/repo`, a git URL, or a path. A top-level `[vars]` table (a name→string map) supplies the
 values `tmpl` resources interpolate.
 
 **Duplicate file destinations resolve last-wins** across `[modules…, base, overlays…]` — and only
@@ -445,7 +445,7 @@ src/
     skill.ts               renders the Claude SKILL.md (commands/skill.ts is the CLI wrapper)
     pinning.ts             boom lock / --check: resolved package versions in boom.lock
     rollback.ts code.ts discovery.ts
-  config/  schema.ts load.ts compose.ts remote.ts profile.ts modules.ts registry.ts (curated module packs)
+  config/  schema.ts load.ts compose.ts remote.ts profile.ts modules.ts registry.ts (the `use` splicer)
   lib/     reporter.ts color.ts fs.ts paths.ts proc.ts git.ts release.ts version.ts
 test/                       bun test (unit + sandboxed integration)
 examples/dotfiles/          a runnable boomfile.toml example

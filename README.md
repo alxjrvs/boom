@@ -116,7 +116,7 @@ boom doctor --fix       # …and mend the safe ones (state dir, boom skill)
 boom doctor --secrets   # audit that every secret ref (op:// and pluggable backends) resolves
 boom lock               # pin resolved package versions to boom.lock (--check reports drift)
 boom fleet              # every machine's last-sync summary; fleet drift | diff <a> <b> for more
-boom module             # list `use` modules; module search <term> | add <name> for the registry
+boom module             # list `use` modules; module add <ref> splices one into your boomfile
 boom where config|code|engine   # resolve where boom keeps things
 boom upgrade            # upgrade the boom binary itself
 boom askpass <ref>      # resolve a secret ref to stdout (the SUDO_ASKPASS helper; see [boom])
@@ -135,8 +135,8 @@ sections that run in phase order
 (`link → copy → tmpl → secret → dir → pkg → osx_default → launchd → systemd → run → check → hook`):
 
 ```toml
-# Optional: compose shared, vetted sections from other boom repos before your own (a git
-# remote, or a path relative to this repo). `boom module search|add` browse a curated registry;
+# Optional: compose shared sections from other boom repos before your own (a git
+# remote, or a path relative to this repo). `boom module add <ref>` splices one in;
 # a module may itself `use` further modules — they compose recursively (cycles are broken).
 # A module's paths resolve against the module's own directory, so a module ships its dotfiles.
 # `use` belongs here, in the base file — it is rejected in an overlay (see below).

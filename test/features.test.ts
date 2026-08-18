@@ -9,7 +9,7 @@ import { run } from "@stricli/core";
 import { app } from "../src/cli.ts";
 import { loadConfig, readConfigBreadcrumb } from "../src/config/load.ts";
 import { resolveModule } from "../src/config/modules.ts";
-import { insertUseRef, searchRegistry } from "../src/config/registry.ts";
+import { insertUseRef } from "../src/config/registry.ts";
 import type { BoomContext } from "../src/context.ts";
 import { adopt } from "../src/engine/adopt.ts";
 import { doctor } from "../src/engine/doctor.ts";
@@ -434,15 +434,27 @@ test("overlays: a vars-only overlay loads and its value wins over the base's", a
   expect(await readFile(join(sb.home, ".gitconfig"), "utf8")).toContain("email = host");
 });
 
-// --- module registry (search / add) -------------------------------------------------------
+// --- module add ---------------------------------------------------------------------------
 
-test("registry: search matches a pack by a substring of its name or tag", () => {
-  expect(searchRegistry("node").some((p) => p.name === "node-dev")).toBe(true);
-  // tag match: cli-essentials carries the "terminal" tag, not the literal in its name.
-  expect(searchRegistry("terminal").some((p) => p.name === "cli-essentials")).toBe(true);
-  // an empty term lists everything; a nonsense term nothing.
-  expect(searchRegistry("").length).toBeGreaterThan(0);
-  expect(searchRegistry("zzznope")).toHaveLength(0);
+test("module add takes a real ref and refuses a bare word", async () => {
+  // `add` used to resolve a name against a curated registry whose five packs all pointed at
+  // repositories that do not exist — so the command's whole job was splicing a dead ref into
+  // the user's committed config. It now takes the ref itself, and shape-checks it.
+  const sb = await sandbox('[[section]]\nname = "x"\n');
+  const file = join(sb.repo, "boomfile.toml");
+
+  expect(await run(app, ["module", "add", "github:o/r"], sb.ctx)).toBeUndefined();
+  expect(await readFile(file, "utf8")).toContain('use = ["github:o/r"]');
+
+  // idempotent — a second add of the same ref changes nothing
+  const before = await readFile(file, "utf8");
+  await run(app, ["module", "add", "github:o/r"], sb.ctx);
+  expect(await readFile(file, "utf8")).toBe(before);
+
+  // a bare word (the old pack-name shape) is refused rather than written in as a ref
+  await run(app, ["module", "add", "node-dev"], sb.ctx);
+  expect(await readFile(file, "utf8")).not.toContain("node-dev");
+  expect(sb.out()).toContain("is not a module ref");
 });
 
 test("insertUseRef: idempotent + least-destructive across the three shapes", () => {
@@ -460,35 +472,29 @@ test("insertUseRef: idempotent + least-destructive across the three shapes", () 
   expect(spliced.text).toContain('"b"');
 });
 
-test("module search: reports a matching pack via the reporter", async () => {
-  const sb = await sandbox('[[section]]\nname = "x"\n');
-  await run(app, ["module", "search", "rust"], sb.ctx);
-  expect(sb.ctx.process.exitCode).toBe(0);
-  expect(sb.out()).toContain("rust");
-});
-
 test("module add: appends the ref to `use`, is idempotent, and loadConfig sees it", async () => {
   const sb = await sandbox('[[section]]\nname = "x"\n');
-  await run(app, ["module", "add", "node-dev"], sb.ctx);
+  const ref = "github:someone/boom-mod-node";
+  await run(app, ["module", "add", ref], sb.ctx);
   expect(sb.ctx.process.exitCode).toBe(0);
-  const ref = "github:alxjrvs/boom-mod-node-dev";
   expect((await loadConfig(sb.repo)).use).toContain(ref);
   expect(sb.out()).toContain(ref);
 
   // second add → skip, not a duplicate.
   sb.ctx.process.exitCode = 0;
-  await run(app, ["module", "add", "node-dev"], sb.ctx);
+  await run(app, ["module", "add", ref], sb.ctx);
   expect(sb.ctx.process.exitCode).toBe(0);
   const use = (await loadConfig(sb.repo)).use ?? [];
   expect(use.filter((r) => r === ref)).toHaveLength(1);
   expect(sb.out()).toContain("already");
 });
 
-test("module add: an unknown pack fails with a hint to search", async () => {
+test("module add: a bare word is refused rather than written in as a ref", async () => {
   const sb = await sandbox('[[section]]\nname = "x"\n');
   await run(app, ["module", "add", "no-such-pack"], sb.ctx);
   expect(sb.ctx.process.exitCode).toBe(1);
-  expect(sb.out()).toContain("module search");
+  expect(sb.out()).toContain("is not a module ref");
+  expect((await loadConfig(sb.repo)).use ?? []).toHaveLength(0);
 });
 
 // --- fleet awareness ----------------------------------------------------------------------
