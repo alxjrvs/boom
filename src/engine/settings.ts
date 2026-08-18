@@ -11,7 +11,7 @@ import { readdir } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { detectOs } from "../config/profile.ts";
 import type { BoomSettings, Schedule } from "../config/schema.ts";
-import { displayPath, mkdir, pathExists } from "../lib/fs.ts";
+import { displayPath, mkdir, pathExists, rename } from "../lib/fs.ts";
 import {
   agentLastExit,
   agentLoaded,
@@ -31,6 +31,30 @@ import { displace, journalWrite } from "./journal.ts";
 import { runWorkItems, type WorkItem } from "./registry.ts";
 import { skillDoc, skillInstallPath } from "./skill.ts";
 import type { ReconcileCtx } from "./types.ts";
+
+// Roll a timer's log once it passes this, keeping exactly one previous generation (`.log.1`).
+// 2 MB is chosen against observed reality rather than taste: a 15-minute timer writing ~54 KB
+// per run reached 2.71 MB and 71,304 lines in a month, so this rolls roughly monthly and retains
+// about two months across both files.
+const TIMER_LOG_MAX_BYTES = 2 * 1024 * 1024;
+
+// launchd appends to StandardOutPath/StandardErrorPath forever and never truncates, and boom is
+// not the writer — the job is, long after boom exited. So sync is the only moment boom can act,
+// and this is deliberately a sync-time sweep rather than a rotation daemon: bounded, no new
+// moving parts, and it converges on any machine that syncs at all.
+//
+// Best-effort throughout. A log that cannot be statted or moved is not a reason to fail a
+// reconcile — the worst case is the file keeps growing, which is exactly today's behavior.
+async function rollTimerLog(log: string, ctx: ReconcileCtx): Promise<void> {
+  try {
+    const f = Bun.file(log);
+    if (!(await f.exists()) || f.size <= TIMER_LOG_MAX_BYTES) return;
+    await rename(log, `${log}.1`); // replaces any previous generation
+    ctx.report.note(`rolled ${displayPath(log, ctx.env)} (was ${(f.size / 1024 / 1024).toFixed(1)} MB)`);
+  } catch {
+    // ignore: growth is the status quo, not a regression
+  }
+}
 
 // Every boom-owned timer plist is labelled `com.boomtube.<cmd-slug>` — the shared prefix lets
 // reaping recognize (and remove) a timer whose `schedule` entry was deleted without a state
@@ -183,6 +207,7 @@ async function applyTimer(ctx: ReconcileCtx, sched: Schedule): Promise<void> {
     return;
   }
   if (ctx.dryRun) {
+    // (log rolling is a sync-time side effect; a dry run must not move files)
     report.plan(`would schedule ${what} every ${sched.every}`);
     return;
   }
@@ -194,6 +219,7 @@ async function applyTimer(ctx: ReconcileCtx, sched: Schedule): Promise<void> {
 
   const logDir = join(boomStateDir(ctx.env), "logs");
   const log = join(logDir, `${label}.log`);
+  await rollTimerLog(log, ctx);
   // Carry the PATH boom itself is running with into the timer. launchd gives an agent a minimal
   // PATH — not the user's — so a scheduled `boom code fetch` could not find `gh`, `git`'s
   // credential helper, or anything else installed by a version manager, and failed on every
