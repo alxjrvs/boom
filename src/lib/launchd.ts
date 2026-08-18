@@ -120,3 +120,21 @@ export function unloadAgent(plistPath: string, env: Env): void {
 export function agentLoaded(label: string, env: Env): boolean {
   return captureArgv(["launchctl", "list", label], env).code === 0;
 }
+
+// The exit status of the agent's last completed run, or undefined if it is not loaded, has
+// never run, or launchctl said something we don't recognize.
+//
+// This exists because "loaded" and "working" are different questions, and boom only ever asked
+// the first. A timer can be installed, loaded, firing on schedule and failing every single time
+// — which is precisely what `code fetch` did for a month, reporting only into its own log. The
+// whole point of a scheduled check is that nobody is watching, so a failing one has to be able
+// to reach the drift report the way any other drift does.
+export function agentLastExit(label: string, env: Env): number | undefined {
+  const r = captureArgv(["launchctl", "list", label], env);
+  if (r.code !== 0) return undefined;
+  // `launchctl list <label>` prints a plist-ish dict: 	"LastExitStatus" = 0;
+  const m = r.stdout.match(/"LastExitStatus"\s*=\s*(-?\d+)/);
+  if (!m?.[1]) return undefined;
+  const n = Number(m[1]);
+  return Number.isFinite(n) ? n : undefined;
+}

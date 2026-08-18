@@ -13,6 +13,7 @@ import { detectOs } from "../config/profile.ts";
 import type { BoomSettings, Schedule } from "../config/schema.ts";
 import { displayPath, mkdir, pathExists } from "../lib/fs.ts";
 import {
+  agentLastExit,
   agentLoaded,
   launchAgentsDir,
   parseInterval,
@@ -216,7 +217,19 @@ async function applyTimer(ctx: ReconcileCtx, sched: Schedule): Promise<void> {
     const current = (await pathExists(plistPath)) ? await Bun.file(plistPath).text() : undefined;
     if (current !== plist) report.warn(`${what} timer missing/outdated — sync installs it`);
     else if (!agentLoaded(label, ctx.env)) report.warn(`${what} timer installed but not loaded`);
-    else report.skip(`${what} every ${sched.every}`);
+    else {
+      // Installed AND loaded still isn't "working". A timer can fire on schedule and fail every
+      // run, which is exactly what happened here: `code fetch` failed on four remotes for a
+      // month and said so only in its own log. Since nobody watches a scheduled job by
+      // definition, a non-zero last exit has to reach the drift report like any other drift —
+      // and from there the `[boom] notify` desktop notification.
+      const last = agentLastExit(label, ctx.env);
+      if (last !== undefined && last !== 0) {
+        report.warn(`${what} timer last run failed (exit ${last}) — see ${displayPath(log, ctx.env)}`);
+      } else {
+        report.skip(`${what} every ${sched.every}`);
+      }
+    }
     return;
   }
   // sync (non-dry)
