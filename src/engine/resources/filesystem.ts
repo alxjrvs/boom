@@ -292,6 +292,21 @@ async function copyOne(entry: File, place: Placement, ctx: ReconcileCtx): Promis
       // verb contract (verify already calls this state "copy current") and churns a fresh
       // retained backup of an unchanged file each sync.
       if (await current()) {
+        // Content is current — but the mode still has to be enforced, or a copy whose
+        // permissions drifted looser is never repaired: this gate returns before the chmod
+        // below, so `--fix` is a no-op and `verify` (which calls the same `current()`) is
+        // blind. A copied `~/.ssh/config` left 0777 stays 0777 forever. Re-chmod only —
+        // no rewrite, no journal churn, no fresh backup — the branch `secret` already takes.
+        const want = await wantMode();
+        if (((await stat(dst)).mode & 0o777) !== want) {
+          if (ctx.dryRun) {
+            report.plan(`${disp} mode would be set to 0${want.toString(8)}`);
+            return;
+          }
+          await chmod(dst, want);
+          report.ok(`${disp} mode set to 0${want.toString(8)}`);
+          return;
+        }
         report.skip(`${disp} already up to date`);
         return;
       }
@@ -318,8 +333,16 @@ async function copyOne(entry: File, place: Placement, ctx: ReconcileCtx): Promis
         report.fail(`${disp} ← ${srcRel} (source missing)`);
         return;
       }
-      if (await current()) report.skip(`${disp} (copy current)`);
-      else report.warn(`${disp} copy missing/stale`);
+      if (!(await current())) {
+        report.warn(`${disp} copy missing/stale`);
+        return;
+      }
+      // Content current — check mode too, so verify reports the drift sync now repairs.
+      // `link`'s verify has always done this (see the mode branch above); copy was the outlier.
+      const want = await wantMode();
+      const perms = (await stat(dst)).mode & 0o777;
+      if (perms !== want) report.warn(`${disp} mode ${perms.toString(8)}, expected ${want.toString(8)}`);
+      else report.skip(`${disp} (copy current)`);
       return;
     }
     case "uninstall": {
