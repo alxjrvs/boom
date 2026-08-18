@@ -3,7 +3,7 @@
 // darwin-only and exercised via the resource tests). The upgrade-newer compare used to live here
 // too; it moved into test/version-compare.test.ts with the comparator it now exercises.
 import { expect, test } from "bun:test";
-import { parseInterval, plistLabel, renderAgentPlist } from "../src/lib/launchd.ts";
+import { agentLastExit, parseInterval, plistLabel, renderAgentPlist } from "../src/lib/launchd.ts";
 
 test("parseInterval normalizes s/m/h and bare seconds", () => {
   expect(parseInterval("30s")).toBe(30);
@@ -73,6 +73,12 @@ test("renderAgentPlist XML-escapes environment keys and values", () => {
   });
   expect(p).toContain("<key>A&amp;B</key>");
   expect(p).toContain("<string>&lt;v&gt;</string>");
+});
+
+test("agentLastExit parses launchctl's LastExitStatus, and is undefined when unloaded", () => {
+  // A stripped env has no launchctl (and no such agent), which must read as "unknown" rather
+  // than as "healthy" — the failure mode this guards against is a failing timer looking fine.
+  expect(agentLastExit("com.boomtube.definitely-not-loaded", { PATH: "/nonexistent" })).toBeUndefined();
 });
 
 test("plistLabel extracts the Label, or undefined when absent", () => {
