@@ -13,7 +13,7 @@ import { loadConfig, NO_CONFIG_REPO_MSG, readConfigBreadcrumb, resolveConfigDir 
 import { detectOs } from "../config/profile.ts";
 import type { Boomfile } from "../config/schema.ts";
 import type { BoomContext } from "../context.ts";
-import { AGENT_KEYCHAIN_ITEM, agentTokenPresent } from "../lib/keychain.ts";
+import { agentKeychainItem, agentTokenPresent } from "../lib/keychain.ts";
 import { hasCommand } from "../lib/proc.ts";
 import { bandsReporter } from "../lib/reporter.ts";
 import { VERSION } from "../lib/version.ts";
@@ -116,8 +116,8 @@ export async function boomStatus(ctx: BoomContext, json = false): Promise<number
     // token is a note, not a warning — an interactive `op` session may still resolve refs. The
     // darwin gate stays here: this file composes what other modules own and introduces no state,
     // so the probe is lib/keychain.ts's and the policy is status's.
-    if (detectOs(ctx.env) === "darwin" && !agentTokenPresent()) {
-      report.note(`${AGENT_KEYCHAIN_ITEM} keychain token missing (agent secret path)`);
+    if (detectOs(ctx.env) === "darwin" && !agentTokenPresent(ctx.env)) {
+      report.note(`${agentKeychainItem(ctx.env)} keychain token missing (agent secret path)`);
     }
   }
 

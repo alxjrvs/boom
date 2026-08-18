@@ -46,12 +46,25 @@ export async function requireCodeDir(ctx: BoomContext): Promise<string | undefin
   return root;
 }
 
-// Grouping folders to never crawl into: `Legacy` archives retired projects (often
-// with stray `git init` shells), so its contents shouldn't surface in the agent
-// picker. Matched case-insensitively against a directory's basename.
-const SKIP_DIRS = new Set(["legacy"]);
+// Grouping folders to never crawl into — archived/retired project shelves, whose contents
+// shouldn't surface in the agent picker. `legacy` is the default because it is a common name
+// for one, but it is one person's directory convention, so `BOOM_CODE_SKIP_DIRS` (a
+// comma-separated list) replaces it; an empty value crawls everything. Matched
+// case-insensitively against a directory's basename.
+const DEFAULT_SKIP_DIRS = "legacy";
 
-export async function findRepos(root: string): Promise<string[]> {
+function skipDirs(env: Env): Set<string> {
+  const raw = env.BOOM_CODE_SKIP_DIRS ?? DEFAULT_SKIP_DIRS;
+  return new Set(
+    raw
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
+  );
+}
+
+export async function findRepos(root: string, env: Env = {}): Promise<string[]> {
+  const SKIP_DIRS = skipDirs(env);
   const out: string[] = [];
   const walk = async (dir: string, depth: number): Promise<void> => {
     if (depth > 3) return;
@@ -126,8 +139,8 @@ export async function pruneFarmProject(env: Env, farm: string): Promise<boolean>
 // Map each repo to its basename; the `@<repo>` key is the basename, so two repos
 // that share one (across orgs) collide. findRepos() returns sorted paths, so
 // first-wins is deterministic; the loser is reported, not silently dropped.
-export async function planAgentsFarm(root: string): Promise<FarmPlan> {
-  const repos = await findRepos(root);
+export async function planAgentsFarm(root: string, env: Env = {}): Promise<FarmPlan> {
+  const repos = await findRepos(root, env);
   const links: FarmLink[] = [];
   const collisions: FarmLink[] = [];
   const taken = new Set<string>();

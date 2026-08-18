@@ -61,7 +61,7 @@ const claudeCommand = buildCommand<{ dryRun?: boolean }, [], BoomContext>({
   async func(flags) {
     const root = await requireCodeDir(this);
     if (!root) return;
-    const { links, collisions } = await planAgentsFarm(root);
+    const { links, collisions } = await planAgentsFarm(root, this.env);
     const farm = agentsFarmDir(this.env);
     const report = bandsReporter(this.process, this.env, "code", { setup: "OPENING THE PORTAL…" });
     report.header(`agent farm (${root} → ${farm})`);
@@ -102,7 +102,7 @@ const cmuxCommand = buildCommand<{ dryRun?: boolean }, [], BoomContext>({
   async func(flags) {
     const root = await requireCodeDir(this);
     if (!root) return;
-    const repos = await findRepos(root);
+    const repos = await findRepos(root, this.env);
     // verbose (stream, no krackle): the loop spawns `cmux open` with inherited stdout while the
     // band is open, so a dense-mode krackle line would be corrupted by the child's output when
     // closeBand's \r rewrite fires. Streaming avoids the in-place rewrite entirely.
@@ -142,7 +142,7 @@ const fetchCommand = buildCommand<{ dryRun?: boolean }, [], BoomContext>({
   async func(flags) {
     const root = await requireCodeDir(this);
     if (!root) return;
-    const repos = await findRepos(root);
+    const repos = await findRepos(root, this.env);
     const report = bandsReporter(this.process, this.env, "code fetch", {
       setup: "FANNING OUT ACROSS THE CODE DIR…",
     });
@@ -218,7 +218,7 @@ const reapCommand = buildCommand<
   async func(flags) {
     const root = await requireCodeDir(this);
     if (!root) return;
-    const repos = await findRepos(root);
+    const repos = await findRepos(root, this.env);
     const report = bandsReporter(this.process, this.env, "code reap", {
       setup: "SWEEPING AGENT WORKTREES…",
     });
