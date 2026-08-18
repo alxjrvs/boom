@@ -191,17 +191,31 @@ export async function doctor(
   // "is boom set up to do its job" — warned about a 1Password service-account item they had
   // never heard of, and told them to run `op-agent provision`, which boom neither ships nor
   // installs. A false positive on first run with an unactionable remedy.
-  const opSecrets = repo ? await countOpSecrets(repo) : 0;
-  if (detectOs(ctx.env) === "darwin" && opSecrets > 0) {
+  if (detectOs(ctx.env) === "darwin") {
     const item = agentKeychainItem(ctx.env);
-    report.header("1Password agent");
-    if (agentTokenPresent(ctx.env)) report.ok(`${item} service-account token present in keychain`);
-    else
-      report.warn(
-        `${item} keychain item missing — ${opSecrets} op:// secret(s) declared. Add the ` +
-          `service-account token to the login keychain under that name, or set ` +
-          `BOOM_OP_KEYCHAIN_ITEM to the item you use.`,
-      );
+    // Two independent reasons to report, because `secret` resources are not the only way to use
+    // this token. It is equally the backing for `headersHelper`, `*_COMMAND` resolvers and hook
+    // scripts that shell out to `op` — none of which appear in the boomfile as a `secret`.
+    //
+    // Gating solely on declared secrets (as this did) silenced the check completely for a config
+    // that resolves every credential at runtime and declares zero — which is the setup most
+    // likely to depend on the item, and exactly the case that regressed. Presence is the honest
+    // second signal: if the item is there, something put it there, so confirm it.
+    const present = agentTokenPresent(ctx.env);
+    const opSecrets = repo ? await countOpSecrets(repo) : 0;
+    if (present || opSecrets > 0) {
+      report.header("1Password agent");
+      if (present) report.ok(`${item} service-account token present in keychain`);
+      else
+        report.warn(
+          `${item} keychain item missing — ${opSecrets} op:// secret(s) declared. Add the ` +
+            `service-account token to the login keychain under that name, or set ` +
+            `BOOM_OP_KEYCHAIN_ITEM to the item you use.`,
+        );
+    }
+    // Neither present nor needed → stay silent. That is the case this gate was narrowed for:
+    // a new user on macOS with no op-backed anything should not be told to provision a
+    // 1Password service account they have never heard of.
   }
 
   report.header("State");
