@@ -3,7 +3,7 @@
 import { rm, rmdir } from "node:fs/promises";
 import { detectOs } from "../config/profile.ts";
 import type { BoomContext } from "../context.ts";
-import { displayPath, restoreFrom } from "../lib/fs.ts";
+import { displayPath, pathExists, restoreFrom } from "../lib/fs.ts";
 import { acquireLock } from "../lib/lock.ts";
 import { captureArgv, cleanEnv } from "../lib/proc.ts";
 import { bandsReporter, type Reporter } from "../lib/reporter.ts";
@@ -167,6 +167,43 @@ type Run = NonNullable<Awaited<ReturnType<typeof readRun>>>;
 // single-run rollback and the multi-run `--to <checkpoint>` rewind, so both undo identically.
 async function reverseRun(ctx: BoomContext, run: Run, report: Reporter, dryRun: boolean): Promise<void> {
   const reversed: string[] = [];
+
+  // Orphaned intents first: an intent with no `done` is the mutation the run died *during*, so
+  // it is the newest thing that happened and reverses ahead of everything below. Its planned
+  // token was written before the displace, which is what makes it recoverable at all — the
+  // original is sitting in the backup tree at exactly the path the row names.
+  //
+  // Reported separately from a clean reversal, and never silently: an operator whose sync was
+  // killed needs to know a half-applied destination was found, not just that rollback exited 0.
+  for (const rec of [...run.orphans].reverse()) {
+    const disp = displayPath(rec.dst, ctx.env);
+    if (dryRun) {
+      report.plan(`${undoPreview(rec.undo, disp)} (interrupted mid-write)`);
+      continue;
+    }
+    try {
+      if (rec.undo.kind === "restore") {
+        // The backup only exists if the crash landed after the displace. Before it, there is
+        // nothing to put back and `dst` was never touched — a no-op worth stating, not a failure.
+        if (await pathExists(rec.undo.from)) {
+          await restoreFrom(rec.undo.from, rec.dst);
+          report.warn(`restored ${disp} (interrupted mid-write)`);
+          reversed.push(rec.dst);
+        } else {
+          report.note(`${disp} was not modified before the interruption — nothing to restore`);
+        }
+      } else {
+        // Planned undo was "remove what we create". If the write never happened this is a
+        // harmless no-op; if it half-happened this is exactly the cleanup.
+        await rm(rec.dst, { recursive: true, force: true });
+        report.warn(`removed ${disp} (interrupted mid-write)`);
+        reversed.push(rec.dst);
+      }
+    } catch (e) {
+      report.fail(`${disp}: ${(e as Error).message}`);
+    }
+  }
+
   for (const rec of [...run.done].reverse()) {
     const disp = displayPath(rec.dst, ctx.env);
     // A destructive replay — preview it under --dry-run so an operator can see exactly what

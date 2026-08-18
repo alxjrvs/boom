@@ -19,7 +19,7 @@ import { Journal, listRuns, newRunId, readRun } from "../src/engine/journal.ts";
 import { reconcile } from "../src/engine/reconcile.ts";
 import { listRollbacks, rollback } from "../src/engine/rollback.ts";
 import { readManifest } from "../src/engine/state.ts";
-import { linkTarget, pathExists, stat } from "../src/lib/fs.ts";
+import { backupTo, linkTarget, pathExists, stat } from "../src/lib/fs.ts";
 import { backupsDir } from "../src/lib/paths.ts";
 
 interface Sandbox {
@@ -643,6 +643,58 @@ test("a hook's journalWrite never displaces outside a mutating sync", async () =
   expect(await readFile(f, "utf8")).toBe("original");
   expect(await reconcile("sync", sb.ctx, { dryRun: true })).toBe(0);
   expect(await readFile(f, "utf8")).toBe("original");
+});
+
+test("an interrupted write is recoverable — rollback restores an orphaned intent", async () => {
+  // The crash window: `displace` has already moved the original into the backup tree, but the
+  // `done` row naming where it went was never written. Every reader filtered `t = 'done'`, so
+  // the run reported 0 ops and rollback restored nothing while exiting clean — the original was
+  // recoverable only by hand-spelunking the backup dir.
+  const sb = await sandbox(`[[section]]\nname = "S"\ncopy = [{ src = "cfg", dst = "~/.cfg" }]\n`);
+  await writeFile(join(sb.repo, "cfg"), "from-repo\n");
+  const dst = join(sb.home, ".cfg");
+  await writeFile(dst, "the user's original\n");
+
+  // Simulate a run killed between the displace and the `done`.
+  const runId = newRunId();
+  const j = new Journal(sb.env, runId);
+  const backupRoot = join(backupsDir(sb.env), runId);
+  await j.intent("copy", dst, { kind: "restore", from: join(backupRoot, dst) });
+  await backupTo(dst, backupRoot); // original now in the backup tree
+  j.close(); // ...and the process dies here, before done()
+
+  expect(await pathExists(dst)).toBe(false);
+
+  // The half-applied op is visible rather than counted as nothing.
+  const run = await readRun(sb.env);
+  expect(run?.orphans.length).toBe(1);
+  expect((await listRuns(sb.env))[0]?.ops).toBe(1);
+
+  expect(await rollback(sb.ctx)).toBe(0);
+  expect(await readFile(dst, "utf8")).toBe("the user's original\n");
+  expect(sb.out()).toContain("interrupted mid-write");
+});
+
+test("a second write to the same dst is not masked by the first write's done row", async () => {
+  // The completing `done` has to come *after* the intent. Correlating on (op, dst) alone let the
+  // FIRST write's done row mask a second, genuinely orphaned intent for the same destination —
+  // so the interrupted mutation went unreported again, defeating the point of tracking orphans.
+  const sb = await sandbox(`[[section]]\nname = "S"\n`);
+  const dst = join(sb.home, ".twice");
+  const runId = newRunId();
+  const j = new Journal(sb.env, runId);
+  const backupRoot = join(backupsDir(sb.env), runId);
+
+  // First write completes normally.
+  await j.intent("copy", dst, { kind: "remove" });
+  await j.done("copy", dst, { kind: "remove" });
+  // Second write to the SAME dst is interrupted after its intent.
+  await j.intent("copy", dst, { kind: "restore", from: join(backupRoot, dst) });
+  j.close();
+
+  const run = await readRun(sb.env);
+  expect(run?.orphans.length).toBe(1); // was 0 — masked by the earlier done
+  expect((await listRuns(sb.env))[0]?.ops).toBe(2); // 1 done + 1 orphan
 });
 
 test("uninstall is journaled and reversible — rollback puts the removed copy back", async () => {
