@@ -100,7 +100,9 @@ reconciled from) without cd-ing into the cache dir it lives in:
 
 ```sh
 boom source diff          # show uncommitted local changes in the config repo
-boom source push          # commit local changes and push them upstream
+boom source push          # commit local changes and open a PR for them
+boom source push --merge  # …and let GitHub land it once its checks pass
+boom source push --direct # …or skip the PR and push the branch straight up
 boom source reset         # discard local changes, reset to origin
 boom source reset --force # …including commits no remote has (refused otherwise)
 ```

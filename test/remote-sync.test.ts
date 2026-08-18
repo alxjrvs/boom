@@ -11,6 +11,7 @@ import { linkRemoteConfigRepo, parseRemoteRef } from "../src/config/remote.ts";
 import type { BoomContext } from "../src/context.ts";
 import { diffConfigRepo } from "../src/engine/diff.ts";
 import { doctor } from "../src/engine/doctor.ts";
+import { branchNameFor, githubSlug } from "../src/engine/pr.ts";
 import { pushConfigRepo } from "../src/engine/push.ts";
 import { reconcile } from "../src/engine/reconcile.ts";
 import { resetConfigRepo } from "../src/engine/reset.ts";
@@ -541,7 +542,7 @@ test("push commits local changes with the given message, then pushes them", asyn
   await writeFile(join(repo, "scratch.txt"), "local addition\n");
 
   const { ctx, out } = ctxFor(env, repo);
-  const rc = await pushConfigRepo(ctx, "my message");
+  const rc = await pushConfigRepo(ctx, { message: "my message" });
   expect(rc).toBe(0);
   expect(out()).toContain("committed (my message)");
   expect(out()).toContain("pushed");
@@ -569,6 +570,173 @@ test("push on a clean tree commits nothing and still pushes", async () => {
 test("push fails cleanly when no remote config is linked", async () => {
   const { ctx } = ctxFor({ XDG_STATE_HOME: await base(), NO_COLOR: "1" }, await base());
   expect(await pushConfigRepo(ctx)).toBe(1);
+});
+
+// ---- push: PR mode ----------------------------------------------------------
+
+test("githubSlug recognizes every spelling git hands back, and nothing else", () => {
+  expect(githubSlug("git@github.com:alxjrvs/dotFiles.git")).toBe("alxjrvs/dotFiles");
+  expect(githubSlug("https://github.com/alxjrvs/dotFiles.git")).toBe("alxjrvs/dotFiles");
+  expect(githubSlug("https://github.com/alxjrvs/dotFiles")).toBe("alxjrvs/dotFiles");
+  expect(githubSlug("ssh://git@github.com/alxjrvs/dotFiles.git")).toBe("alxjrvs/dotFiles");
+  // Not GitHub, and not a clone URL: both must fall back to a direct push rather than
+  // guessing a slug and handing `gh` something it will reject.
+  expect(githubSlug("git@gitlab.com:alxjrvs/dotFiles.git")).toBeUndefined();
+  expect(githubSlug("/tmp/some/local/bare.git")).toBeUndefined();
+  expect(githubSlug("https://github.com/alxjrvs/dotFiles/tree/main")).toBeUndefined();
+});
+
+test("branchNameFor derives a stable branch from the commit, not the clock", () => {
+  expect(branchNameFor("chore(pin): bump mise.lock", "abcdef1234567")).toBe(
+    "boom/chore-pin-bump-mise-lock-abcdef1",
+  );
+  // Same commit, same branch — that is what makes a retry after a failed `gh` call reuse
+  // the ref it already pushed instead of opening a second near-identical PR.
+  expect(branchNameFor("x", "1111111aaaa")).toBe(branchNameFor("x", "1111111bbbb"));
+  // A subject that slugifies to nothing still yields a legal ref.
+  expect(branchNameFor("!!! ???", "abcdef1234567")).toBe("boom/config-abcdef1");
+});
+
+// A `gh` stand-in: records the argv it was called with, and prints a PR URL the way the
+// real one does. Lets PR mode be exercised end to end with no network and no GitHub auth.
+async function fakeGh(dir: string, opts: { readonly mergeFails?: boolean } = {}): Promise<string> {
+  const bin = join(dir, "bin");
+  await mkdir(bin, { recursive: true });
+  const log = join(dir, "gh-calls.txt");
+  await writeFile(
+    join(bin, "gh"),
+    [
+      "#!/bin/sh",
+      `printf '%s\\n' "$*" >> ${JSON.stringify(log)}`,
+      opts.mergeFails ? 'case "$2" in merge) echo "auto-merge is not enabled" >&2; exit 1;; esac' : "",
+      "echo https://github.com/alxjrvs/dotFiles/pull/42",
+    ].join("\n"),
+    { mode: 0o755 },
+  );
+  return bin;
+}
+
+// Point the clone at a GitHub-looking origin while every actual transfer still goes to the
+// local bare repo, so PR mode can be exercised end to end offline.
+//
+// It must be `pushInsteadOf`, not `insteadOf`: `git remote get-url` *does* apply a plain
+// insteadOf rewrite, so that spelling hands the local path straight back and the disguise
+// erases itself. pushInsteadOf rewrites only the push, which is all boom does here, and
+// leaves the GitHub URL visible to the code under test.
+function disguiseAsGitHub(repo: string, bare: string): void {
+  git(repo, "remote", "set-url", "origin", "https://github.com/alxjrvs/dotFiles.git");
+  git(repo, "config", `url.${bare}.pushInsteadOf`, "https://github.com/alxjrvs/dotFiles.git");
+}
+
+async function prFixture(opts: { readonly mergeFails?: boolean } = {}) {
+  const bare = await bareOriginFixture();
+  const home = await base();
+  const env = {
+    XDG_STATE_HOME: home,
+    NO_COLOR: "1",
+    PATH: `${await fakeGh(home, opts)}:${process.env.PATH}`,
+  };
+  const repo = await linkRemoteConfigRepo(env, bare);
+  configureIdentity(repo);
+  disguiseAsGitHub(repo, bare);
+  return { bare, repo, env, calls: () => join(home, "gh-calls.txt") };
+}
+
+test("push opens a pull request instead of pushing the default branch directly", async () => {
+  const { bare, repo, env, calls } = await prFixture();
+  await writeFile(join(repo, "scratch.txt"), "local addition\n");
+
+  const { ctx, out } = ctxFor(env, repo);
+  expect(await pushConfigRepo(ctx, { message: "chore: add scratch" })).toBe(0);
+
+  // The branch is published and the PR is open...
+  expect(out()).toContain("published boom/chore-add-scratch-");
+  expect(out()).toContain("https://github.com/alxjrvs/dotFiles/pull/42");
+  const gh = await readFile(calls(), "utf8");
+  expect(gh).toContain("pr create --head boom/chore-add-scratch-");
+  expect(gh).toContain("--base main");
+  expect(gh).toContain("--title chore: add scratch");
+
+  // ...the ref really landed on the origin, under boom/, and NOT on main.
+  const refs = captureArgv(["git", "ls-remote", "--heads", bare], {}).stdout;
+  expect(refs).toContain("refs/heads/boom/chore-add-scratch-");
+  expect(captureArgv(["git", "-C", bare, "rev-parse", "main"], {}).stdout).not.toBe(
+    captureArgv(["git", "-C", repo, "rev-parse", "HEAD"], {}).stdout,
+  );
+});
+
+test("push in PR mode never moves the clone off its branch", async () => {
+  // The clone's working tree is what every dotfile symlink points at. Checking out the PR
+  // branch would swap the machine's live config out from under the user until it merged,
+  // so the commit stays put and only the ref is published.
+  const { repo, env } = await prFixture();
+  await writeFile(join(repo, "scratch.txt"), "local addition\n");
+
+  const before = captureArgv(["git", "-C", repo, "rev-parse", "--abbrev-ref", "HEAD"], {}).stdout;
+  expect(await pushConfigRepo(ctxFor(env, repo).ctx, { message: "chore: add scratch" })).toBe(0);
+
+  expect(captureArgv(["git", "-C", repo, "rev-parse", "--abbrev-ref", "HEAD"], {}).stdout).toBe(before);
+  expect(before).toBe("main");
+  expect(await readFile(join(repo, "scratch.txt"), "utf8")).toBe("local addition\n");
+  expect(captureArgv(["git", "-C", repo, "status", "--porcelain"], {}).stdout).toBe("");
+});
+
+test("push --direct still pushes straight to the branch on a GitHub remote", async () => {
+  const { bare, repo, env, calls } = await prFixture();
+  await writeFile(join(repo, "scratch.txt"), "local addition\n");
+
+  const { ctx, out } = ctxFor(env, repo);
+  expect(await pushConfigRepo(ctx, { message: "chore: direct", direct: true })).toBe(0);
+  expect(out()).toContain("pushed");
+  expect(await pathExists(calls())).toBe(false); // gh never invoked
+  expect(captureArgv(["git", "ls-remote", "--heads", bare], {}).stdout).not.toContain("refs/heads/boom/");
+});
+
+test("push --merge asks GitHub to land the PR once checks pass", async () => {
+  const { repo, env, calls } = await prFixture();
+  await writeFile(join(repo, "scratch.txt"), "local addition\n");
+
+  const { ctx, out } = ctxFor(env, repo);
+  expect(await pushConfigRepo(ctx, { message: "chore: mergeable", merge: true })).toBe(0);
+  expect(await readFile(calls(), "utf8")).toContain(
+    "pr merge https://github.com/alxjrvs/dotFiles/pull/42 --auto --squash",
+  );
+  expect(out()).toContain("auto-merge on");
+});
+
+test("push --merge warns rather than fails when the repo has auto-merge off", async () => {
+  // The PR is open and correct; auto-merge being unavailable is a repo setting, not a
+  // boom failure, so the run stays green and says why.
+  const { repo, env } = await prFixture({ mergeFails: true });
+  await writeFile(join(repo, "scratch.txt"), "local addition\n");
+
+  const { ctx, out } = ctxFor(env, repo);
+  expect(await pushConfigRepo(ctx, { message: "chore: no auto", merge: true })).toBe(0);
+  expect(out()).toContain("auto-merge unavailable");
+});
+
+test("push in PR mode says nothing to push when the clone already matches origin", async () => {
+  const { repo, env, calls } = await prFixture();
+  const { ctx, out } = ctxFor(env, repo);
+  expect(await pushConfigRepo(ctx)).toBe(0);
+  expect(out()).toContain("nothing to push");
+  // No empty branch published, and `gh` never asked to open a PR with no commits in it.
+  expect(await pathExists(calls())).toBe(false);
+});
+
+test("push explains itself when it falls back to a direct push", async () => {
+  // A non-GitHub origin (here, the local bare fixture) has no PR to open. Pushing directly
+  // is right, but silence would make the default look inconsistent — so it says why.
+  const bare = await bareOriginFixture();
+  const env = { XDG_STATE_HOME: await base(), NO_COLOR: "1" };
+  const repo = await linkRemoteConfigRepo(env, bare);
+  configureIdentity(repo);
+  await writeFile(join(repo, "scratch.txt"), "local addition\n");
+
+  const { ctx, out } = ctxFor(env, repo);
+  expect(await pushConfigRepo(ctx, { message: "chore: local origin" })).toBe(0);
+  expect(out()).toContain("origin is not a GitHub repo");
+  expect(out()).toContain("pushed");
 });
 
 // ---- captureArgv hardening --------------------------------------------------
