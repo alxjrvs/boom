@@ -14,8 +14,8 @@
 //     so real shell config survives.
 import { dirname, join } from "node:path";
 import type { Tmpl } from "../../config/schema.ts";
-import { chmod, displayPath, expandTilde, mkdir, pathExists, rm, stat } from "../../lib/fs.ts";
-import { displace, type UndoToken } from "../journal.ts";
+import { chmod, displayPath, expandTilde, mkdir, pathExists, stat } from "../../lib/fs.ts";
+import { displace, journalRemove, type UndoToken } from "../journal.ts";
 import type { ReconcileCtx } from "../types.ts";
 import { renderTemplate } from "./filesystem.ts";
 
@@ -139,7 +139,7 @@ export async function reconcileTmpl(entry: Tmpl, ctx: ReconcileCtx): Promise<voi
       if (content === undefined || (await Bun.file(dst).text()) !== content) return;
       if (ctx.dryRun) report.note(`would remove ${disp}`);
       else {
-        await rm(dst, { force: true });
+        await journalRemove("tmpl-rm", dst, ctx);
         report.ok(`${disp} removed`);
       }
       return;

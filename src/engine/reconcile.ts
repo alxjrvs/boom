@@ -194,7 +194,14 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
   let journal: Journal | undefined;
   try {
     let backupRoot: string | undefined;
-    if (mutating) {
+    // `writes`, not `mutating`: uninstall is the most destructive verb boom has and it used to
+    // run with NO journal and NO backup tree, so every removal was unrecorded and permanent —
+    // `rollback` afterwards read the previous *sync's* run and could not name, let alone undo,
+    // anything the teardown deleted. Nothing about the transaction machinery is sync-specific;
+    // it was only ever gated that way. Resources that already journal their removals (systemd's
+    // uninstall arm writes intent/displace/done verbatim) start working the moment the envelope
+    // exists — their `ctx.journal?.` calls were silently no-oping.
+    if (writes) {
       let runId = newRunId();
       // --resume continues INTO the interrupted run — reuse its id and backup dir — rather
       // than opening a fresh run. A fresh run would leave the interrupted pass's displaced
@@ -204,7 +211,10 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
       // Re-application itself needs no journal-based skip list: reconcile is naturally
       // idempotent (an already-correct link/copy is skipped by the reality checks in
       // filesystem.ts), so resume just re-runs and only touches what isn't already in place.
-      if (opts.resume) {
+      // Sync only: `--resume` continues an interrupted *sync*. An uninstall must never adopt a
+      // prior sync's run id, or its removals would be appended to that run's rows and rollback
+      // would replay a single run that both created and destroyed the same destinations.
+      if (opts.resume && verb === "sync") {
         const prior = await readRun(ctx.env);
         if (prior && !prior.committed) runId = prior.runId;
       }
@@ -332,7 +342,7 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
     // can; deciding above them journals a run whose self-wiring failed as clean, which is the
     // precise mislabelling `committed` exists to prevent, and it is also what `rollback --list`
     // and `--resume` read to find an interrupted run.
-    if (mutating && report.failures === 0) journal?.markCommitted();
+    if (writes && report.failures === 0) journal?.markCommitted();
 
     return finish();
   } finally {

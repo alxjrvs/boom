@@ -19,10 +19,9 @@ import {
   linkTarget,
   mkdir,
   pathExists,
-  rm,
   stat,
 } from "../../lib/fs.ts";
-import { displace, type UndoToken } from "../journal.ts";
+import { displace, journalRemove, type UndoToken } from "../journal.ts";
 import type { LinkMode, ReconcileCtx } from "../types.ts";
 
 // A resolved src→dst pair. `srcRel` (the repo-relative path) is carried only for legible
@@ -240,7 +239,7 @@ async function linkOne(entry: File, place: Placement, ctx: ReconcileCtx): Promis
       if ((await linkTarget(dst)) !== src) return;
       if (ctx.dryRun) report.note(`would remove ${disp}`);
       else {
-        await rm(dst, { force: true });
+        await journalRemove("link-rm", dst, ctx);
         report.ok(`${disp} removed`);
       }
       return;
@@ -350,7 +349,7 @@ async function copyOne(entry: File, place: Placement, ctx: ReconcileCtx): Promis
       if (!(await current())) return;
       if (ctx.dryRun) report.note(`would remove ${disp}`);
       else {
-        await rm(dst, { force: true });
+        await journalRemove("copy-rm", dst, ctx);
         report.ok(`${disp} removed`);
       }
       return;

@@ -63,6 +63,28 @@ export async function journalWrite(op: string, file: string, ctx: ReconcileCtx):
   await ctx.journal.done(op, file, undo);
 }
 
+// The uninstall twin of journalWrite, and note the one structural difference: here the displace
+// IS the mutation — nothing is written afterwards — so unlike journalWrite this must still take
+// the file out of the way when no journal is open, or `uninstall` would silently stop removing
+// anything. Same undo-before-mutation ordering, so a crash mid-teardown leaves every already-
+// displaced original with a row that names it.
+//
+// Callers must gate on `!ctx.dryRun` themselves (a dry run reports and returns before reaching
+// here), which is why this cannot borrow journalWrite's "guard lives in the helper" trick.
+export async function journalRemove(
+  op: string,
+  file: string,
+  ctx: ReconcileCtx,
+  recursive = false,
+): Promise<void> {
+  if (!ctx.journal) {
+    await rm(file, { recursive, force: true });
+    return;
+  }
+  await ctx.journal.intent(op, file);
+  await ctx.journal.done(op, file, await displace(file, ctx.backupRoot, recursive));
+}
+
 interface DoneRecord {
   op: string;
   dst: string;

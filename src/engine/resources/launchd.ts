@@ -7,8 +7,9 @@
 import { basename, join } from "node:path";
 import { detectOs } from "../../config/profile.ts";
 import type { Launchd } from "../../config/schema.ts";
-import { displayPath, expandTilde, linkTarget, pathExists, rm } from "../../lib/fs.ts";
+import { displayPath, expandTilde, linkTarget, pathExists } from "../../lib/fs.ts";
 import { agentLoaded, launchAgentsDir, plistLabel, reloadAgent, unloadAgent } from "../../lib/launchd.ts";
+import { journalRemove } from "../journal.ts";
 import type { ReconcileCtx } from "../types.ts";
 import { applyLink } from "./filesystem.ts";
 
@@ -71,7 +72,7 @@ export async function reconcileLaunchd(entry: Launchd, ctx: ReconcileCtx): Promi
         return;
       }
       unloadAgent(dst, ctx.env);
-      await rm(dst, { force: true });
+      await journalRemove("launchd-rm", dst, ctx);
       report.ok(`${disp} unloaded + removed`);
       return;
     }

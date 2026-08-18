@@ -15,7 +15,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import type { BoomContext } from "../src/context.ts";
-import { Journal, listRuns, newRunId } from "../src/engine/journal.ts";
+import { Journal, listRuns, newRunId, readRun } from "../src/engine/journal.ts";
 import { reconcile } from "../src/engine/reconcile.ts";
 import { listRollbacks, rollback } from "../src/engine/rollback.ts";
 import { readManifest } from "../src/engine/state.ts";
@@ -643,4 +643,38 @@ test("a hook's journalWrite never displaces outside a mutating sync", async () =
   expect(await readFile(f, "utf8")).toBe("original");
   expect(await reconcile("sync", sb.ctx, { dryRun: true })).toBe(0);
   expect(await readFile(f, "utf8")).toBe("original");
+});
+
+test("uninstall is journaled and reversible — rollback puts the removed copy back", async () => {
+  // uninstall ran with no journal and no backup tree, so every removal was permanent: rollback
+  // afterwards read the previous *sync's* run and could neither name nor undo the teardown.
+  const sb = await sandbox(`[[section]]\nname = "S"\ncopy = [{ src = "cfg", dst = "~/.cfg" }]\n`);
+  await writeFile(join(sb.repo, "cfg"), "k=v\n");
+  const dst = join(sb.home, ".cfg");
+
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  expect(await pathExists(dst)).toBe(true);
+
+  expect(await reconcile("uninstall", sb.ctx, {})).toBe(0);
+  expect(await pathExists(dst)).toBe(false);
+
+  // The teardown is its own run, carrying a restore token for what it displaced.
+  const run = await readRun(sb.env);
+  expect(run?.done.some((d) => d.dst === dst && d.undo.kind === "restore")).toBe(true);
+
+  expect(await rollback(sb.ctx)).toBe(0);
+  expect(await pathExists(dst)).toBe(true); // came back out of the backup tree
+  expect(await readFile(dst, "utf8")).toBe("k=v\n");
+});
+
+test("uninstall opens its own run rather than adopting an interrupted sync's under --resume", async () => {
+  // A shared run id would let rollback replay one run that both created and destroyed the same
+  // destination — not a state the machine was ever in.
+  const sb = await sandbox(`[[section]]\nname = "S"\ncopy = [{ src = "cfg", dst = "~/.cfg" }]\n`);
+  await writeFile(join(sb.repo, "cfg"), "v\n");
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  const syncRun = (await readRun(sb.env))?.runId;
+
+  expect(await reconcile("uninstall", sb.ctx, { resume: true })).toBe(0);
+  expect((await readRun(sb.env))?.runId).not.toBe(syncRun);
 });
