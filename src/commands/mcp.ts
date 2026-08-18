@@ -6,7 +6,8 @@
 // of being parsed as boom's own flags — no pre-Stricli passthrough needed.
 import { buildCommand, buildRouteMap } from "@stricli/core";
 import type { BoomContext } from "../context.ts";
-import { AGENT_KEYCHAIN_ITEM } from "../lib/keychain.ts";
+import { agentKeychainItem } from "../lib/keychain.ts";
+import type { Env } from "../lib/paths.ts";
 import { hasCommand } from "../lib/proc.ts";
 import { str } from "./flags.ts";
 
@@ -24,8 +25,8 @@ const OP_BIN = "op";
 // This is the one `find-generic-password` in boom that is *not* lib/keychain.ts's probe, and it
 // can't be: it is text handed to the MCP client to run later, in another process, so the literal
 // has to survive into the generated argv. Only the item name is shared.
-const AGENT_WRAPPER =
-  `export OP_SERVICE_ACCOUNT_TOKEN="$(security find-generic-password -s ${AGENT_KEYCHAIN_ITEM} -w)"; ` +
+const agentWrapper = (env: Env): string =>
+  `export OP_SERVICE_ACCOUNT_TOKEN="$(security find-generic-password -s ${agentKeychainItem(env)} -w)"; ` +
   `ef="$1"; shift; exec ${OP_BIN} run --env-file="$ef" -- "$@"`;
 
 export interface McpAdd {
@@ -38,9 +39,9 @@ export interface McpAdd {
 
 // Build the `claude mcp add …` argv for a request. The server command is always carried
 // as distinct argv elements (never string-joined), so quoting/spaces survive.
-export function buildMcpAddArgv(p: McpAdd): string[] {
+export function buildMcpAddArgv(p: McpAdd, env: Env = {}): string[] {
   const wrapped = p.agent
-    ? ["sh", "-c", AGENT_WRAPPER, "boom-mcp", p.envFile, ...p.server]
+    ? ["sh", "-c", agentWrapper(env), "boom-mcp", p.envFile, ...p.server]
     : ["op", "run", `--env-file=${p.envFile}`, "--", ...p.server];
   return ["claude", "mcp", "add", p.name, "--scope", p.scope, "--", ...wrapped];
 }

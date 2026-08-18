@@ -10,7 +10,7 @@ import { detectOs } from "../config/profile.ts";
 import type { BoomContext } from "../context.ts";
 import { pathExists } from "../lib/fs.ts";
 import { remoteReachableAsync } from "../lib/git.ts";
-import { AGENT_KEYCHAIN_ITEM, agentTokenPresent } from "../lib/keychain.ts";
+import { agentKeychainItem, agentTokenPresent } from "../lib/keychain.ts";
 import { boomStateDir } from "../lib/paths.ts";
 import { captureArgvAsync, hasCommand, lastLine } from "../lib/proc.ts";
 import { bandsReporter, type Reporter } from "../lib/reporter.ts";
@@ -62,6 +62,21 @@ async function checkSkill(ctx: BoomContext, report: Reporter, fix: boolean): Pro
 // Only the exit code of `op read` is inspected; the resolved plaintext is NEVER logged. Warning
 // tier like verify: an unresolvable ref is "attention" (exit 2), not a hard failure. `template`
 // secrets are noted, not resolved — checking one needs `op inject`, out of scope for an audit.
+// How many declared secrets resolve through 1Password — the `op` backend is either stated
+// outright or inferred from an `op://` ref, matching how backends.ts picks one. Returns 0 for an
+// unreadable boomfile: the keychain check this gates is a nicety, and a config error is already
+// being reported by validateConfigFiles above.
+async function countOpSecrets(repo: string): Promise<number> {
+  try {
+    const config = await loadConfig(repo);
+    return config.section
+      .flatMap((s) => s.secret ?? [])
+      .filter((s) => s.backend === "op" || (!s.backend && (s.ref ?? "").startsWith("op://"))).length;
+  } catch {
+    return 0;
+  }
+}
+
 async function auditSecrets(ctx: BoomContext, report: Reporter): Promise<void> {
   const repo = await resolveConfigDir(ctx.env, ctx.cwd);
   if (!repo) {
@@ -171,10 +186,22 @@ export async function doctor(
     else report.warn(`${cmd} not on PATH — needed for ${why}`);
   }
 
-  if (detectOs(ctx.env) === "darwin") {
+  // Only when the config actually declares an `op`-backed secret. This used to run on every
+  // macOS machine, so a brand-new user's first `boom doctor` — the command whose whole job is
+  // "is boom set up to do its job" — warned about a 1Password service-account item they had
+  // never heard of, and told them to run `op-agent provision`, which boom neither ships nor
+  // installs. A false positive on first run with an unactionable remedy.
+  const opSecrets = repo ? await countOpSecrets(repo) : 0;
+  if (detectOs(ctx.env) === "darwin" && opSecrets > 0) {
+    const item = agentKeychainItem(ctx.env);
     report.header("1Password agent");
-    if (agentTokenPresent()) report.ok(`${AGENT_KEYCHAIN_ITEM} service-account token present in keychain`);
-    else report.warn(`${AGENT_KEYCHAIN_ITEM} keychain item missing — provision it (op-agent provision)`);
+    if (agentTokenPresent(ctx.env)) report.ok(`${item} service-account token present in keychain`);
+    else
+      report.warn(
+        `${item} keychain item missing — ${opSecrets} op:// secret(s) declared. Add the ` +
+          `service-account token to the login keychain under that name, or set ` +
+          `BOOM_OP_KEYCHAIN_ITEM to the item you use.`,
+      );
   }
 
   report.header("State");

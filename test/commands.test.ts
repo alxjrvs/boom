@@ -133,6 +133,20 @@ test("findRepos skips Legacy folders entirely", async () => {
   expect(repos.some((r) => r.includes("Legacy"))).toBe(false);
 });
 
+test("BOOM_CODE_SKIP_DIRS replaces the default skip list", async () => {
+  // `legacy` is one person's directory convention shipped as a default, not a universal truth —
+  // someone whose archive shelf is called `Attic` (or who wants everything crawled) can say so.
+  const root = await base();
+  await mkdir(join(root, "Attic/old/.git"), { recursive: true });
+  await mkdir(join(root, "Legacy/repo/.git"), { recursive: true });
+
+  const custom = await findRepos(root, { BOOM_CODE_SKIP_DIRS: "attic" });
+  expect(custom).toEqual([join(root, "Legacy/repo")]); // Attic skipped, Legacy no longer is
+
+  const all = await findRepos(root, { BOOM_CODE_SKIP_DIRS: "" });
+  expect(all.length).toBe(2); // empty value crawls everything
+});
+
 test("planAgentsFarm flattens nested repos to basenames and flags collisions", async () => {
   const root = await base();
   await mkdir(join(root, "OrgA/widget/.git"), { recursive: true });
