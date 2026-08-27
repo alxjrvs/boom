@@ -31,6 +31,28 @@ test("package.json description uses the current verb names, not the retired ones
   expect(pkg.description).not.toContain("botu");
 });
 
+// The version-lockstep rule in CLAUDE.md has four locations and, until this test, one of them
+// was enforced: `Formula/boom.rb` is WRITTEN by the release workflow and cannot drift, the
+// `version-guard` CI job checks only that package.json moved one semver step from main, and
+// site/index.html was hand-maintained with nothing checking it at all.
+//
+// That gap has a specific failure mode. site/build.ts injects `pkg.version` into the generated
+// doc pages automatically, so after a bump the docs show the new version while the hand-authored
+// landing still shows the old one — split-brain on a single deployed site.
+//
+// Asserted over EVERY semver-shaped string in the file rather than three known line numbers,
+// because the point is to catch an occurrence nobody remembered to update — including a new one.
+// CLAUDE.md says "the footer version"; there are in fact three (JSON-LD `softwareVersion`, the
+// nav badge, the footer), which is exactly why following it by hand left two stale.
+test("every version string on the landing page matches package.json", () => {
+  const html = readFileSync(join(import.meta.dir, "../site/index.html"), "utf8");
+  const found = [...html.matchAll(/\d+\.\d+\.\d+/g)].map((m) => m[0]);
+  // Guard the guard: if the landing ever stops naming a version, this must fail loudly rather
+  // than pass vacuously over an empty list.
+  expect(found.length).toBeGreaterThanOrEqual(3);
+  for (const v of found) expect(v).toBe(pkg.version);
+});
+
 // CLAUDE.md is the first thing a contributor (and every coding agent) reads, so a verb that
 // does not exist there is worse than one in the README: it teaches the wrong model of the
 // reconcile loop before anyone opens the code. The verb set is derived from the `Verb` union

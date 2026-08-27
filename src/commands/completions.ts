@@ -186,5 +186,8 @@ export const completionsCommand = buildCommand<Record<never, never>, [string], B
   func(_flags, shell) {
     if (!isShell(shell)) return new Error(`unknown shell: ${shell} (expected ${SHELLS.join(" | ")})`);
     this.process.stdout.write(completionScript(shell));
+    // Explicit: this `func` returns an Error to signal failure, so "success" is a value here,
+    // not a fallthrough. Required by noImplicitReturns, and it is the clearer reading anyway.
+    return undefined;
   },
 });
