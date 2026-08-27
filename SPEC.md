@@ -423,7 +423,7 @@ repo is a leaf, never descended into. Two subcommands ride that crawl:
 | Concern | Choice |
 |---------|--------|
 | CLI | `@stricli/core` — the only framework that compiles cleanly under `bun build --compile` |
-| Config | TOML via `smol-toml`, validated by `valibot` |
+| Config | TOML via `Bun.TOML.parse` (`lib/toml.ts` re-adds the line number Bun omits), validated by `valibot` |
 | State | `bun:sqlite` (`state.db`: owned-destinations manifest + transaction journal) |
 | Shell / process | `Bun.$` / `Bun.spawnSync`; `node:fs/promises` for symlink/copy/mode |
 | Output | `Bun.color` palette + a tally Reporter (drives exit codes) |
