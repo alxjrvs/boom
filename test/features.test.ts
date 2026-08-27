@@ -123,7 +123,34 @@ test("doctor --secrets: warns cleanly when op is not on PATH", async () => {
     emptyPath: true,
   });
   expect(await doctor(sb.ctx, false, false, false, true)).toBe(2);
-  expect(sb.out()).toContain("op (1Password CLI) not on PATH");
+  // Now reported per-ref rather than as one early return, so the warning names WHICH ref could
+  // not be audited — and the audit continues to any other backend's refs instead of stopping.
+  expect(sb.out()).toContain("op://v/i/f — op (1Password CLI) not installed");
+});
+
+// The audit used to shell `op read <ref>` at every declared ref regardless of scheme, and to
+// return early when `op` was missing. Both are wrong once backends exist: `op read env:TOKEN`
+// exits non-zero, so a perfectly good env secret was reported "unresolvable", and a machine
+// using only env/pass/age audited nothing while printing a 1Password warning. This drives the
+// whole thing with NO `op` on PATH at all — under the old code the run could not audit anything.
+test("doctor --secrets: audits non-op backends, and does not need op to do it", async () => {
+  const sb = await sandbox(
+    '[[section]]\nname = "s"\nsecret = [' +
+      '{ dst = "~/.set", ref = "env:BOOM_TEST_TOKEN" },' +
+      '{ dst = "~/.unset", ref = "env:BOOM_TEST_MISSING" }]\n',
+    { emptyPath: true },
+  );
+  sb.env.BOOM_TEST_TOKEN = "SUPERSECRETVALUE";
+
+  expect(await doctor(sb.ctx, false, false, false, true)).toBe(2);
+  const out = sb.out();
+  expect(out).toContain("env:BOOM_TEST_TOKEN resolves (env)");
+  expect(out).toContain("env:BOOM_TEST_MISSING — unresolvable");
+  expect(out).toContain("$BOOM_TEST_MISSING not set");
+  // The old failure mode, asserted directly: a good env ref must never be called unresolvable.
+  expect(out).not.toContain("env:BOOM_TEST_TOKEN — unresolvable");
+  // And the resolved plaintext still never reaches the report, on this path too.
+  expect(out).not.toContain("SUPERSECRETVALUE");
 });
 
 // --- secret resource schema ---------------------------------------------------------------

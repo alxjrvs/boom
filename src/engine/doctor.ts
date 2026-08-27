@@ -12,9 +12,10 @@ import { pathExists } from "../lib/fs.ts";
 import { remoteReachableAsync } from "../lib/git.ts";
 import { agentKeychainItem, agentTokenPresent } from "../lib/keychain.ts";
 import { boomStateDir } from "../lib/paths.ts";
-import { captureArgvAsync, hasCommand, lastLine } from "../lib/proc.ts";
+import { hasCommand } from "../lib/proc.ts";
 import { bandsReporter, type Reporter } from "../lib/reporter.ts";
 import { VERSION } from "../lib/version.ts";
+import { getBackend } from "./secrets/backends.ts";
 import { skillDoc, skillInstallPath } from "./skill.ts";
 import { validateConfigFiles } from "./validate.ts";
 
@@ -57,11 +58,6 @@ async function checkSkill(ctx: BoomContext, report: Reporter, fix: boolean): Pro
   report.ok(`installed boom skill → ${file} (v${VERSION})`);
 }
 
-// `secretsOnly` (the `--secrets` flag): audit every `op://` reference the boomfile declares —
-// does each still resolve? — so a stale/renamed/missing ref surfaces here rather than mid-sync.
-// Only the exit code of `op read` is inspected; the resolved plaintext is NEVER logged. Warning
-// tier like verify: an unresolvable ref is "attention" (exit 2), not a hard failure. `template`
-// secrets are noted, not resolved — checking one needs `op inject`, out of scope for an audit.
 // How many declared secrets resolve through 1Password — the `op` backend is either stated
 // outright or inferred from an `op://` ref, matching how backends.ts picks one. Returns 0 for an
 // unreadable boomfile: the keychain check this gates is a nicety, and a config error is already
@@ -77,6 +73,13 @@ async function countOpSecrets(repo: string): Promise<number> {
   }
 }
 
+// `secretsOnly` (the `--secrets` flag): audit every secret reference the boomfile declares —
+// does each still resolve? — so a stale/renamed/missing ref surfaces here rather than mid-sync.
+// Every backend, not just 1Password: the audit routes through the same `getBackend` seam the
+// `secret` resource does, so what it reports is what a sync would actually attempt. The resolved
+// plaintext is NEVER logged. Warning tier like verify: an unresolvable ref is "attention"
+// (exit 2), not a hard failure. `template` secrets are noted, not resolved — checking one means
+// running the backend's injector, out of scope for an audit.
 async function auditSecrets(ctx: BoomContext, report: Reporter): Promise<void> {
   const repo = await resolveConfigDir(ctx.env, ctx.cwd);
   if (!repo) {
@@ -87,10 +90,6 @@ async function auditSecrets(ctx: BoomContext, report: Reporter): Promise<void> {
   const secrets = config.section.flatMap((s) => s.secret ?? []);
 
   report.header("Secrets");
-  if (!hasCommand("op", ctx.env)) {
-    report.warn("op (1Password CLI) not on PATH — cannot audit refs");
-    return;
-  }
   const refs = secrets.filter((s) => s.ref);
   const templates = secrets.filter((s) => s.template);
   if (refs.length === 0 && templates.length === 0) {
@@ -99,18 +98,29 @@ async function auditSecrets(ctx: BoomContext, report: Reporter): Promise<void> {
   }
   for (const s of refs) {
     const ref = s.ref as string;
-    // An `op read` is a network round-trip → run it under the spinner. Check only the exit code:
-    // stdout is the secret and is never read here, so no value can leak into the report.
-    const r = await report.spin(`op read ${ref}`, () =>
-      captureArgvAsync(["op", "read", "--no-newline", ref], ctx.env),
-    );
-    if (r.code === 0) report.ok(`${ref} resolves`);
-    else report.warn(`${ref} — unresolvable (${lastLine(r.stderr) || "op read failed"})`);
+    // Dispatch through the same seam the `secret` resource uses, so the audit agrees with what
+    // a sync would actually do. This used to shell `op read` at EVERY ref regardless of scheme,
+    // which reported a perfectly good `env:`/`pass:`/age/sops secret as unresolvable — and
+    // returned early when `op` was absent, so a machine with no 1Password audited nothing while
+    // claiming to. `getBackend` honours an explicit `backend =` and otherwise infers from the
+    // scheme; `resolveRef` is not used here because it discards that explicit field.
+    const backend = getBackend(s);
+    if (!backend.available(ctx.env)) {
+      report.warn(`${ref} — ${backend.tool} not installed, cannot audit`);
+      continue;
+    }
+    // A read may be a network round-trip (op) → run it under the spinner. Only `ok`/`err` are
+    // inspected: the resolved plaintext is never bound, logged, or reported. It exists in memory
+    // for the life of the call, exactly as it does for the askpass helper, and goes nowhere.
+    const r = await report.spin(`${backend.name} read ${ref}`, () => backend.read(s, { env: ctx.env, repo }));
+    if (r.ok) report.ok(`${ref} resolves (${backend.name})`);
+    else report.warn(`${ref} — unresolvable (${r.err})`);
   }
-  // A template's op:// refs live inside a file rendered by `op inject`; auditing them means
-  // running the injection (out of scope), so we only surface that the template exists.
+  // A template's refs live inside a file rendered by the backend's injector (`op inject` and
+  // friends); auditing them means running the injection (out of scope), so we only surface that
+  // the template exists — and which backend would render it.
   for (const s of templates) {
-    report.note(`${s.template} — template (op inject); resolvability not audited`);
+    report.note(`${s.template} — template (${getBackend(s).name}); resolvability not audited`);
   }
 }
 
@@ -126,7 +136,7 @@ export async function doctor(
     setup: fix ? "MENDING WHAT WE CAN…" : "TAKING THE MACHINE'S PULSE…",
   });
 
-  // `--secrets` narrows doctor to just the op:// audit — a single warning-tier job (0/2/1),
+  // `--secrets` narrows doctor to just the secret-ref audit — a single warning-tier job (0/2/1),
   // fully independent of the rest, exactly as `--config` narrows it to the boomfile parse.
   if (secretsOnly) {
     await auditSecrets(ctx, report);
