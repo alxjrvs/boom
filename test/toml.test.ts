@@ -45,9 +45,12 @@ w = 4
     }
   })();
   expect(err).toBeDefined();
-  // Bun's own wording is kept — it names the offending token, which is the useful half.
-  expect(err?.message).toContain("Expected a value");
+  // The LINE is what lib/toml.ts contributes and therefore what is pinned. Bun's own wording is
+  // passed through unchanged and deliberately not asserted: it differs between Bun versions (1.3
+  // says "Unexpected =", 1.4 says "Expected a value but found '='"), and it is Bun's contract,
+  // not boom's. Pinning it here would turn a runtime upgrade into a red test for no reason.
   expect(err?.message).toContain("(line 3)");
+  expect(err?.message.length).toBeGreaterThan("(line 3)".length);
 });
 
 test("a duplicate key is located at the redefinition, not the first definition", () => {
@@ -56,13 +59,13 @@ k = 1
 
 k = 2
 `;
-  expect(() => parseToml(src)).toThrow(/Cannot redefine key 'k'.*\(line 4\)/);
+  expect(() => parseToml(src)).toThrow(/\(line 4\)/);
 });
 
 // The case that makes prefix-scanning trustworthy rather than plausible. Every prefix that cuts
-// this file inside the multi-line array fails with "Unterminated array" — a DIFFERENT message
-// from the document's real failure — so a naive "first prefix that throws" would report line 1.
-// Matching the message skips those and finds the actual error further down.
+// this file inside the multi-line array fails with an unterminated-array error — a DIFFERENT
+// message from the document's real failure — so a naive "first prefix that throws" would report
+// line 1. Matching the message skips those and finds the actual error further down.
 test("a valid multi-line array does not swallow a later error", () => {
   const src = `items = [
   1,
@@ -71,11 +74,16 @@ test("a valid multi-line array does not swallow a later error", () => {
 ]
 bad = =
 `;
-  expect(() => parseToml(src)).toThrow(/Expected a value.*\(line 6\)/);
+  expect(() => parseToml(src)).toThrow(/\(line 6\)/);
 });
 
 // When the document's failure IS an unterminated array, the match lands on the line that opened
 // it — the line worth pointing at, since that is where the missing `]` belongs.
+//
+// This one is the strongest evidence the locator is version-independent: Bun 1.3 and 1.4 describe
+// this failure completely differently ("Unexpected end of file" vs "Unterminated array; expected
+// ']'"), and both land on line 3. They have to, because `locate` compares Bun's message to
+// itself rather than to anything hardcoded here.
 test("an unterminated array is located at the line that opened it", () => {
   const src = `x = 1
 y = 2
@@ -83,7 +91,7 @@ items = [
   1,
   2,
 `;
-  expect(() => parseToml(src)).toThrow(/Unterminated array.*\(line 3\)/);
+  expect(() => parseToml(src)).toThrow(/\(line 3\)/);
 });
 
 // A parse failure must always be reportable, even when the line cannot be pinned down — the
