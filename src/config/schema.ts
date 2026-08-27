@@ -336,7 +336,6 @@ export const OverlaySchema = v.strictObject({
   section: v.optional(v.array(SectionSchema), []),
 });
 
-export type When = v.InferOutput<typeof WhenSchema>;
 export type File = v.InferOutput<typeof FileSchema>;
 export type Pkg = v.InferOutput<typeof PkgSchema>;
 export type Dir = v.InferOutput<typeof DirSchema>;

@@ -11,7 +11,7 @@ import type { BoomContext } from "../context.ts";
 import { displayPath, filesEqual, linkTarget, pathExists } from "../lib/fs.ts";
 import { acquireLock } from "../lib/lock.ts";
 import { backupsDir } from "../lib/paths.ts";
-import { bandsReporter, REPORT_SCHEMA_VERSION } from "../lib/reporter.ts";
+import { bandsReporter } from "../lib/reporter.ts";
 import { Journal, journalRemove, newRunId, pruneRuns, readRun } from "./journal.ts";
 import { auditLockDrift } from "./pinning.ts";
 import { finalizeResources, reconcileSection } from "./registry.ts";
@@ -20,10 +20,6 @@ import { applyBoomSettings } from "./settings.ts";
 import { type ManifestEntry, readManifest, writeManifest } from "./state.ts";
 import { syncConfigRepo } from "./sync.ts";
 import type { LinkMode, ReconcileCtx, Verb } from "./types.ts";
-
-// Re-exported (the envelope shape lives in reporter.ts now) so existing importers of the
-// reconcile module's constant keep working.
-export { REPORT_SCHEMA_VERSION };
 
 // The grey opening band, per verb — the bombastic "we're getting to work" splash the cosmic-bands
 // output opens on (site voice: high-energy, no comic-lore proper nouns). Keyed by verb; the
@@ -110,11 +106,12 @@ async function reapOrphans(ctx: ReconcileCtx, prior: readonly ManifestEntry[]): 
     }
     const target = await linkTarget(entry.dst);
     if (target === undefined) continue; // not a symlink — nothing to reap
-    // Prefer an exact match against the source the manifest recorded: it is strictly more precise
-    // AND origin-independent, so a link a *module* shipped (whose target points into the module's
-    // own dir, not the config repo) is still reaped when that module leaves `use`. The
-    // startsWith fallback exists only for pre-TSV legacy rows, which carry `src: ""`.
-    if (entry.src ? target !== entry.src : !target.startsWith(`${ctx.repo}/`)) continue;
+    // Match against the source the manifest recorded: precise AND origin-independent, so a link a
+    // *module* shipped (whose target points into the module's own dir, not the config repo) is
+    // still reaped when that module leaves `use`. The `startsWith(repo)` fallback that used to sit
+    // here served pre-TSV rows carrying `src: ""`; readManifest can no longer produce one (see
+    // state.ts), so every entry has a real `src` and the fallback was unreachable.
+    if (target !== entry.src) continue;
     await reap(entry.dst, disp, `→ ${target} (no longer declared)`);
   }
 }
