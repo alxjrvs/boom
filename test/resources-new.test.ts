@@ -4,15 +4,17 @@
 // oracle style as engine.test.ts). launchctl itself is never invoked here — the timer paths
 // are exercised via dry-run/off-platform, and the effectful primitives are darwin-only.
 import { expect, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { chmod, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { BoomContext } from "../src/context.ts";
 import { pruneRuns } from "../src/engine/journal.ts";
 import { reconcile } from "../src/engine/reconcile.ts";
 import { rollback } from "../src/engine/rollback.ts";
 import { pathExists } from "../src/lib/fs.ts";
 import type { Env } from "../src/lib/paths.ts";
+import { makeSandbox, type Sandbox } from "./support/sandbox.ts";
+
+const sandbox = (boomfile: string, extraEnv: Record<string, string> = {}): Promise<Sandbox> =>
+  makeSandbox(boomfile, { prefix: "boom-new-", env: extraEnv });
 
 // Write an executable fake binary into `dir` and return nothing — the caller prepends `dir`
 // to PATH so the sandboxed reconcile shells out to these instead of the real tools.
@@ -20,37 +22,6 @@ async function fakeBin(dir: string, name: string, script: string): Promise<void>
   await mkdir(dir, { recursive: true });
   await writeFile(join(dir, name), `#!/bin/sh\n${script}`);
   await chmod(join(dir, name), 0o755);
-}
-
-interface Sandbox {
-  readonly home: string;
-  readonly repo: string;
-  readonly ctx: BoomContext;
-  out(): string;
-}
-
-async function sandbox(boomfile: string, extraEnv: Record<string, string> = {}): Promise<Sandbox> {
-  const base = await mkdtemp(join(tmpdir(), "boom-new-"));
-  const home = join(base, "home");
-  const repo = join(base, "repo");
-  await mkdir(home, { recursive: true });
-  await mkdir(repo, { recursive: true });
-  await writeFile(join(repo, "boomfile.toml"), boomfile);
-  const env: Record<string, string | undefined> = {
-    HOME: home,
-    XDG_STATE_HOME: join(base, "state"),
-    BOOM_CONFIG: repo,
-    NO_COLOR: "1",
-    GIT_CONFIG_NOSYSTEM: "1",
-    ...extraEnv,
-  };
-  const buf = { out: "" };
-  const write = (s: string) => {
-    buf.out += s;
-  };
-  const proc = { stdout: { write }, stderr: { write }, env, exitCode: 0 };
-  const ctx = { process: proc, env, cwd: repo } as unknown as BoomContext;
-  return { home, repo, ctx, out: () => buf.out };
 }
 
 const mode = async (p: string): Promise<string> => ((await stat(p)).mode & 0o777).toString(8);

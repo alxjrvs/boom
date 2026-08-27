@@ -16,10 +16,13 @@ import { expect, test } from "bun:test";
 import { chmod as chmodFs, mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { BoomContext } from "../src/context.ts";
 import { reconcile } from "../src/engine/reconcile.ts";
 import { askpassPath, askpassScript, installAskpass } from "../src/engine/secrets/askpass.ts";
 import { resolveRef } from "../src/engine/secrets/backends.ts";
+import { makeSandbox, type Sandbox } from "./support/sandbox.ts";
+
+const sandbox = (boomfile: string, extraEnv: Record<string, string> = {}): Promise<Sandbox> =>
+  makeSandbox(boomfile, { prefix: "boom-askpass-", env: extraEnv });
 
 async function base(): Promise<string> {
   return mkdtemp(join(tmpdir(), "boom-askpass-"));
@@ -98,35 +101,6 @@ test("resolveRef reports an unavailable backend by the tool to install", async (
 });
 
 // -------------------------------------------------------------- end-to-end through reconcile
-
-interface Sandbox {
-  readonly repo: string;
-  readonly ctx: BoomContext;
-  out(): string;
-}
-
-async function sandbox(boomfile: string, extraEnv: Record<string, string> = {}): Promise<Sandbox> {
-  const root = await base();
-  const home = join(root, "home");
-  const repo = join(root, "repo");
-  await mkdir(home, { recursive: true });
-  await mkdir(repo, { recursive: true });
-  await writeFile(join(repo, "boomfile.toml"), boomfile);
-  const env: Record<string, string | undefined> = {
-    HOME: home,
-    XDG_STATE_HOME: join(root, "state"),
-    BOOM_CONFIG: repo,
-    NO_COLOR: "1",
-    GIT_CONFIG_NOSYSTEM: "1",
-    ...extraEnv,
-  };
-  const buf = { out: "" };
-  const write = (s: string): void => {
-    buf.out += s;
-  };
-  const proc = { stdout: { write }, stderr: { write }, env, exitCode: 0 };
-  return { repo, ctx: { process: proc, env, cwd: repo } as unknown as BoomContext, out: () => buf.out };
-}
 
 async function fakeBin(dir: string, name: string, script: string): Promise<void> {
   await mkdir(dir, { recursive: true });
