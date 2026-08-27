@@ -71,17 +71,22 @@ const claudeCommand = buildCommand<{ dryRun?: boolean }, [], BoomContext>({
 
     if (flags.dryRun) {
       report.plan(`would symlink the above into ${farm} and run: claude agents`);
-      report.finish({ ok: `${links.length} repo(s) planned` });
+      this.process.exitCode = report.finish({ ok: `${links.length} repo(s) planned` });
       return;
     }
     await materializeAgentsFarm(this.env, links);
     if (!hasCommand("claude", this.env)) {
       report.warn(`farm ready — claude not found; run \`claude agents\` in ${farm}`);
-      report.finish({ ok: "farm ready", warn: (w) => `${w} note(s)` });
+      this.process.exitCode = report.finish({ ok: "farm ready", warn: (w) => `${w} note(s)` });
       return;
     }
-    // Verdict before handing the terminal to the interactive session.
-    report.finish({ ok: `${links.length} repo(s) linked — launching claude agents` });
+    // Verdict before handing the terminal to the interactive session. Assigned, not discarded:
+    // a name collision above is a warn, and the farm it skipped is genuinely missing from the
+    // session about to start. `claude`'s own exit is deliberately NOT propagated — quitting an
+    // interactive session (^C → 130) is not a boom failure.
+    this.process.exitCode = report.finish({
+      ok: `${links.length} repo(s) linked — launching claude agents`,
+    });
     await Bun.spawn(["claude", "agents"], {
       cwd: farm,
       env: cleanEnv(this.env),
@@ -126,7 +131,7 @@ const cmuxCommand = buildCommand<{ dryRun?: boolean }, [], BoomContext>({
       }).exited;
       report.ok(`${rel(root, repo)} → launched`);
     }
-    report.finish({ ok: `${repos.length} repo(s)` });
+    this.process.exitCode = report.finish({ ok: `${repos.length} repo(s)` });
   },
 });
 
@@ -170,8 +175,12 @@ const fetchCommand = buildCommand<{ dryRun?: boolean }, [], BoomContext>({
         report.warn(`${rel(root, repo)} (git fetch exit ${code})`);
       }
     }
+    // The one command here that deliberately DISCARDS finish's verdict rather than assigning it
+    // (every sibling assigns): a warm-the-cache sweep should not exit 2 because one repo's remote
+    // was briefly unreachable. Non-zero only if every repo failed — a real, systemic problem —
+    // which overrides finish's warn→2. Kept explicit so this does not read as the same dropped
+    // verdict its siblings had.
     report.finish({ ok: `${repos.length} repo(s) fetched`, warn: (w) => `${w} repo(s) failed` });
-    // Non-zero only if every repo failed (a real, systemic problem), overriding finish's warn→2.
     this.process.exitCode = repos.length > 0 && failed === repos.length ? 1 : 0;
   },
 });
@@ -370,9 +379,15 @@ const reapCommand = buildCommand<
     const summary = `${reaped} ${verb}, ${kept} kept${deleted > 0 ? `, ${deleted} deleted` : ""}`;
     // `meta` (not `ok`) is what the bands verdict prints on success — the counts are the
     // whole point of a sweep, so they belong on the verdict line rather than "all clear".
-    report.finish({ ok: summary, meta: summary, warn: (w) => `${w} removal(s) failed` });
-    // A removal failure stays a warning (finish maps that to exit 2): the sweep is a
-    // courtesy and the next run retries, so nothing here should ever wedge a scheduled timer.
+    // A removal failure stays a warning, which finish maps to exit 2: the sweep is a courtesy
+    // and the next run retries, so nothing here should ever wedge a scheduled timer. That was
+    // the stated intent all along, but the verdict was computed and thrown away — so a sweep
+    // that failed every removal still exited 0 and nothing could gate on it.
+    this.process.exitCode = report.finish({
+      ok: summary,
+      meta: summary,
+      warn: (w) => `${w} removal(s) failed`,
+    });
   },
 });
 
@@ -386,5 +401,7 @@ export const codeRouteMap = buildRouteMap({
   },
   // Bare `boom code` is the everyday entrypoint — go straight to the agent farm.
   defaultCommand: "claude",
-  docs: { brief: "Open portals to your code workspaces (default: claude / cmux / fetch / reap)" },
+  docs: {
+    brief: "Open portals to your code workspaces (init / claude / cmux / fetch / reap; default: claude)",
+  },
 });

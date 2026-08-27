@@ -3,6 +3,8 @@ import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { run } from "@stricli/core";
+import { app } from "../src/cli.ts";
 import {
   BoomConfigError,
   configRepoCacheDir,
@@ -42,7 +44,10 @@ async function gitFixture(withBoomfile = true): Promise<string> {
   return dir;
 }
 
-function ctxFor(env: Record<string, string | undefined>, cwd: string): { ctx: BoomContext; out(): string } {
+function ctxFor(
+  env: Record<string, string | undefined>,
+  cwd: string,
+): { ctx: BoomContext; out(): string; code(): number } {
   const buf = { out: "" };
   const proc = {
     stdout: {
@@ -58,7 +63,11 @@ function ctxFor(env: Record<string, string | undefined>, cwd: string): { ctx: Bo
     env,
     exitCode: 0,
   };
-  return { ctx: { process: proc, env, cwd } as unknown as BoomContext, out: () => buf.out };
+  return {
+    ctx: { process: proc, env, cwd } as unknown as BoomContext,
+    out: () => buf.out,
+    code: () => proc.exitCode,
+  };
 }
 
 test("resolveCodeDir honors BOOM_CODE", async () => {
@@ -294,4 +303,33 @@ test("runUserCommand returns undefined for an unknown command", async () => {
   await writeFile(join(repo, "boomfile.toml"), `[[section]]\nname = "x"\n`);
   const { ctx } = ctxFor({ BOOM_CONFIG: repo }, repo);
   expect(await runUserCommand("nope", [], ctx)).toBeUndefined();
+});
+
+// `boom code`'s subcommands computed the 0/2/1 verdict with report.finish() and threw the
+// return away, so `init`/`claude`/`cmux`/`reap` always exited 0 — a warn tier that could never
+// be observed. `code claude` with no `claude` on PATH is the cheapest reachable warn: the farm
+// is materialized, the launch is skipped, and finish() is given a warn tier for exactly that.
+// Under the old code this asserted 0. (`fetch` still overrides finish deliberately — see its
+// comment — and is not covered by this.)
+test("code claude surfaces its warn tier as exit 2 instead of discarding the verdict", async () => {
+  const home = await base();
+  const stateHome = await base();
+  const codeDir = await base();
+  // One repo for the farm to link, so the command reaches the launch branch at all.
+  const repo = join(codeDir, "proj");
+  await mkdir(repo, { recursive: true });
+  Bun.spawnSync(["git", "-C", repo, "init", "-q", "-b", "main"], { stdout: "ignore", stderr: "ignore" });
+  await mkdir(join(stateHome, "boom"), { recursive: true });
+  await writeFile(join(stateHome, "boom", "code"), `${codeDir}\n`);
+
+  // PATH deliberately empty: hasCommand("claude") is false, so the command warns and finishes
+  // rather than handing the terminal to an interactive session.
+  const { ctx, out, code } = ctxFor(
+    { HOME: home, XDG_STATE_HOME: stateHome, PATH: "", NO_COLOR: "1" },
+    codeDir,
+  );
+  await run(app, ["code", "claude"], ctx);
+
+  expect(out()).toContain("claude not found");
+  expect(code()).toBe(2);
 });
