@@ -2,8 +2,10 @@
 // _ok/_warn/_fail and drives the verify exit code (0 ok / 2 warn / 1 fail). In JSON
 // mode it suppresses human output and only collects records (for `verify --json`).
 //
-// Three human presentations share this one tally + record stream — `ReportSurface`:
-//   • `classic` (`==> Header`, indented ✓/→/✗ lines) — every non-reconcile command;
+// Two human presentations share this one tally + record stream — `ReportSurface`. (A third,
+// `classic` — `==> Header` with indented ✓/→/✗ lines — was the pre-bands surface. It became
+// unreachable once every construction went through `bandsReporter`, whose `surface` option only
+// ever offers bands or category, and was removed rather than left as a mode nothing can select.)
 //   • `bands` — the cosmic surface matching the site's design: a permanent `▎` bar per section in
 //     a cycling brand color, a trailing status glyph (a Kirby-krackle burst while working → ✓ done
 //     / ! attention), a grey setup band to open, and a `COMMAND...COMPLETE!` / `...FAILED!`
@@ -15,7 +17,7 @@
 // --verbose streams live instead — showing the held-back skips and the raw subprocess chatter
 // (brew/mise/git) — and collapses `category` onto `bands`, which is why they share every branch
 // below except the quiet ones.
-import { BAND_CYCLE, COSMIC, type ColorName, colorEnabled, paint, paintHex } from "./color.ts";
+import { BAND_CYCLE, COSMIC, colorEnabled, paintHex } from "./color.ts";
 
 interface Stream {
   write(s: string): void;
@@ -33,14 +35,14 @@ type EmitLevel = Exclude<ReportLevel, "header">;
 // One value instead of the two booleans (`bands`, `categoryMode`) it replaces. They were never
 // independent — `categoryMode` was only ever passed alongside `bands`, and "category but not
 // bands" had no branch — so the pair could express a state the renderer did not implement.
-export type ReportSurface = "classic" | "bands" | "category";
+export type ReportSurface = "bands" | "category";
 
 interface ReportRecord {
   readonly level: ReportLevel;
   readonly msg: string;
   // The reconcile category this line belongs to (DOTFILES/PACKAGES/…), stamped from
   // Reporter.category as resources emit. Drives the dense default's category-grouped bands (and
-  // lets a `--json` consumer group the same way). Absent on the classic surface — nothing sets it.
+  // lets a `--json` consumer group the same way). Absent unless the run sets a category.
   readonly category?: string;
 }
 
@@ -71,8 +73,7 @@ const RECONCILE_CATEGORY_ORDER = [
 // test/reporter-surface.test.ts — this is a collapse, not a redesign.
 interface LevelStyle {
   readonly glyph: string;
-  readonly color: ColorName; // classic surface
-  readonly hex: string; // bands/category surfaces
+  readonly hex: string;
   readonly shape: "glyph" | "prefix" | "note";
   readonly stream: "out" | "err";
   readonly verboseOnly?: boolean; // quiet holds it back — `skip` is the only one
@@ -80,12 +81,12 @@ interface LevelStyle {
 }
 
 const LEVEL_STYLE: Record<EmitLevel, LevelStyle> = {
-  ok: { glyph: "✓", color: "green", hex: COSMIC.ok, shape: "glyph", stream: "out" },
-  skip: { glyph: "- ", color: "dim", hex: COSMIC.dim, shape: "prefix", stream: "out", verboseOnly: true },
-  note: { glyph: "", color: "dim", hex: COSMIC.dim, shape: "note", stream: "out" },
-  plan: { glyph: "~ ", color: "cyan", hex: COSMIC.cyan, shape: "prefix", stream: "out" },
-  warn: { glyph: "→", color: "yellow", hex: COSMIC.warn, shape: "glyph", stream: "out", tally: "warn" },
-  fail: { glyph: "✗", color: "red", hex: COSMIC.crit, shape: "glyph", stream: "err", tally: "fail" },
+  ok: { glyph: "✓", hex: COSMIC.ok, shape: "glyph", stream: "out" },
+  skip: { glyph: "- ", hex: COSMIC.dim, shape: "prefix", stream: "out", verboseOnly: true },
+  note: { glyph: "", hex: COSMIC.dim, shape: "note", stream: "out" },
+  plan: { glyph: "~ ", hex: COSMIC.cyan, shape: "prefix", stream: "out" },
+  warn: { glyph: "→", hex: COSMIC.warn, shape: "glyph", stream: "out", tally: "warn" },
+  fail: { glyph: "✗", hex: COSMIC.crit, shape: "glyph", stream: "err", tally: "fail" },
 };
 
 // The active-work spinner's frames — a pulsing Kirby-krackle burst (grows and shrinks, spins),
@@ -135,14 +136,8 @@ export class Reporter {
 
   // The category the next emitted line belongs to (category mode only). The reconcile loop and
   // registry set this as they move through the run's phases; every record stamps its current
-  // value, and finish() groups by it. Undefined on the classic surface.
+  // value, and finish() groups by it. Undefined until a run sets it.
   category?: string;
-
-  // Quiet mode (the default) holds a section header back until a *shown* line lands under it,
-  // so a section that produced only suppressed `skip` noise prints no header at all — the whole
-  // point of quiet output being that a steady-state run says almost nothing. Verbose writes
-  // headers eagerly and this stays undefined. (Classic surface only; bands mode uses `band`.)
-  private pendingHeader?: string;
 
   // Bands-mode state: the section currently accumulating, and the color-cycle cursor.
   private band?: Band;
@@ -188,24 +183,12 @@ export class Reporter {
     this.color = opts.color;
     this.json = opts.json ?? false;
     this.verbose = opts.verbose ?? false;
-    this.surface = opts.surface ?? "classic";
+    this.surface = opts.surface ?? "bands";
     this.interactive = opts.interactive ?? false;
   }
 
-  private c(name: ColorName, s: string): string {
-    return paint(this.color, name, s);
-  }
   private hx(hex: string, s: string): string {
     return paintHex(this.color, hex, s);
-  }
-
-  // Flush a header the classic quiet path is holding back — called by every *shown* line so its
-  // section banner precedes it. A no-op in verbose (headers already wrote) and once flushed.
-  private flushHeader(): void {
-    if (this.pendingHeader !== undefined) {
-      this.out.write(`\n${this.c("bold", `==> ${this.pendingHeader}`)}\n`);
-      this.pendingHeader = undefined;
-    }
   }
 
   // ---- band rendering (the bands + category surfaces) ---------------------------------------
@@ -213,7 +196,7 @@ export class Reporter {
   // The grey opening band ("PREPARING FOR THE WORLD THAT'S COMING…"). Bands mode only; a no-op
   // elsewhere so the reconcile entry can call it unconditionally.
   setup(msg: string): void {
-    if (this.json || this.surface === "classic") return;
+    if (this.json) return;
     this.out.write(`\n${this.hx(COSMIC.dim, `▎ ${msg}`)}\n`);
   }
 
@@ -278,23 +261,23 @@ export class Reporter {
     this.out.write(`    ${this.hx(COSMIC.dim, `▸ ${s}`)}\n`);
   }
 
-  // Render one leveled line from LEVEL_STYLE, on whichever surface asked for it. `note` is the
-  // one level whose two surfaces genuinely differ: the bands surface dims it, the classic one
-  // prints it plain. That predates this table and is preserved, not unified.
-  private line(level: EmitLevel, msg: string, band: boolean): string {
+  // Render one leveled line from LEVEL_STYLE. Both remaining surfaces tint from the same `hex`,
+  // so this no longer branches on which one asked: the `band` parameter and the ANSI-named
+  // `color` it selected went with the classic surface.
+  private line(level: EmitLevel, msg: string): string {
     const st = LEVEL_STYLE[level];
-    const tint = (s: string): string => (band ? this.hx(st.hex, s) : this.c(st.color, s));
+    const tint = (s: string): string => this.hx(st.hex, s);
     if (st.shape === "glyph") return `  ${tint(st.glyph)} ${msg}\n`;
     if (st.shape === "prefix") return `  ${tint(`${st.glyph}${msg}`)}\n`;
-    return band ? `    ${tint(msg)}\n` : `    ${msg}\n`;
+    return `    ${tint(msg)}\n`;
   }
 
-  // Write one buffered sub-line under a band. Fail goes to stderr, matching the classic surface.
+  // Write one buffered sub-line under a band. Fail goes to stderr.
   private writeSub(rec: ReportRecord): void {
     this.bandsDrawn = true;
     if (rec.level === "header") return; // headers open bands; they are never band content
     const st = LEVEL_STYLE[rec.level];
-    (st.stream === "err" ? this.err : this.out).write(this.line(rec.level, rec.msg, true));
+    (st.stream === "err" ? this.err : this.out).write(this.line(rec.level, rec.msg));
   }
 
   // Route a leveled line in bands mode: --verbose prints it live under the (already-printed) band;
@@ -352,9 +335,9 @@ export class Reporter {
     return failed ? this.hx(COSMIC.crit, "!") : warned ? this.hx(COSMIC.warn, "!") : this.hx(COSMIC.ok, "✓");
   }
 
-  // The two-line verdict block both non-classic surfaces close on: the COMMAND...COMPLETE! /
+  // The two-line verdict block both surfaces close on: the COMMAND...COMPLETE! /
   // …FAILED! band, then its outcome as a dim sub-line beneath. Reads the tally (never mutates
-  // it), so the 0/2/1 ladder matches the classic path. The elapsed suffix is appended here, once
+  // it), so the 0/2/1 ladder matches finish()'s own. The elapsed suffix is appended here, once
   // — before this collapse `verdict` appended it at the write and `categoryVerdict` folded it
   // into `meta`, two spellings of one format that could drift apart.
   private drawVerdict(hasWarnTier: boolean, meta: string): number {
@@ -462,43 +445,32 @@ export class Reporter {
       }
       return;
     }
-    if (this.surface !== "classic") {
-      // An eager banner isn't a section — draw it grey like the setup band and don't track it.
-      if (eager) {
-        this.out.write(`\n${this.hx(COSMIC.dim, `▎ ${s}`)}\n`);
-        return;
-      }
-      this.closeBand(); // resolve the previous section before starting this one
-      const color = BAND_CYCLE[this.cycle++ % BAND_CYCLE.length] ?? COSMIC.cyan;
-      const band: Band = {
-        label: s,
-        color,
-        failAt: this.failures,
-        warnAt: this.warnings,
-        buf: [],
-        krackleShown: false,
-      };
-      this.band = band;
-      if (this.verbose) {
-        this.bandsDrawn = true;
-        this.out.write(`\n${this.hx(color, `▎ ${s}`)}\n`);
-      } else if (this.interactive) {
-        // Live: the permanent bar + a krackle burst where the mark will land, on its own blank-
-        // separated line. No trailing newline — close overwrites this line in place with \r.
-        // Nothing prints between (detail buffers; subprocess output is silenced), so it stays put.
-        this.out.write(`\n${this.hx(color, `▎ ${s}...`)}${this.hx(COSMIC.solar, "✸")}`);
-        band.krackleShown = true;
-      }
+    // An eager banner isn't a section — draw it grey like the setup band and don't track it.
+    if (eager) {
+      this.out.write(`\n${this.hx(COSMIC.dim, `▎ ${s}`)}\n`);
       return;
     }
+    this.closeBand(); // resolve the previous section before starting this one
+    const color = BAND_CYCLE[this.cycle++ % BAND_CYCLE.length] ?? COSMIC.cyan;
+    const band: Band = {
+      label: s,
+      color,
+      failAt: this.failures,
+      warnAt: this.warnings,
+      buf: [],
+      krackleShown: false,
+    };
+    this.band = band;
     if (this.verbose) {
-      this.out.write(`\n${this.c("bold", `==> ${s}`)}\n`);
-      return;
+      this.bandsDrawn = true;
+      this.out.write(`\n${this.hx(color, `▎ ${s}`)}\n`);
+    } else if (this.interactive) {
+      // Live: the permanent bar + a krackle burst where the mark will land, on its own blank-
+      // separated line. No trailing newline — close overwrites this line in place with \r.
+      // Nothing prints between (detail buffers; subprocess output is silenced), so it stays put.
+      this.out.write(`\n${this.hx(color, `▎ ${s}...`)}${this.hx(COSMIC.solar, "✸")}`);
+      band.krackleShown = true;
     }
-    // Quiet: stage this header. A following header with no shown line in between overwrites
-    // (and thereby discards) it — the previous section was all-skips; `eager` flushes now.
-    this.pendingHeader = s;
-    if (eager) this.flushHeader();
   }
 
   // The one path every leveled line takes, in place of six copies of the same six-step preamble.
@@ -513,12 +485,7 @@ export class Reporter {
     if (this.json) return;
     if (this.surface === "category" && !this.verbose) return; // buffered → grouped at finish
     if (st.verboseOnly && !this.verbose) return;
-    if (this.surface !== "classic") {
-      this.bandEmit(rec);
-      return;
-    }
-    this.flushHeader();
-    (st.stream === "err" ? this.err : this.out).write(this.line(level, msg, false));
+    this.bandEmit(rec);
   }
 
   ok(s: string): void {
@@ -526,7 +493,7 @@ export class Reporter {
   }
   // A no-op: already in the desired state, nothing done. Pure noise on a steady-state run, so
   // quiet suppresses it (records still capture it for `--json`); verbose shows the dim line.
-  // The lone `verboseOnly` level — every other one prints on the quiet classic surface.
+  // The lone `verboseOnly` level — every other one prints even when quiet.
   skip(s: string): void {
     this.emit("skip", s);
   }
@@ -555,30 +522,30 @@ export class Reporter {
     fail?: (failures: number, warnings: number) => string;
     warn?: (warnings: number) => string;
     // Bands mode only: the verdict band's outcome text on success (e.g. "v0.14.0 → v0.15.0"),
-    // in place of the auto-generated count. Ignored on the classic surface and on failure.
+    // in place of the auto-generated count. Ignored on failure.
     meta?: string;
   }): number {
     const f = this.failures;
     const w = this.warnings;
-    // Discard a section header still held back from the last (all-skips) section, so quiet
-    // mode doesn't print a stray banner right before the summary. The summary itself is an
-    // `ok`/`warn`/`fail` line and is always shown.
-    this.pendingHeader = undefined;
     // Category mode (dense reconcile default): draw the grouped category bands from the buffered
     // records, then the two-line verdict block.
     if (this.surface === "category" && !this.verbose && !this.json) {
       const touched = this.renderCategorySummary();
       return this.categoryVerdict(msgs.warn !== undefined, touched);
     }
-    // Bands mode: resolve the last section band, then draw the verdict band in place of the
-    // classic summary. `msgs.warn` presence marks a warning-tier command (verify), same as below.
-    // The `!json` is what `bands: !json` used to buy by construction: with the surface no longer
-    // derived from the JSON flag, a `--json` run would otherwise draw a verdict band into stdout
-    // ahead of the envelope. JSON always falls through to the silent classic ladder below.
-    if (this.surface !== "classic" && !this.json) {
+    // Bands mode: resolve the last section band, then draw the verdict band. `msgs.warn` presence
+    // marks a warning-tier command (verify), same as below. The `!json` is what `bands: !json`
+    // used to buy by construction: with the surface no longer derived from the JSON flag, a
+    // `--json` run would otherwise draw a verdict band into stdout ahead of the envelope.
+    if (!this.json) {
       this.closeBand();
       return this.verdict(msgs.warn !== undefined, msgs.meta);
     }
+    // Reached only under `--json`, and only defensively: every json-capable command branches to
+    // finishJson() first (module.ts, reconcile.ts), so nothing takes this path today. It stays
+    // because it is what makes finish() total — it computes the same 0/2/1 ladder the band
+    // verdicts do, so the two modes cannot disagree about an exit code. Its ok/warn/fail calls
+    // print nothing under json: emit() returns at the json guard before any surface renders.
     this.out.write("\n");
     if (f > 0) {
       this.fail(msgs.fail ? msgs.fail(f, w) : `${f} failure(s)`);
@@ -618,7 +585,7 @@ export class Reporter {
 // `...FAILED!` verdict from finish(). Interactive (TTY + color, non-JSON) enables the live in-place
 // krackle. `verbose` defaults false — the dense-by-default form; a command that streams raw output
 // with no section band to nest under (diff/push stream git verbatim) passes verbose:true so its
-// lines still show. Under --json, bands turn off and the classic envelope (finishJson) is used.
+// lines still show. Under --json, bands turn off and the structured envelope (finishJson) is used.
 // `surface` picks between one band per section (the default) and reconcile's dense
 // distinct-category grouping. Under --json every surface renders nothing anyway (each emitter
 // returns at the json guard), so it is passed through unconditionally rather than derived.
