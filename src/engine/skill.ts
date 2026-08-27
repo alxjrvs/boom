@@ -80,8 +80,9 @@ config repo. \`code\` is a namespace: \`boom code <init|claude|cmux>\`. Run
   report (with a \`schemaVersion\`); parse that instead of scraping stdout.
 - **Scope a run** with \`--only <section>\` (repeatable) and \`--profile <name>\`.
 - **Destructive commands to use with care:** \`boom source reset --force\` discards local
-  commits no remote has; \`boom uninstall\` removes everything boom installed. Both are
-  reversible only via \`boom rollback\` (which replays the last sync's journal).
+  commits no remote has and is **irreversible** — it is not journaled, so \`boom rollback\`
+  cannot undo it. \`boom uninstall\` removes what boom installed and *is* journaled, so
+  \`boom rollback\` can replay it.
 - **Conflicts** at a link destination are skipped by default (boom never clobbers a file it
   doesn't own); \`boom source --fix\` overwrites them to repair drift.
 

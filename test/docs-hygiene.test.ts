@@ -31,6 +31,28 @@ test("package.json description uses the current verb names, not the retired ones
   expect(pkg.description).not.toContain("botu");
 });
 
+// CLAUDE.md is the first thing a contributor (and every coding agent) reads, so a verb that
+// does not exist there is worse than one in the README: it teaches the wrong model of the
+// reconcile loop before anyone opens the code. The verb set is derived from the `Verb` union
+// itself rather than hardcoded, so this can only fail when the docs and the type disagree.
+test("the prose docs name only verbs that exist in the Verb union", () => {
+  const types = readFileSync(join(import.meta.dir, "../src/engine/types.ts"), "utf8");
+  const union = /export type Verb =([^;]+);/.exec(types)?.[1];
+  expect(union).toBeString();
+  const verbs = [...(union ?? "").matchAll(/"([a-z]+)"/g)].map((m) => m[1]);
+  expect(verbs).toEqual(["sync", "verify", "uninstall"]);
+
+  // Every slash-joined verb list in the prose docs must be a subset of the real union.
+  for (const doc of ["../CLAUDE.md", "../SPEC.md"]) {
+    const text = readFileSync(join(import.meta.dir, doc), "utf8");
+    for (const m of text.matchAll(/`sync`(?:\/`([a-z]+)`)+/g)) {
+      for (const named of [...m[0].matchAll(/`([a-z]+)`/g)].map((x) => x[1])) {
+        expect(verbs, `${doc} names a verb that does not exist: ${named}`).toContain(named);
+      }
+    }
+  }
+});
+
 test("the man page has no dangling SEE ALSO refs and no stale framing", () => {
   const m = manPage(pkg.version);
   // boom-verify(1) / boom-source(1) man pages were never shipped — don't advertise them.
