@@ -27,7 +27,7 @@ import { runArgv } from "../lib/proc.ts";
 import { fetchLatestVersion } from "../lib/release.ts";
 import { compareVersions, VERSION } from "../lib/version.ts";
 import { machineSummary, writeMachineSummary } from "./fleet.ts";
-import { displace, journalWrite } from "./journal.ts";
+import { journalRemove, journalWrite } from "./journal.ts";
 import { runWorkItems, type WorkItem } from "./registry.ts";
 import { skillDoc, skillInstallPath } from "./skill.ts";
 import type { ReconcileCtx } from "./types.ts";
@@ -305,9 +305,7 @@ async function reapUndeclaredTimers(settings: BoomSettings, ctx: ReconcileCtx): 
     // Unload before displacing the plist (unload reads the file), then journal the removal as
     // a displaced-original restore so rollback can put the timer back.
     if (detectOs(ctx.env) === "darwin") unloadAgent(plistPath, ctx.env);
-    await ctx.journal?.intent("reap-timer", plistPath);
-    const undo = await displace(plistPath, ctx.backupRoot);
-    await ctx.journal?.done("reap-timer", plistPath, undo);
+    await journalRemove("reap-timer", plistPath, ctx);
     report.ok(`removed ${label} timer`);
   }
 }

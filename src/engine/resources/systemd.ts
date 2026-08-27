@@ -12,7 +12,7 @@ import type { Systemd } from "../../config/schema.ts";
 import { displayPath, mkdir, pathExists } from "../../lib/fs.ts";
 import type { Env } from "../../lib/paths.ts";
 import { captureArgv, hasCommand } from "../../lib/proc.ts";
-import { displace, journalWrite } from "../journal.ts";
+import { journalRemove, journalWrite } from "../journal.ts";
 import type { ReconcileCtx } from "../types.ts";
 
 // ~/.config/systemd/user — where per-user units live (honoring XDG_CONFIG_HOME). Undefined
@@ -174,9 +174,7 @@ export async function reconcileSystemd(entry: Systemd, ctx: ReconcileCtx): Promi
       systemctl(["disable", "--now", primary], ctx.env);
       for (const u of units) {
         if (!(await pathExists(u.path))) continue;
-        await ctx.journal?.intent("systemd-rm", u.path);
-        const undo = await displace(u.path, ctx.backupRoot);
-        await ctx.journal?.done("systemd-rm", u.path, undo);
+        await journalRemove("systemd-rm", u.path, ctx);
       }
       systemctl(["daemon-reload"], ctx.env);
       report.ok(`${primary} disabled + removed`);

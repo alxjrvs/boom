@@ -21,7 +21,7 @@ import {
   pathExists,
   stat,
 } from "../../lib/fs.ts";
-import { displace, journalRemove, type UndoToken } from "../journal.ts";
+import { journalRemove, journalWrite } from "../journal.ts";
 import type { LinkMode, ReconcileCtx } from "../types.ts";
 
 // A resolved src→dst pair. `srcRel` (the repo-relative path) is carried only for legible
@@ -108,13 +108,11 @@ async function ensureParentDir(dir: string, mode: LinkMode, ctx: ReconcileCtx): 
   if (!(await pathExists(dir))) return true; // mkdir will create it fresh below
   if ((await stat(dir).catch(() => undefined))?.isDirectory()) return true;
   if (mode !== "overwrite") return false;
-  await ctx.journal?.intent("mkdir", dir);
-  const undo = await displace(dir, ctx.backupRoot, true);
-  // Record the undo BEFORE the create: displace has already moved the conflicting file into
-  // the backup tree, so if mkdir throws (or the process dies) the `done` row is what lets
-  // rollback restore it. Writing `done` only after a successful create leaves that displaced
-  // file orphaned with no journal row pointing at it — unrecoverable.
-  await ctx.journal?.done("mkdir", dir, undo);
+  // Undo BEFORE the create, via the one helper that owns that ordering: displace moves the
+  // conflicting file into the backup tree, so if mkdir throws (or the process dies) the rows
+  // journalWrite wrote are what let rollback restore it. Inlining this sequence is what used to
+  // leave the intent row's undo NULL, which both orphan readers skip.
+  await journalWrite("mkdir", dir, ctx, true);
   await mkdir(dir, { recursive: true });
   return true;
 }
@@ -161,23 +159,17 @@ export async function applyLink(
   // repo source — "restore the displaced original" would mean restoring boom's own INPUT, and
   // the run would have moved the repo into the backup tree to make room for links pointing at
   // it. Hence the landsInRepo refusal above: this discipline assumes dst is outside the repo.
-  if (!conflict) {
-    await ctx.journal?.intent("link", dst);
-    await ctx.journal?.done("link", dst, { kind: "remove" });
-    await ensureSymlink(src, dst);
-    report.ok(`${disp} linked`);
-    return;
-  }
-  if (mode === "overwrite") {
-    await ctx.journal?.intent("link", dst);
-    const undo = await displace(dst, ctx.backupRoot, true);
-    await ctx.journal?.done("link", dst, undo);
-    await ensureSymlink(src, dst);
-    report.ok(`${disp} overwritten`);
-    return;
-  }
   // skip: never clobber a file boom doesn't own.
-  report.skip(`${disp} exists but is not our symlink — skipped`);
+  if (conflict && mode !== "overwrite") {
+    report.skip(`${disp} exists but is not our symlink — skipped`);
+    return;
+  }
+  // One call for both arms: journalWrite picks the undo from what is actually at `dst` — a
+  // plain remove for a fresh link, a restore-from-backup for a displaced original — and writes
+  // it as the intent's plan token as well as the `done` row.
+  await journalWrite("link", dst, ctx, true);
+  await ensureSymlink(src, dst);
+  report.ok(conflict ? `${disp} overwritten` : `${disp} linked`);
 }
 
 export async function reconcileLink(entry: File, ctx: ReconcileCtx): Promise<void> {
@@ -313,14 +305,10 @@ async function copyOne(entry: File, place: Placement, ctx: ReconcileCtx): Promis
         report.plan(`${disp} would be copied`);
         return;
       }
-      await ctx.journal?.intent("copy", dst);
-      // Only displace when a file is actually there; with no backup root the undo is a plain
-      // remove of the copy we're about to write. Recorded before the write (same rationale as
-      // applyLink): if it throws after a displace, rollback still restores the original.
-      const undo: UndoToken = (await pathExists(dst))
-        ? await displace(dst, ctx.backupRoot, true)
-        : { kind: "remove" };
-      await ctx.journal?.done("copy", dst, undo);
+      // journalWrite only displaces when a file is actually there; with no backup root the undo
+      // is a plain remove of the copy we're about to write. Recorded before the write (same
+      // rationale as applyLink): if it throws after a displace, rollback still restores it.
+      await journalWrite("copy", dst, ctx, true);
       await mkdir(dirname(dst), { recursive: true });
       await copyFile(src, dst);
       await chmod(dst, await wantMode());

@@ -61,7 +61,11 @@ export async function reconcileDir(entry: Dir, ctx: ReconcileCtx): Promise<void>
       // refuses a non-empty dir. The other mkdir journal site (filesystem.ts, ~:82) records the
       // *displacement* of a conflicting non-directory, which is reversed by restoring it, so
       // the two look alike and mean opposite things.
-      await ctx.journal?.intent("mkdir", path);
+      // The plan token is passed to `intent` as well as `done`: nothing is displaced between
+      // the two here (the mkdir follows both), so this site was never at risk — but an intent
+      // row with a null undo is skipped by the orphan readers, so recording it keeps every
+      // intent row in the journal self-sufficient rather than only most of them.
+      await ctx.journal?.intent("mkdir", path, { kind: "rmdir" });
       await ctx.journal?.done("mkdir", path, { kind: "rmdir" });
       await mkdir(path, { recursive: true });
       await applyMode();

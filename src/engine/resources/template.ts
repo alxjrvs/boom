@@ -15,7 +15,7 @@
 import { dirname, join } from "node:path";
 import type { Tmpl } from "../../config/schema.ts";
 import { chmod, displayPath, expandTilde, mkdir, pathExists, stat } from "../../lib/fs.ts";
-import { displace, journalRemove, type UndoToken } from "../journal.ts";
+import { journalRemove, journalWrite } from "../journal.ts";
 import type { ReconcileCtx } from "../types.ts";
 import { renderTemplate } from "./filesystem.ts";
 
@@ -95,13 +95,10 @@ export async function reconcileTmpl(entry: Tmpl, ctx: ReconcileCtx): Promise<voi
         report.plan(`${disp} would be rendered`);
         return;
       }
-      await ctx.journal?.intent("copy", dst);
-      // Record the undo before the write (same rationale as copy): a displaced original is in
-      // the backup tree with a `done` row that restores it; a fresh write's undo is a remove.
-      const undo: UndoToken = (await pathExists(dst))
-        ? await displace(dst, ctx.backupRoot, true)
-        : { kind: "remove" };
-      await ctx.journal?.done("copy", dst, undo);
+      // Undo before the write (same rationale as copy): a displaced original is in the backup
+      // tree with a `done` row that restores it; a fresh write's undo is a remove. Identical to
+      // the `copy` resource's arm, so it routes through the identical helper.
+      await journalWrite("copy", dst, ctx, true);
       await mkdir(dirname(dst), { recursive: true });
       await Bun.write(dst, content);
       if (wantMode !== undefined) await chmod(dst, wantMode);

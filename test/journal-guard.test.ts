@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { profileContext } from "../src/config/profile.ts";
 import type { BoomContext } from "../src/context.ts";
+import { withDb } from "../src/engine/db.ts";
 import { Journal, journalWrite, listRuns, readRun } from "../src/engine/journal.ts";
 import { reconcile } from "../src/engine/reconcile.ts";
 import type { ReconcileCtx } from "../src/engine/types.ts";
@@ -113,6 +114,58 @@ test("an interrupted (uncommitted) run is still readable by a fresh connection",
 });
 
 // ---------------------------------------------------------- undo-before-write (the invariant)
+
+// A boomfile that exercises the write paths which journal: a link over a conflicting file, a
+// copy, and a rendered template — the three that hand-inlined intent/displace/done.
+const WRITERS = `[[section]]
+name = "W"
+
+[[section.link]]
+src = "src.txt"
+dst = "~/linked.txt"
+
+[[section.copy]]
+src = "src.txt"
+dst = "~/copied.txt"
+
+[[section.tmpl]]
+src = "t.tmpl"
+dst = "~/rendered.txt"
+`;
+
+// The structural guard behind this whole invariant. `intent(op, dst, plan)` takes the undo token
+// the mutation is ABOUT to become, and BOTH orphan readers filter `AND undo IS NOT NULL` — so an
+// intent row without one is invisible to `rollback` and counts as 0 in `rollback --list`. Seven
+// sites used to hand-inline intent→displace→done and omit the token, leaving exactly that hole
+// for any crash between the displace and the `done`.
+//
+// Asserted over the whole ops table rather than per-site on purpose: this fails for a NEW writer
+// that inlines the sequence too, which is the failure mode that produced the original seven.
+test("every intent row names its own undo (rollback cannot see one that does not)", async () => {
+  const sb = await sandbox(WRITERS);
+  await writeFile(join(sb.repo, "src.txt"), "hello");
+  await writeFile(join(sb.repo, "t.tmpl"), "value={{ host }}\n");
+  // A conflicting file at the link destination forces the overwrite arm (the one that displaces).
+  await writeFile(join(sb.home, "linked.txt"), "in the way");
+
+  expect(await reconcile("sync", sb.ctx, { linkMode: "overwrite" })).toBe(0);
+
+  const nullPlans = withDb(
+    sb.env,
+    (db) =>
+      db.query("SELECT op, dst FROM ops WHERE t = 'intent' AND undo IS NULL").all() as {
+        op: string;
+        dst: string;
+      }[],
+  );
+  expect(nullPlans).toEqual([]);
+  // Guard the guard: if the sync journaled nothing, the assertion above is vacuously true.
+  const intents = withDb(
+    sb.env,
+    (db) => (db.query("SELECT COUNT(*) AS n FROM ops WHERE t = 'intent'").get() as { n: number }).n,
+  );
+  expect(intents).toBeGreaterThan(0);
+});
 
 // `<home>/.claude/skills/boom` as a regular FILE makes applySkill's `mkdir(dirname(SKILL.md))`
 // throw ENOTDIR — a failure sited exactly between the journal write and the file write, which
