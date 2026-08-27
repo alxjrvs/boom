@@ -18,16 +18,16 @@
     "site:build": "bun run site/build.ts"
   },
   "engines": {
-    "bun": ">=1.3.0"
+    "bun": ">=1.4.0"
   },
   "dependencies": {
-    "@stricli/core": "1.2.7",
-    "valibot": "1.4.1"
+    "@stricli/core": "1.3.0",
+    "valibot": "1.4.2"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.0",
-    "@types/bun": "1.3.14",
-    "marked": "^18.0.6",
-    "typescript": "6.0.3"
+    "@biomejs/biome": "2.5.10",
+    "@types/bun": "1.4.0",
+    "marked": "18.0.11",
+    "typescript": "7.0.2"
   }
 }
