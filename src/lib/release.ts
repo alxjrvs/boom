@@ -1,5 +1,5 @@
 // Reading boom's own GitHub releases. Two consumers with opposite failure contracts —
-// `boom upgrade` (throws, the user asked for it) and the `[boom] upgrade_check_on_sync`
+// `boom upgrade` (throws, the user asked for it) and the `[boom] upgrade_on_sync`
 // nudge (never throws, a sync must not fail on a flaky network) — so both live here rather
 // than in `commands/upgrade.ts`: the engine used to reach *up* into commands for the second
 // one through a dynamic import that was only ever hiding the layer inversion from tsc.
@@ -23,7 +23,7 @@ export async function latestRelease(): Promise<Release> {
   return { tag, version: tag.replace(/^v/, "") };
 }
 
-// Best-effort latest-version probe for the `[boom] upgrade_check_on_sync` nudge: returns the
+// Best-effort latest-version probe for the `[boom] upgrade_on_sync` nudge: returns the
 // latest release version, or undefined on any error (offline, rate-limited, no release) —
 // never throws, so a sync-time check can't fail the sync. A 5s deadline keeps a flaky
 // network from stalling reconcile.

@@ -1,6 +1,6 @@
 // launchd helpers — the one place the "manage a macOS LaunchAgent" incantation lives, shared
 // by the `launchd` resource (link + lifecycle a user-authored plist) and the boom-owned
-// schedulers (`verify_schedule`/`code_fetch_schedule`, which generate their own plist). Every
+// schedulers (`[boom] schedule`, which generates its own plist). Every
 // launchctl call is darwin-only; callers OS-gate before reaching here. Pure builders
 // (parseInterval/renderAgentPlist/plistLabel) are unit-tested without touching launchctl.
 import { join } from "node:path";

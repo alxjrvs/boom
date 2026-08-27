@@ -133,7 +133,7 @@ const cmuxCommand = buildCommand<{ dryRun?: boolean }, [], BoomContext>({
 // `boom code fetch` — `git fetch` every repo under the code dir, so `origin/HEAD` is warm
 // whenever an agent's `worktree.baseRef: "fresh"` worktree is cut off it. Runs as the login
 // user, so it uses the existing git credential helper (headless, no biometric). Standalone,
-// and the command the `[boom] code_fetch_schedule` launchd timer invokes on its interval.
+// and the command the `[boom] schedule` launchd timer invokes on its interval.
 const fetchCommand = buildCommand<{ dryRun?: boolean }, [], BoomContext>({
   docs: { brief: "git fetch every code-dir repo (keep origin warm for agent worktrees)" },
   parameters: {
