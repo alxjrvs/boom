@@ -53,9 +53,11 @@ The site lives in `site/` and deploys to GitHub Pages on merge to `main`
 canvas-drawn hex-tunnel mark/glyphs on the cosmic design tokens); `site/build.ts`
 generates the doc pages from repo markdown.
 
-- **Version lockstep.** When you bump the release (`package.json` + `Formula/boom.rb`),
-  also bump the version printed in `site/index.html` (footer `.meta`, e.g. `v0.13.0`).
-  A stale footer version is drift — treat it as part of the version bump.
+- **Version lockstep.** A release bump is `package.json` + **every** version string in
+  `site/index.html` — there are three (JSON-LD `softwareVersion`, the nav `.bar-ver` badge,
+  the footer `.meta`), and `test/docs-hygiene.test.ts` fails if any disagrees. Do **not**
+  hand-edit `Formula/boom.rb`: the release workflow writes its version and sha256s from the
+  tag and opens its own auto-merging PR, so a manual bump is overwritten.
 - **True to the surface.** The landing is deliberately *high-level* (no exhaustive flag
   tables — the live reference is the generated docs). When commands, the `boomfile.toml`
   schema, or install steps change, update the landing's high-level copy and its
