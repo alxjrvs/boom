@@ -21,7 +21,7 @@ build: ## compile a standalone binary for the host
 	bun build src/index.ts --compile --outfile build/boom
 
 build-all: ## cross-compile the release target matrix
-	@for t in bun-darwin-arm64 bun-darwin-x64 bun-linux-x64; do \
+	@for t in bun-darwin-arm64 bun-darwin-x64 bun-linux-x64 bun-linux-arm64; do \
 		echo "compiling $$t"; \
 		bun build src/index.ts --compile --target=$$t --outfile build/boom-$$t; \
 	done
