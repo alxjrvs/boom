@@ -64,6 +64,9 @@ const setCommand = buildCommand<{ sync?: boolean; verbose?: boolean }, [string],
         verbose: flags.verbose,
         command: "source",
       });
+    // Explicit: the catch above returns an Error to signal failure, so "success" is a value
+    // here, not a fallthrough. Required by noImplicitReturns.
+    return undefined;
   },
 });
 
