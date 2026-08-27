@@ -31,6 +31,30 @@ test("package.json description uses the current verb names, not the retired ones
   expect(pkg.description).not.toContain("botu");
 });
 
+// `.bun-version` is the single Bun pin every workflow reads via setup-bun's `bun-version-file`,
+// and it is what `bun build --compile` embeds into every shipped binary. Two things have to agree
+// with it or the tree type-checks against a runtime it does not ship:
+//   • `@types/bun` — types newer than the runtime describe APIs the binary will not have, which
+//     is how `Bun.TOML.stringify` type-checks locally and throws for a user;
+//   • `engines.bun` — the floor a contributor is told to build with.
+// Checked here rather than trusted, because the whole point of collapsing four literal
+// `bun-version:` pins into one file is that the remaining copies are few enough to enforce.
+test("the Bun pin, its types, and the engines floor agree", () => {
+  const pin = readFileSync(join(import.meta.dir, "../.bun-version"), "utf8").trim();
+  expect(pin).toMatch(/^\d+\.\d+\.\d+$/);
+  expect(pkg.devDependencies["@types/bun"]).toBe(pin);
+  expect(pkg.engines.bun).toBe(`>=${pin}`);
+
+  // And no workflow may reintroduce a literal pin alongside the file. Asserted on the offending
+  // LINES rather than the file text: matching the whole file makes a failure dump the entire
+  // workflow into the diff, which buries the one line that actually needs changing.
+  for (const wf of ["ci.yml", "release.yml", "pages.yml"]) {
+    const text = readFileSync(join(import.meta.dir, "../.github/workflows", wf), "utf8");
+    const literal = text.split("\n").filter((l) => /bun-version:\s*\d/.test(l));
+    expect(literal, `${wf} should read .bun-version, not pin a literal`).toEqual([]);
+  }
+});
+
 // The version-lockstep rule in CLAUDE.md has four locations and, until this test, one of them
 // was enforced: `Formula/boom.rb` is WRITTEN by the release workflow and cannot drift, the
 // `version-guard` CI job checks only that package.json moved one semver step from main, and

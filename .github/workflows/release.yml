@@ -43,12 +43,12 @@ jobs:
       tag: ${{ steps.v.outputs.tag }}
       new: ${{ steps.v.outputs.new }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # need the tags to tell whether this version already shipped
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version-file: .bun-version
       - run: bun install --frozen-lockfile
 
       # Gate the release on the same checks ci enforces — never ship a red tree.
@@ -86,7 +86,7 @@ jobs:
 
       - name: Upload unsigned binaries
         if: steps.v.outputs.new == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: boom-unsigned
           path: dist/boom-*
@@ -102,7 +102,7 @@ jobs:
       # Evaluates to the string "true"/"false" without ever exposing the secret value.
       HAS_SIGNING: ${{ secrets.MACOS_CERT_P12 != '' }}
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: boom-unsigned
           path: dist
@@ -149,7 +149,7 @@ jobs:
           done
 
       - name: Upload signed macOS binaries
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: boom-darwin-signed
           path: dist/boom-bun-darwin-*
@@ -161,11 +161,11 @@ jobs:
     steps:
       # Linux binary from the build job; the signed macOS binaries override their unsigned
       # counterparts. download-artifact merges into the same dir, signed copies last.
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: boom-unsigned
           path: dist
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: boom-darwin-signed
           path: dist
@@ -176,7 +176,7 @@ jobs:
         run: cd dist && sha256sum boom-* > SHA256SUMS
 
       - name: Tag + release with the binaries attached
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.build.outputs.tag }}
           name: ${{ needs.build.outputs.tag }}
@@ -198,7 +198,7 @@ jobs:
     steps:
       # Check out with RELEASE_PAT when present: a PR whose branch was pushed by the
       # default token can't trigger the required ci checks, so it could never auto-merge.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: main
           token: ${{ secrets.RELEASE_PAT || github.token }}
