@@ -1,16 +1,17 @@
 // Resolve, parse, and validate a boomfile.toml. Resolution order mirrors the bash
 // engine: $BOOM_CONFIG → breadcrumb (from `boom source set`) → cwd; first dir
-// with a boomfile.toml wins. Parsing is smol-toml; validation is the valibot schema.
+// with a boomfile.toml wins. Parsing is Bun's own TOML (lib/toml.ts); validation is the
+// valibot schema.
 //
 // Config is repo-only: the breadcrumb always names a boom-managed clone of a git
 // remote (config/remote.ts owns cloning + writing it), never an arbitrary local
 // folder — so it carries the remote alongside the resolved path.
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { parse as parseToml } from "smol-toml";
 import * as v from "valibot";
 import type { BoomContext } from "../context.ts";
 import { type Env, stateHome } from "../lib/paths.ts";
+import { parseToml } from "../lib/toml.ts";
 import { type Boomfile, BoomfileSchema, type Overlay, OverlaySchema } from "./schema.ts";
 
 export const CONFIG_FILE = "boomfile.toml";

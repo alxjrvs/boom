@@ -11,12 +11,12 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { buildCommand, buildRouteMap } from "@stricli/core";
-import { parse as parseToml } from "smol-toml";
 import { CONFIG_FILE, loadConfig, NO_CONFIG_REPO_MSG, resolveConfigDir } from "../config/load.ts";
 import { resolveModule } from "../config/modules.ts";
 import { insertUseRef } from "../config/registry.ts";
 import type { BoomContext } from "../context.ts";
 import { bandsReporter, type Reporter } from "../lib/reporter.ts";
+import { parseToml } from "../lib/toml.ts";
 import { jsonFlag, str } from "./flags.ts";
 
 // `boom module list` (default) — the original behavior: list the boomfile's `use` modules and

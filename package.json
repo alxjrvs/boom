@@ -22,7 +22,6 @@
   },
   "dependencies": {
     "@stricli/core": "1.2.7",
-    "smol-toml": "1.6.1",
     "valibot": "1.4.1"
   },
   "devDependencies": {

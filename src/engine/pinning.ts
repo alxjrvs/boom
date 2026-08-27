@@ -15,6 +15,7 @@ import type { BoomContext } from "../context.ts";
 import { pathExists } from "../lib/fs.ts";
 import { captureArgv, hasCommand } from "../lib/proc.ts";
 import { bandsReporter, type Reporter } from "../lib/reporter.ts";
+import { parseToml } from "../lib/toml.ts";
 
 // Resolved versions, grouped by manager. A plain name→version map per manager — enough to
 // diff, small enough to read.
@@ -132,13 +133,14 @@ export async function writeLock(repo: string, lock: Lock): Promise<void> {
   await Bun.write(lockPath(repo), serializeLock(lock));
 }
 
-// Read + parse boom.lock, or undefined when absent. Uses smol-toml (already a dep); a malformed
-// lock throws, surfaced to the user as a failure rather than silently treated as empty.
+// Read + parse boom.lock, or undefined when absent. A malformed lock throws, surfaced to the
+// user as a failure rather than silently treated as empty. The dynamic import this used to do
+// existed to keep a dependency off the hot path; `lib/toml.ts` wraps a runtime built-in, so it
+// is a plain static import like any other.
 export async function readLock(repo: string): Promise<Lock | undefined> {
   const file = lockPath(repo);
   if (!(await pathExists(file))) return undefined;
-  const { parse } = await import("smol-toml");
-  const raw = parse(await Bun.file(file).text()) as {
+  const raw = parseToml(await Bun.file(file).text()) as {
     brew?: Record<string, string>;
     mise?: Record<string, string>;
   };

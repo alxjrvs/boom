@@ -368,6 +368,6 @@ make fmt     # biome autofix + format
 ```
 
 Built with [`@stricli/core`](https://github.com/bloomberg/stricli) (CLI),
-[valibot](https://valibot.dev) + [smol-toml](https://github.com/squirrelchat/smol-toml)
-(config), and Bun's `--compile`. Tests sandbox a throwaway `$HOME` +
-`$XDG_STATE_HOME`, so they never touch the real machine.
+[valibot](https://valibot.dev) over Bun's own TOML parser (config), and Bun's
+`--compile`. Tests sandbox a throwaway `$HOME` + `$XDG_STATE_HOME`, so they
+never touch the real machine.
