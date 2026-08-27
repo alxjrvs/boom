@@ -90,13 +90,19 @@ async function readLegacyManifest(env: Env): Promise<ManifestEntry[]> {
   for (const line of text.split("\n")) {
     if (line.length === 0) continue;
     const parts = line.split("\t");
-    if (parts.length >= 3)
-      out.push({
-        kind: parts[0] === "copy" ? "copy" : "link",
-        dst: parts[1] as string,
-        src: parts[2] as string,
-      });
-    else out.push({ kind: "link", dst: parts[0] as string, src: "" });
+    // A short row is skipped, not turned into an entry with an empty `src`. The bare-dst format
+    // that fallback existed for was only ever written under the OLD name, at
+    // ~/.local/state/botu/manifest: three-column TSV landed in cc29b05, before 7677c8e (v0.4.0)
+    // moved the state dir botu → boom. `manifestPath` reads the boom path, so every row it can
+    // ever see is TSV, and the only way to reach the old branch now is a truncated line — where
+    // fabricating `src: ""` was actively harmful, because reconcile's reap then fell back to
+    // matching any link under the repo and could reap a destination this row never named.
+    if (parts.length < 3) continue;
+    out.push({
+      kind: parts[0] === "copy" ? "copy" : "link",
+      dst: parts[1] as string,
+      src: parts[2] as string,
+    });
   }
   return out;
 }
