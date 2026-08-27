@@ -101,7 +101,10 @@ export async function reconcileOsxDefault(entry: OsxDefault, ctx: ReconcileCtx):
         type,
         prior: ok ? cur : null,
       };
-      await ctx.journal?.intent("osx", disp);
+      // Same token on both rows: the `defaults write` below is the mutation, so nothing is
+      // displaced in the intent→done window and this site was never at risk. Recording it
+      // anyway keeps "every intent row names its own undo" true of the whole journal.
+      await ctx.journal?.intent("osx", disp, undo);
       await ctx.journal?.done("osx", disp, undo);
       // The journal row ages out (pruneRuns keeps 10 runs); the machine's *pre-boom* value has
       // to outlive it or `boom uninstall` would later "restore" boom's own earlier value as if

@@ -62,11 +62,21 @@ function plannedUndo(dst: string, backupRoot: string | undefined): UndoToken {
   return backupRoot ? { kind: "restore", from: join(backupRoot, dst) } : { kind: "remove" };
 }
 
-export async function journalWrite(op: string, file: string, ctx: ReconcileCtx): Promise<void> {
+// `recursive` is passed through to `displace` for the callers whose conflicting destination
+// may be a directory (a link/copy/mkdir landing where a real directory used to be). It mirrors
+// journalRemove's parameter of the same name; without it those callers had to inline the
+// sequence to reach `displace`'s third argument, which is how six of them ended up recording a
+// null plan token.
+export async function journalWrite(
+  op: string,
+  file: string,
+  ctx: ReconcileCtx,
+  recursive = false,
+): Promise<void> {
   if (!ctx.journal) return;
   const exists = await pathExists(file);
   await ctx.journal.intent(op, file, exists ? plannedUndo(file, ctx.backupRoot) : { kind: "remove" });
-  const undo: UndoToken = exists ? await displace(file, ctx.backupRoot) : { kind: "remove" };
+  const undo: UndoToken = exists ? await displace(file, ctx.backupRoot, recursive) : { kind: "remove" };
   await ctx.journal.done(op, file, undo);
 }
 

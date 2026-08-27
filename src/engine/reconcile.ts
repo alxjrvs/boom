@@ -12,7 +12,7 @@ import { displayPath, filesEqual, linkTarget, pathExists } from "../lib/fs.ts";
 import { acquireLock } from "../lib/lock.ts";
 import { backupsDir } from "../lib/paths.ts";
 import { bandsReporter, REPORT_SCHEMA_VERSION } from "../lib/reporter.ts";
-import { displace, Journal, newRunId, pruneRuns, readRun } from "./journal.ts";
+import { Journal, journalRemove, newRunId, pruneRuns, readRun } from "./journal.ts";
 import { auditLockDrift } from "./pinning.ts";
 import { finalizeResources, reconcileSection } from "./registry.ts";
 import { installAskpass } from "./secrets/askpass.ts";
@@ -87,9 +87,7 @@ async function reapOrphans(ctx: ReconcileCtx, prior: readonly ManifestEntry[]): 
       // Same transaction as every other mutation here: journaled with a backup, so
       // `boom rollback` can restore a reaped file instead of the deletion being a
       // silent, un-undoable side effect outside the run's safety net.
-      await ctx.journal?.intent("reap", dst);
-      const undo = await displace(dst, ctx.backupRoot);
-      await ctx.journal?.done("reap", dst, undo);
+      await journalRemove("reap", dst, ctx);
       ctx.report.ok(`reaped orphan ${disp}`);
     }
   };
