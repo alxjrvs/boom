@@ -1,27 +1,14 @@
-// Minimal ANSI palette, gated by a color flag (NO_COLOR / non-TTY → plain text).
-// Kept tiny and explicit (mirrors the bash engine's lib.sh palette) rather than
-// pulling a dependency — legibility over abstraction.
+// The terminal palette, gated by a color flag (NO_COLOR / non-TTY → plain text).
 //
 // The enable decision defers to Bun.enableANSIColors, the runtime's own resolution
 // of the whole matrix a well-behaved CLI must honor — stdout is-a-TTY, NO_COLOR,
 // FORCE_COLOR, and TERM=dumb — so piping (`boom verify > run.log` / `| grep`) no
 // longer leaks escape codes, which the old NO_COLOR-only check silently did.
-const CODES = {
-  bold: "\x1b[1m",
-  dim: "\x1b[2m",
-  red: "\x1b[31m",
-  green: "\x1b[32m",
-  yellow: "\x1b[33m",
-  cyan: "\x1b[36m",
-} as const;
-
+//
+// There used to be a second, named-ANSI palette here (bold/dim/red/green/yellow/cyan) with a
+// `paint()` beside this one. It existed only for the reporter's `classic` surface; both went
+// when that surface did. Everything boom prints now tints from a COSMIC hex.
 const RESET = "\x1b[0m";
-
-export type ColorName = keyof typeof CODES;
-
-export function paint(enabled: boolean, name: ColorName, s: string): string {
-  return enabled ? `${CODES[name]}${s}${RESET}` : s;
-}
 
 // The "cosmic" palette — the site's design tokens (site/index.html) ported to the terminal
 // as 24-bit truecolor, so the CLI and the landing page share one identity. Brand hues use the
@@ -43,15 +30,23 @@ export const COSMIC = {
 // splash panels (cyan → magenta → violet → solar → repeat).
 export const BAND_CYCLE = [COSMIC.cyan, COSMIC.magenta, COSMIC.violet, COSMIC.solar] as const;
 
-// `#rrggbb` → an SGR truecolor foreground escape. No validation: the inputs are the frozen
-// COSMIC constants, not user data. Returns the string unpainted when color is disabled, so
-// NO_COLOR / a pipe get plain text exactly like paint().
+// `#rrggbb` → an SGR truecolor foreground escape, via the runtime's own converter rather than
+// three hand-rolled parseInt slices. Returns the string unpainted when color is disabled, so
+// NO_COLOR / a pipe get plain text.
+//
+// "ansi-16m", not "ansi", and the distinction is deliberate rather than observed: both emit the
+// same truecolor escape on a capable terminal (they agree under `bun test`), but "ansi" is
+// documented to downgrade to the detected color depth, which would make boom's output depend on
+// the environment's capability probe. Whether to color at all is already decided once, by
+// colorEnabled/Bun.enableANSIColors; the escape itself should not be re-negotiated per call.
+// "ansi-16m" is byte-identical to the parseInt version this replaced, for every COSMIC color.
+//
+// Bun.color returns null on unparseable input, which a template literal would render as the text
+// "null" rather than throwing. Safe here because the inputs are the frozen COSMIC constants, not
+// user data — the same assumption the parseInt version made when it would have produced NaN.
 export function paintHex(enabled: boolean, hex: string, s: string): string {
   if (!enabled) return s;
-  const r = Number.parseInt(hex.slice(1, 3), 16);
-  const g = Number.parseInt(hex.slice(3, 5), 16);
-  const b = Number.parseInt(hex.slice(5, 7), 16);
-  return `\x1b[38;2;${r};${g};${b}m${s}${RESET}`;
+  return `${Bun.color(hex, "ansi-16m")}${s}${RESET}`;
 }
 
 export function colorEnabled(env: Record<string, string | undefined>): boolean {

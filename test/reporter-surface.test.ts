@@ -5,6 +5,7 @@
 // the refactor moved no bytes: glyph, indent, which stream, whether quiet holds it back, and the
 // exit code.
 import { expect, test } from "bun:test";
+import { COSMIC, paintHex } from "../src/lib/color.ts";
 import { Reporter, type ReportSurface } from "../src/lib/reporter.ts";
 
 function capture(): { s: string; write(x: string): void } {
@@ -37,16 +38,6 @@ function run(surface: ReportSurface, verbose: boolean): { out: string; err: stri
 }
 
 const GOLDEN: Record<string, { out: string; err: string; code: number }> = {
-  "classic quiet": {
-    out: "\n==> Section One\n  ✓ did a thing\n    a note\n  ~ would do\n  → careful\n\n",
-    err: "  ✗ broke\n  ✗ 1 failure(s)\n",
-    code: 1,
-  },
-  "classic verbose": {
-    out: "\n==> Section One\n  ✓ did a thing\n  - already fine\n    a note\n  ~ would do\n  → careful\n\n",
-    err: "  ✗ broke\n  ✗ 1 failure(s)\n",
-    code: 1,
-  },
   "bands quiet": {
     out: "\n▎ Section One...!\n  ✓ did a thing\n    a note\n  ~ would do\n  → careful\n\n▎ DEMO...FAILED!\n   1 failure(s), 1 warning(s) · <t>\n",
     err: "  ✗ broke\n",
@@ -72,8 +63,6 @@ const GOLDEN: Record<string, { out: string; err: string; code: number }> = {
 };
 
 const CASES: Array<[string, ReportSurface, boolean]> = [
-  ["classic quiet", "classic", false],
-  ["classic verbose", "classic", true],
   ["bands quiet", "bands", false],
   ["bands verbose", "bands", true],
   ["category quiet", "category", false],
@@ -126,7 +115,7 @@ test("json finish() draws no verdict band", () => {
 // `skip` is the one level quiet holds back. It must still reach `records`, on every surface —
 // that is what makes `--json` a complete report rather than a filtered one.
 test("skip is suppressed on the quiet human surfaces but always recorded", () => {
-  for (const surface of ["classic", "bands", "category"] as const) {
+  for (const surface of ["bands", "category"] as const) {
     const out = capture();
     const err = capture();
     const r = new Reporter({ out, err }, { color: false, surface });
@@ -141,4 +130,27 @@ test("skip is suppressed on the quiet human surfaces but always recorded", () =>
       surface,
     ).toContain("skip");
   }
+});
+
+// The golden snapshots above all run with `color: false`, so they never exercise paintHex's
+// painting branch — which means they could not have caught a change in the escape it emits.
+// paintHex now delegates to Bun.color instead of hand-parsing the hex with three parseInt
+// slices, so this pins the actual bytes for every color boom can print.
+//
+// Note what this does NOT pin: "ansi-16m" vs plain "ansi" is invisible here, because both emit
+// the same escape when the runtime resolves full color depth. The reason color.ts names
+// "ansi-16m" is to keep the escape from depending on a capability probe at all, not because this
+// test could tell them apart — swapping it does not fail this.
+test("paintHex emits the same truecolor escape for every COSMIC color", () => {
+  const handRolled = (hex: string): string => {
+    const r = Number.parseInt(hex.slice(1, 3), 16);
+    const g = Number.parseInt(hex.slice(3, 5), 16);
+    const b = Number.parseInt(hex.slice(5, 7), 16);
+    return `\x1b[38;2;${r};${g};${b}m`;
+  };
+  for (const [name, hex] of Object.entries(COSMIC)) {
+    expect(paintHex(true, hex, "x"), name).toBe(`${handRolled(hex)}x\x1b[0m`);
+  }
+  // Disabled means untouched — NO_COLOR and pipes get plain text, no escapes at all.
+  expect(paintHex(false, COSMIC.cyan, "x")).toBe("x");
 });
