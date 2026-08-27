@@ -9,7 +9,6 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { profileContext } from "../src/config/profile.ts";
-import type { BoomContext } from "../src/context.ts";
 import { withDb } from "../src/engine/db.ts";
 import { Journal, journalWrite, listRuns, readRun } from "../src/engine/journal.ts";
 import { reconcile } from "../src/engine/reconcile.ts";
@@ -17,44 +16,16 @@ import type { ReconcileCtx } from "../src/engine/types.ts";
 import { pathExists } from "../src/lib/fs.ts";
 import type { Env } from "../src/lib/paths.ts";
 import { Reporter } from "../src/lib/reporter.ts";
+import { makeSandbox, type Sandbox } from "./support/sandbox.ts";
+
+const sandbox = (boomfile: string): Promise<Sandbox> => makeSandbox(boomfile, { prefix: "boom-jrng-" });
 
 async function stateEnv(): Promise<{ XDG_STATE_HOME: string }> {
   return { XDG_STATE_HOME: await mkdtemp(join(tmpdir(), "boom-jrn-")) };
 }
 
-interface Sandbox {
-  readonly home: string;
-  readonly repo: string;
-  readonly env: Env;
-  readonly ctx: BoomContext;
-  out(): string;
-}
-
 // Sandboxed $HOME + $XDG_STATE_HOME + config repo, driving reconcile() in-process (the shape
 // resources-new.test.ts uses). Nothing here touches the real machine.
-async function sandbox(boomfile: string): Promise<Sandbox> {
-  const base = await mkdtemp(join(tmpdir(), "boom-jrng-"));
-  const home = join(base, "home");
-  const repo = join(base, "repo");
-  await mkdir(home, { recursive: true });
-  await mkdir(repo, { recursive: true });
-  await writeFile(join(repo, "boomfile.toml"), boomfile);
-  const env: Env = {
-    HOME: home,
-    XDG_STATE_HOME: join(base, "state"),
-    BOOM_CONFIG: repo,
-    NO_COLOR: "1",
-    GIT_CONFIG_NOSYSTEM: "1",
-  };
-  const buf = { out: "" };
-  const write = (s: string): void => {
-    buf.out += s;
-  };
-  const proc = { stdout: { write }, stderr: { write }, env, exitCode: 0 };
-  const ctx = { process: proc, env, cwd: repo } as unknown as BoomContext;
-  return { home, repo, env, ctx, out: () => buf.out };
-}
-
 // The ONE place this file constructs a ReconcileCtx. Every field but `journal`/`backupRoot` is
 // required, so a bare literal per test would mean editing N of them the next time the interface
 // grows a field — and a `as unknown as ReconcileCtx` cast would erase the very type the

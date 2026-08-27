@@ -40,45 +40,17 @@ import { headSha } from "../src/lib/git.ts";
 import { acquireLock } from "../src/lib/lock.ts";
 import { notifyArgv } from "../src/lib/notify.ts";
 import { backupsDir } from "../src/lib/paths.ts";
+import { makeSandbox, type Sandbox } from "./support/sandbox.ts";
 
-interface Sandbox {
-  readonly home: string;
-  readonly repo: string;
-  readonly base: string;
-  readonly env: Record<string, string | undefined>;
-  readonly ctx: BoomContext;
-  out(): string;
-}
+const sandbox = (boomfile: string, opts: { emptyPath?: boolean } = {}): Promise<Sandbox> =>
+  makeSandbox(boomfile, {
+    prefix: "boom-feat-",
+    emptyPath: opts.emptyPath ?? false,
+    env: { BOOM_HOST: "testhost" },
+  });
 
 // A sandbox like engine.test's, plus an `emptyPath` switch: point PATH at a dir with no tools so
 // `hasCommand` deterministically reports brew/op/mise absent (for the secret + adopt paths).
-async function sandbox(boomfile: string, opts: { emptyPath?: boolean } = {}): Promise<Sandbox> {
-  const base = await mkdtemp(join(tmpdir(), "boom-feat-"));
-  const home = join(base, "home");
-  const repo = join(base, "repo");
-  const emptyBin = join(base, "empty-bin");
-  await mkdir(home, { recursive: true });
-  await mkdir(repo, { recursive: true });
-  await mkdir(emptyBin, { recursive: true });
-  await writeFile(join(repo, "boomfile.toml"), boomfile);
-  const env: Record<string, string | undefined> = {
-    HOME: home,
-    XDG_STATE_HOME: join(base, "state"),
-    BOOM_CONFIG: repo,
-    BOOM_HOST: "testhost",
-    NO_COLOR: "1",
-    GIT_CONFIG_NOSYSTEM: "1",
-    PATH: opts.emptyPath ? emptyBin : process.env.PATH,
-  };
-  const buf = { out: "" };
-  const write = (s: string): void => {
-    buf.out += s;
-  };
-  const proc = { stdout: { write }, stderr: { write }, env, exitCode: 0 };
-  const ctx = { process: proc, env, cwd: repo } as unknown as BoomContext;
-  return { home, repo, base, env, ctx, out: () => buf.out };
-}
-
 // Write an executable fake binary into `dir`; the caller prepends `dir` to PATH so the
 // sandboxed code shells out to this instead of the real tool.
 async function fakeBin(dir: string, name: string, script: string): Promise<void> {
