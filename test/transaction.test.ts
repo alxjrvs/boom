@@ -14,64 +14,15 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
-import type { BoomContext } from "../src/context.ts";
 import { Journal, listRuns, newRunId, readRun } from "../src/engine/journal.ts";
 import { reconcile } from "../src/engine/reconcile.ts";
 import { listRollbacks, rollback } from "../src/engine/rollback.ts";
 import { readManifest } from "../src/engine/state.ts";
 import { backupTo, linkTarget, pathExists, stat } from "../src/lib/fs.ts";
 import { backupsDir } from "../src/lib/paths.ts";
+import { makeSandbox, type Sandbox } from "./support/sandbox.ts";
 
-interface Sandbox {
-  readonly home: string;
-  readonly repo: string;
-  readonly env: Record<string, string | undefined>;
-  readonly ctx: BoomContext;
-  out(): string;
-  clear(): void;
-  write(file: string, body: string): Promise<void>;
-}
-
-async function sandbox(boomfile: string): Promise<Sandbox> {
-  const base = await mkdtemp(join(tmpdir(), "boom-tx-"));
-  const home = join(base, "home");
-  const repo = join(base, "repo");
-  await mkdir(home, { recursive: true });
-  await mkdir(repo, { recursive: true });
-  await writeFile(join(repo, "boomfile.toml"), boomfile);
-  const env: Record<string, string | undefined> = {
-    HOME: home,
-    XDG_STATE_HOME: join(base, "state"),
-    BOOM_CONFIG: repo,
-    NO_COLOR: "1",
-  };
-  const buf = { out: "" };
-  const proc = {
-    stdout: {
-      write: (s: string) => {
-        buf.out += s;
-      },
-    },
-    stderr: {
-      write: (s: string) => {
-        buf.out += s;
-      },
-    },
-    env,
-    exitCode: 0,
-  };
-  return {
-    home,
-    repo,
-    env,
-    ctx: { process: proc, env, cwd: repo } as unknown as BoomContext,
-    out: () => buf.out,
-    clear: () => {
-      buf.out = "";
-    },
-    write: (file, body) => writeFile(join(repo, file), body),
-  };
-}
+const sandbox = (boomfile: string): Promise<Sandbox> => makeSandbox(boomfile, { prefix: "boom-tx-" });
 
 // Snapshot every entry under `dir` (path → bytes, or a `symlink:` marker), NOT following
 // symlinks. Used to assert the config repo comes out of a sync byte-identical: the `**` bug

@@ -6,62 +6,13 @@ import { realpathSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { BoomContext } from "../src/context.ts";
 import { readRun } from "../src/engine/journal.ts";
 import { reconcile } from "../src/engine/reconcile.ts";
 import { readManifest, writeManifest } from "../src/engine/state.ts";
 import { linkTarget, pathExists } from "../src/lib/fs.ts";
+import { makeSandbox, type Sandbox } from "./support/sandbox.ts";
 
-interface Sandbox {
-  readonly home: string;
-  readonly repo: string;
-  readonly ctx: BoomContext;
-  out(): string;
-  clear(): void;
-}
-
-async function sandbox(boomfile: string): Promise<Sandbox> {
-  const base = await mkdtemp(join(tmpdir(), "boom-eng-"));
-  const home = join(base, "home");
-  const repo = join(base, "repo");
-  await mkdir(home, { recursive: true });
-  await mkdir(repo, { recursive: true });
-  await writeFile(join(repo, "boomfile.toml"), boomfile);
-  const env: Record<string, string | undefined> = {
-    HOME: home,
-    XDG_STATE_HOME: join(base, "state"),
-    BOOM_CONFIG: repo,
-    NO_COLOR: "1",
-    // Never let a repo's git sync (src/lib/git.ts) see this machine's real system-wide
-    // git config (e.g. a global commit hook) — HOME is already sandboxed above.
-    GIT_CONFIG_NOSYSTEM: "1",
-  };
-  const buf = { out: "" };
-  const proc = {
-    stdout: {
-      write: (s: string) => {
-        buf.out += s;
-      },
-    },
-    stderr: {
-      write: (s: string) => {
-        buf.out += s;
-      },
-    },
-    env,
-    exitCode: 0,
-  };
-  const ctx = { process: proc, env, cwd: repo } as unknown as BoomContext;
-  return {
-    home,
-    repo,
-    ctx,
-    out: () => buf.out,
-    clear: () => {
-      buf.out = "";
-    },
-  };
-}
+const sandbox = (boomfile: string): Promise<Sandbox> => makeSandbox(boomfile, { prefix: "boom-eng-" });
 
 test("link: sync → verify ok → uninstall removes", async () => {
   const sb = await sandbox(`[[section]]\nname = "Shell"\nlink = [{ src = ".zshrc", dst = "~/.zshrc" }]\n`);
