@@ -143,7 +143,7 @@ ahead-of-upstream) — `boom source push` or `boom source reset` first, then re-
 `boomfile.toml` is a TOML document validated against a schema (`src/config/schema.ts`,
 valibot). It is grouped into `[[section]]`s; within a section, resources run in a
 fixed phase order:
-`link → copy → tmpl → secret → dir → pkg → osx_default → launchd → systemd → run → check → hook`.
+`link → copy → tmpl → secret → dir → pkg → osx_default → launchd → systemd → run → check → absent → hook`.
 Resources:
 
 - `link` / `copy` `= [{ src, dst, mode? }]` — place a repo file at `dst` (symlink vs
@@ -214,6 +214,15 @@ Resources:
   assertions: every `present` regex must match and every `absent` must not. On `verify` this
   folds into the exit code + JSON report; on `sync`, `repair` (a shell command, run only when
   the assertion currently fails) converges it. `missing_file` defaults to `fail`
+- `absent = [{ path, message?, recursive? }]` — a path that must **not** exist: `sync` removes
+  it, `verify` fails while it is there, `uninstall` leaves it alone (boom did not create it).
+  The inverse of `check`, and the shape `check` cannot express — `missing_file = "pass"` says
+  absent is *acceptable*, never *required*. For files a tool re-creates behind your back: an
+  editor's local override, a credential cache, a `settings.local.json` an agent writes on an
+  "always allow" click. Removal goes through the journal, so the file lands in the run's backup
+  tree and `boom rollback` restores it — the difference between this and a `run` step calling
+  `rm`, which destroys. A directory needs `recursive = true`, so one typo in a path is not a
+  silent recursive delete
 - `hook = [{ name, with? }]` — load `hooks/<name>.ts`, the TS resource-type extension; `with`
   carries arbitrary (TOML-typed) values, not just strings
 

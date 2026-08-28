@@ -194,6 +194,10 @@ systemd = [{ name = "sync-code", exec = "boom code fetch", timer = "hourly" }]
 name = "Guardrails"
 # Verify-time content assertions — legible where a grep-in-a-run would be escaping-heavy.
 check = [{ path = "~/.claude/settings.json", absent = ["osxkeychain"], message = "cached-PAT regression" }]
+# And the inverse: a path that must NOT exist. Sync removes it (into the backup tree, so
+# `boom rollback` restores it), verify fails while it is there. For files a tool re-creates
+# behind your back — an agent writing settings.local.json on an "always allow" click.
+absent = [{ path = "~/.claude/settings.local.json", message = "machine-local override" }]
 
 [[section]]
 name = "Custom"
