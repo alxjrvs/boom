@@ -990,3 +990,131 @@ test("copy: mode drift on an unchanged file is seen by verify and repaired by sy
   expect(await mode(dst)).toBe("600");
   expect(await reconcile("verify", sb.ctx, {})).toBe(0);
 });
+
+// --- check: json assertions ------------------------------------------------
+// A regex over a JSON file's TEXT is the wrong tool for asserting about its STRUCTURE. The
+// reference consumer was writing patterns like '"model"\s*:\s*"[^"]*fable' and hoping the
+// formatting never changed, and hand-rolling `jq` walks in `run` steps for anything a regex
+// could not express. These assert against the parsed document instead.
+
+test("check json: equals passes on a match and fails with both values named", async () => {
+  const sb = await sandbox(
+    `[[section]]\nname = "c"\ncheck = [{ path = "~/.s.json", json = [{ key = "permissions.defaultMode", equals = "auto" }] }]\n`,
+  );
+  await writeFile(join(sb.home, ".s.json"), JSON.stringify({ permissions: { defaultMode: "auto" } }));
+  expect(await reconcile("verify", sb.ctx, { verbose: true })).toBe(0);
+
+  const bad = await sandbox(
+    `[[section]]\nname = "c"\ncheck = [{ path = "~/.s.json", json = [{ key = "permissions.defaultMode", equals = "auto" }] }]\n`,
+  );
+  await writeFile(join(bad.home, ".s.json"), JSON.stringify({ permissions: { defaultMode: "manual" } }));
+  expect(await reconcile("verify", bad.ctx, {})).toBe(1);
+  expect(bad.out()).toContain('permissions.defaultMode is "manual", expected "auto"');
+});
+
+test("check json: absent distinguishes a missing key from a null one", async () => {
+  // `null` is a value a config can MEAN, so "absent" and "null" cannot be the same answer.
+  const sb = await sandbox(
+    `[[section]]\nname = "c"\ncheck = [{ path = "~/.s.json", json = [{ key = "a", absent = true }] }]\n`,
+  );
+  await writeFile(join(sb.home, ".s.json"), JSON.stringify({ a: null }));
+  expect(await reconcile("verify", sb.ctx, {})).toBe(1);
+  expect(sb.out()).toContain("a should be absent, is null");
+
+  const gone = await sandbox(
+    `[[section]]\nname = "c"\ncheck = [{ path = "~/.s.json", json = [{ key = "a", absent = true }] }]\n`,
+  );
+  await writeFile(join(gone.home, ".s.json"), JSON.stringify({ b: 1 }));
+  expect(await reconcile("verify", gone.ctx, {})).toBe(0);
+});
+
+test("check json: a numeric segment indexes an array", async () => {
+  const sb = await sandbox(
+    `[[section]]\nname = "c"\ncheck = [{ path = "~/.s.json", json = [{ key = "hooks.PreToolUse.0.matcher", equals = "Bash" }] }]\n`,
+  );
+  await writeFile(join(sb.home, ".s.json"), JSON.stringify({ hooks: { PreToolUse: [{ matcher: "Bash" }] } }));
+  expect(await reconcile("verify", sb.ctx, {})).toBe(0);
+});
+
+test("check json: contains asserts array membership", async () => {
+  const sb = await sandbox(
+    `[[section]]\nname = "c"\ncheck = [{ path = "~/.s.json", json = [{ key = "allow", contains = "$defaults" }] }]\n`,
+  );
+  await writeFile(join(sb.home, ".s.json"), JSON.stringify({ allow: ["$defaults", "x"] }));
+  expect(await reconcile("verify", sb.ctx, {})).toBe(0);
+
+  const bad = await sandbox(
+    `[[section]]\nname = "c"\ncheck = [{ path = "~/.s.json", json = [{ key = "allow", contains = "$defaults" }] }]\n`,
+  );
+  await writeFile(join(bad.home, ".s.json"), JSON.stringify({ allow: ["x"] }));
+  expect(await reconcile("verify", bad.ctx, {})).toBe(1);
+  expect(bad.out()).toContain("allow does not contain");
+});
+
+test("check json: a document that does not parse fails once, with the parse error", async () => {
+  const sb = await sandbox(
+    `[[section]]\nname = "c"\ncheck = [{ path = "~/.s.json", json = [{ key = "a", present = true }, { key = "b", present = true }] }]\n`,
+  );
+  await writeFile(join(sb.home, ".s.json"), "{ not json");
+  expect(await reconcile("verify", sb.ctx, {})).toBe(1);
+  expect(sb.out()).toContain("not valid JSON");
+});
+
+test("check json: present and text regexes compose on one entry", async () => {
+  const sb = await sandbox(
+    `[[section]]\nname = "c"\ncheck = [{ path = "~/.s.json", present = ["defaultMode"], json = [{ key = "permissions.defaultMode", present = true }] }]\n`,
+  );
+  await writeFile(join(sb.home, ".s.json"), JSON.stringify({ permissions: { defaultMode: "auto" } }));
+  expect(await reconcile("verify", sb.ctx, {})).toBe(0);
+});
+
+// --- check: cmd assertions -------------------------------------------------
+// The other half of what `run` steps were doing: asserting that a command SUCCEEDS. As a `run`
+// with `unless` it reported through a shell exit code; as a check it reports through the drift
+// report, the exit code, and `--json` like every other resource.
+
+test("check cmd: passes on the expected exit status, fails otherwise", async () => {
+  const ok = await sandbox(`[[section]]\nname = "c"\ncheck = [{ cmd = "true" }]\n`);
+  expect(await reconcile("verify", ok.ctx, { verbose: true })).toBe(0);
+
+  const bad = await sandbox(`[[section]]\nname = "c"\ncheck = [{ cmd = "exit 3", message = "the thing" }]\n`);
+  expect(await reconcile("verify", bad.ctx, {})).toBe(1);
+  expect(bad.out()).toContain("exited 3, expected 0");
+  expect(bad.out()).toContain("the thing");
+});
+
+test("check cmd: a non-zero expectation is assertable", async () => {
+  const sb = await sandbox(`[[section]]\nname = "c"\ncheck = [{ cmd = "exit 2", exit = 2 }]\n`);
+  expect(await reconcile("verify", sb.ctx, {})).toBe(0);
+});
+
+test("check cmd: stdout_present and stdout_absent assert on output", async () => {
+  const sb = await sandbox(
+    `[[section]]\nname = "c"\ncheck = [{ cmd = "echo hello-world", stdout_present = ["hello"], stdout_absent = ["error"] }]\n`,
+  );
+  expect(await reconcile("verify", sb.ctx, {})).toBe(0);
+
+  const bad = await sandbox(
+    `[[section]]\nname = "c"\ncheck = [{ cmd = "echo oh-no-error", stdout_absent = ["error"] }]\n`,
+  );
+  expect(await reconcile("verify", bad.ctx, {})).toBe(1);
+  expect(bad.out()).toContain("forbidden");
+});
+
+test("check cmd: stderr counts as output", async () => {
+  // A tool that reports a problem on stderr and still exits 0 is exactly the shape a
+  // stdout_absent assertion is written to catch.
+  const sb = await sandbox(
+    `[[section]]\nname = "c"\ncheck = [{ cmd = "echo boom >&2", stdout_absent = ["boom"] }]\n`,
+  );
+  expect(await reconcile("verify", sb.ctx, {})).toBe(1);
+});
+
+test("check cmd: sync is a no-op without repair, and converges with one", async () => {
+  const sb = await sandbox(
+    `[[section]]\nname = "c"\ncheck = [{ cmd = "test -f ~/.made", repair = "touch ~/.made" }]\n`,
+  );
+  expect(await reconcile("verify", sb.ctx, {})).toBe(1); // not there yet
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0); // repair runs
+  expect(await reconcile("verify", sb.ctx, {})).toBe(0); // and converged
+});

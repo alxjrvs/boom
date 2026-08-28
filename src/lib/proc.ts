@@ -220,6 +220,31 @@ export interface CaptureResult extends ShellResult {
 // Like runArgv, but captures output instead of streaming it — for callers that need
 // the text (git plumbing: remote URLs, commit counts, changed-file lists), not just a
 // pass/fail exit code.
+// captureArgv's shell-string sibling, for a user-authored command that wants the shell's
+// expansion (the `check` resource's `cmd`, which is written in a boomfile the way it would be
+// typed). Honors `timeoutMs`, because a `cmd` check runs inside `verify` and a command that
+// hangs would hang the drift report.
+export function captureShell(cmd: string, env: Env, opts?: RunOptions): CaptureResult {
+  const timeout = opts?.timeoutMs && opts.timeoutMs > 0 ? opts.timeoutMs : undefined;
+  try {
+    const p = Bun.spawnSync(["sh", "-c", cmd], {
+      env: cleanEnv(env),
+      cwd: opts?.cwd,
+      stdout: "pipe",
+      stderr: "pipe",
+      timeout,
+    });
+    return {
+      code: exitOf(p),
+      timedOut: timeout !== undefined && p.exitCode === null,
+      stdout: p.stdout.toString().trim(),
+      stderr: p.stderr.toString().trim(),
+    };
+  } catch (e) {
+    return { code: -1, stdout: "", stderr: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 export function captureArgv(args: string[], env: Env, opts?: RunOptions): CaptureResult {
   // Bun.spawnSync throws (missing executable, nonexistent cwd) rather than returning
   // a failed result. Callers treat the tool as a black box with exit codes — sync
