@@ -80,6 +80,25 @@ const PkgSchema = v.pipe(
   ),
 );
 
+// A path that must NOT exist: sync removes it, verify fails while it is there, uninstall
+// leaves it alone. The inverse of every other resource, and the gap `check` cannot fill —
+// `check` asserts things *about* a file that exists, and its `missing_file = "pass"` says
+// "absent is acceptable", never "absent is required".
+//
+// The shape comes up wherever a tool writes its own config behind your back: Claude Code
+// creates `settings.local.json` on an "always allow" click, and `.gitignore` can stop such a
+// file being committed but never stops it existing — so a permission nobody reviewed lives on
+// disk, invisible to every gate that reads tracked files.
+//
+// Removal goes through the journal, so the file lands in the run's backup tree and
+// `boom rollback` restores it. `recursive` is required for a directory: without it one typo in
+// a path is a silent recursive delete on the next sync.
+const AbsentSchema = v.strictObject({
+  path: v.string(),
+  message: v.optional(v.string()),
+  recursive: v.optional(v.boolean()),
+});
+
 // The verbs a `run` step can bind to. `on` accepts a single verb or a list, so "run on sync
 // *and* uninstall" is one entry, not a duplicated pair.
 const VerbSchema = v.picklist(["sync", "verify", "uninstall"]);
@@ -246,6 +265,7 @@ const SectionSchema = v.strictObject({
   systemd: v.optional(v.array(SystemdSchema)),
   run: v.optional(v.array(RunSchema)),
   check: v.optional(v.array(CheckSchema)),
+  absent: v.optional(v.array(AbsentSchema)),
   hook: v.optional(v.array(HookSchema)),
 });
 
@@ -340,6 +360,7 @@ export type File = v.InferOutput<typeof FileSchema>;
 export type Pkg = v.InferOutput<typeof PkgSchema>;
 export type Dir = v.InferOutput<typeof DirSchema>;
 export type Check = v.InferOutput<typeof CheckSchema>;
+export type Absent = v.InferOutput<typeof AbsentSchema>;
 export type Secret = v.InferOutput<typeof SecretSchema>;
 export type Tmpl = v.InferOutput<typeof TmplSchema>;
 export type Launchd = v.InferOutput<typeof LaunchdSchema>;

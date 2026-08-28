@@ -10,6 +10,7 @@
 // the core loop reaching into an osx-specific ctx flag.
 import type { ComposedSection } from "../config/compose.ts";
 import type { Section } from "../config/schema.ts";
+import { reconcileAbsent } from "./resources/absent.ts";
 import { reconcileCheck } from "./resources/check.ts";
 import { reconcileDir } from "./resources/dir.ts";
 import { reconcileCopy, reconcileLink } from "./resources/filesystem.ts";
@@ -111,6 +112,17 @@ const RESOURCES: readonly ResourceType[] = [
     category: "CHECKS",
     items: (s) =>
       (s.check ?? []).map((e) => ({ label: `check ${e.path}`, run: (ctx) => reconcileCheck(e, ctx) })),
+  },
+  {
+    // Beside `check` because it is the same job from the other side: `check` asserts what a
+    // file says, `absent` asserts that there is no file. After it, so a run that both repairs
+    // a file and removes another reports them in that order.
+    category: "CHECKS",
+    items: (s) =>
+      (s.absent ?? []).map((e) => ({
+        label: `absent ${e.path}`,
+        run: (ctx) => reconcileAbsent(e, ctx),
+      })),
   },
   {
     category: "HOOKS",
