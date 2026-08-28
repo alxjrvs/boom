@@ -17,8 +17,10 @@ import {
   agentLoaded,
   launchAgentsDir,
   parseInterval,
+  plistEnvValue,
   reloadAgent,
   renderAgentPlist,
+  samePathSet,
   unloadAgent,
 } from "../lib/launchd.ts";
 import { notify } from "../lib/notify.ts";
@@ -226,22 +228,42 @@ async function applyTimer(ctx: ReconcileCtx, sched: Schedule): Promise<void> {
   // HTTPS remote while reporting only into its own log. `boom source` runs from a real shell, so
   // its PATH is the one the user means.
   //
-  // A snapshot, deliberately: it is recorded in the plist, and `verify` compares the plist
-  // byte-for-byte against a fresh render — so a PATH that later changes shows up as timer drift
-  // ("timer missing/outdated — sync installs it") rather than rotting invisibly.
+  // A snapshot, deliberately: it is recorded in the plist so a PATH that genuinely LOSES a
+  // directory shows up as timer drift rather than rotting invisibly. What it is NOT is a
+  // byte-for-byte comparison — see `plistMatches` below and `samePathSet` in lib/launchd.ts.
   const timerEnv = ctx.env.PATH ? { PATH: ctx.env.PATH } : undefined;
-  const plist = renderAgentPlist({
-    label,
-    programArgs: timerArgs(sched.cmd, self),
-    startInterval: parseInterval(sched.every),
-    stdoutPath: log,
-    stderrPath: log,
-    ...(timerEnv ? { environment: timerEnv } : {}),
-  });
+  const renderWith = (path?: string) =>
+    renderAgentPlist({
+      label,
+      programArgs: timerArgs(sched.cmd, self),
+      startInterval: parseInterval(sched.every),
+      stdoutPath: log,
+      stderrPath: log,
+      ...(path ? { environment: { PATH: path } } : {}),
+    });
+  const plist = renderWith(timerEnv?.PATH);
+
+  // An installed plist matches when it is byte-identical, OR when the only difference is the
+  // ORDER of a PATH that still names the same directories. PATH order is a property of the
+  // shell that built it, not of the machine: `boom source` runs from an interactive shell and
+  // `boom verify` from a login one, and on a box with a version manager those two orderings
+  // differ by construction. Comparing them as strings reported drift forever on a converged
+  // machine — the plists were present, loaded, and healthy — which is the one failure mode a
+  // drift signal cannot have, because it is the signal every other check reports through.
+  const plistMatches = (current: string | undefined): boolean => {
+    if (current === undefined) return false;
+    if (current === plist) return true;
+    const recorded = plistEnvValue(current, "PATH");
+    if (recorded === undefined) return false;
+    // Re-render with the RECORDED path: if that reproduces the file exactly, then PATH is the
+    // only thing that differs and everything else is genuinely unchanged.
+    if (renderWith(recorded) !== current) return false;
+    return samePathSet(recorded, timerEnv?.PATH);
+  };
 
   if (ctx.verb === "verify") {
     const current = (await pathExists(plistPath)) ? await Bun.file(plistPath).text() : undefined;
-    if (current !== plist) report.warn(`${what} timer missing/outdated — sync installs it`);
+    if (!plistMatches(current)) report.warn(`${what} timer missing/outdated — sync installs it`);
     else if (!agentLoaded(label, ctx.env)) report.warn(`${what} timer installed but not loaded`);
     else {
       // Installed AND loaded still isn't "working". A timer can fire on schedule and fail every
@@ -259,9 +281,12 @@ async function applyTimer(ctx: ReconcileCtx, sched: Schedule): Promise<void> {
     return;
   }
   // sync (non-dry)
-  if ((await pathExists(plistPath)) && (await Bun.file(plistPath).text()) === plist) {
-    // Byte-identical plist already in place; still ensure it's loaded (a reboot or manual
-    // unload could have dropped it) but don't rewrite.
+  if ((await pathExists(plistPath)) && plistMatches(await Bun.file(plistPath).text())) {
+    // Equivalent plist already in place; still ensure it's loaded (a reboot or manual
+    // unload could have dropped it) but don't rewrite. Using the same equivalence as verify
+    // rather than a byte comparison is what makes sync CONVERGE: with a string comparison
+    // every run rewrote the same two plists with a differently-ordered PATH, so sync never
+    // reached a fixed point and verify never went quiet.
     if (agentLoaded(label, ctx.env)) report.skip(`${what} every ${sched.every} (unchanged)`);
     else if (reloadAgent(plistPath, ctx.env)) report.ok(`reloaded ${what} timer`);
     else report.fail(`${what} timer present but launchctl load failed`);
