@@ -370,6 +370,18 @@ const BoomSettingsSchema = v.strictObject({
   upgrade_on_sync: v.optional(v.picklist(["check", "auto"])),
   // Install/refresh launchd timers that run `boom <cmd>` on an interval (macOS-only).
   schedule: v.optional(v.array(ScheduleSchema)),
+  // RETIRED, and deliberately still accepted. The vault-backed askpass helper this named was
+  // removed: it made `boom askpass <ref>` a real command that printed a resolved secret to
+  // stdout, which is a second way to read a vault value under a program name a machine's own
+  // controls are unlikely to have denied.
+  //
+  // Unlike `copy.expand` above, this is NOT `v.never`. That pattern is right when the migration
+  // is another config key — the error names it and the user edits one line. Here the migration
+  // is an ENVIRONMENT action (export SUDO_ASKPASS yourself), which no config edit expresses, so
+  // failing the whole boomfile would strand a machine over a key whose replacement isn't in the
+  // file at all. The value is parsed and ignored; reconcile warns when it is set. Delete the key
+  // at 1.0, once the warning has outlived its usefulness.
+  sudo_askpass: v.optional(v.string()),
   // After a sync, commit a one-file summary of this machine's state (boom version, drift
   // verdict, timestamp) to `.boom/machines/<host>.json` in the config repo — so `boom fleet`
   // can answer "which of my machines are drifted / on what version" from the repo you already
@@ -379,13 +391,6 @@ const BoomSettingsSchema = v.strictObject({
   // Linux notify-send) instead of letting the 0/2/1 exit code die in a timer log. Opt-in;
   // a no-op on a machine with no notifier.
   notify: v.optional(v.boolean()),
-  // Answer a spawned tool's `sudo` password prompt from the vault instead of the terminal.
-  // The value is a secret *reference* in the `secret` resource's vocabulary
-  // (`op://vault/item/field`, `env:VAR`, `pass:path`) — resolved by the same backends, so
-  // this adds a consumer, not a mechanism. Unlike the rest of this table it isn't a work
-  // item: it's a run-scoped input that puts `SUDO_ASKPASS` in every spawned tool's
-  // environment (see engine/secrets/askpass.ts for why that's the only workable seam).
-  sudo_askpass: v.optional(v.string()),
 });
 
 // A reusable config module: another boom config repo (`owner/repo[@ref]`, a git URL, or a

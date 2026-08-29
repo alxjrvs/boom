@@ -55,7 +55,7 @@ A `boom` invocation does one of two things:
    <!-- commands:begin -->
    `verify`, `status`, `plan`, `uninstall`, `source`, `where`, `edit`, `rollback`,
    `checkpoint`, `upgrade`, `doctor`, `lock`, `adopt`, `init`, `fleet`, `module`, `code`,
-   `mcp`, `askpass`, `completions`, `man`, `skill`.
+   `mcp`, `completions`, `man`, `skill`.
    <!-- commands:end -->
    That list is asserted **equal** to `commandNames()` by `test/docs-hygiene.test.ts`, so adding
    a route without naming it here (or naming one that no longer routes) fails CI. `source`,
@@ -308,41 +308,45 @@ verb-aware (sync installs/refreshes, verify reports drift, uninstall tears the t
 - `notify = true` — when a (typically scheduled) `boom verify` finds drift, raise a desktop
   notification (macOS `osascript` / Linux `notify-send`) so the signal doesn't die in a timer
   log. Best-effort; a platform with no notifier is a silent no-op.
-- `sudo_askpass = "<ref>"` — answer a *spawned tool's* `sudo` prompt from the vault instead of
-  asking the operator. The one field here that isn't a work item: it's a run-scoped input,
-  resolved through the same backends as the `secret` resource (`op://…`, `env:VAR`, `pass:…`).
+### Escalation, and why there is no askpass key
 
-  The background is that a tool boom spawns can escalate on its own — Homebrew runs `sudo` for any
-  cask carrying a `launchctl`/`pkgutil` stanza, which `boom source --update` reaches whenever an
-  outdated cask is declared (`greedy` or not). **By default boom just lets it ask you**: sudo
-  writes its prompt to `/dev/tty`, which no amount of silenced stdout suppresses, so the only
-  thing that ever hid it was boom's own spinner redrawing that line 11×/second — an escalating
-  step therefore runs under a persistent label instead of an animation, and the prompt survives.
-  That needs no configuration.
+A tool boom spawns can escalate on its own — Homebrew runs `sudo` for any cask carrying a
+`launchctl`/`pkgutil` stanza, which `boom source --update` reaches whenever an outdated cask is
+declared (`greedy` or not). **boom lets it ask you.** sudo writes its prompt to `/dev/tty`, which
+no amount of silenced stdout suppresses, so the only thing that ever hid it was boom's own spinner
+redrawing that line 11×/second — an escalating step therefore runs under a persistent label instead
+of an animation, and the prompt survives. That needs no configuration.
 
-  A prompt you can see is still worth nothing if it doesn't say **what** wants the password, so a
-  step that can escalate also names its asker two ways. `SUDO_PROMPT` relabels the prompt itself
-  (`[boom] brew bundle needs administrator rights — password for jarvis:`), which sudo honors from
-  the invoking environment and Homebrew forwards untouched. And because sudoers' escapes (`%p`,
-  `%u`, `%H`) have nothing for the *command*, the specific culprit comes from the tool's own
-  output: boom pipes the step's stdout and relays only Homebrew's `==>` headlines as live lines, so
-  `▸ Upgrading cask tuple` sits directly above the prompt while the byte counts stay hidden under
-  the band. Piping also costs the tool its tty, which conveniently drops its colors and progress
-  bars; the prompt is unaffected, since `/dev/tty` is not stdout.
+A prompt you can see is still worth nothing if it doesn't say **what** wants the password, so a
+step that can escalate names its asker two ways. `SUDO_PROMPT` relabels the prompt itself
+(`[boom] brew bundle needs administrator rights — password for jarvis:`), which sudo honors from
+the invoking environment and Homebrew forwards untouched. And because sudoers' escapes (`%p`, `%u`,
+`%H`) have nothing for the *command*, the specific culprit comes from the tool's own output: boom
+pipes the step's stdout and relays only Homebrew's `==>` headlines as live lines, so
+`▸ Upgrading cask tuple` sits directly above the prompt while the byte counts stay hidden under the
+band. Piping also costs the tool its tty, which conveniently drops its colors and progress bars;
+the prompt is unaffected, since `/dev/tty` is not stdout.
 
-  This key is for when there is **nobody to ask** — an unattended sync (launchd timer, CI, remote
-  session), where a visible prompt is still an indefinite block. Set it and a mutating sync
-  exports `SUDO_ASKPASS` (sudo's own hook, and a documented Homebrew variable: it appends `-A`
-  when it sees one; boom does the same for the `sudo` argv it builds itself for apt/dnf), pointing
-  at a generated 0700 shim under the state dir that execs `boom askpass <ref>`. An executable is
-  required because sudo takes a program path, not a command line — hence a shim rather than a bare
-  env var. Only the *reference* is written to disk; the plaintext exists solely in the pipe
-  between the helper and sudo, the same discipline `secret` applies by refusing to journal one.
-  Configuring it also means nothing will prompt, so the animated spinner comes back.
+There was a vault-backed key here for the unattended case (a launchd timer, CI), and a matching
+`boom askpass` command. **The command is gone; the key is retired.** The command printed a
+resolved secret to stdout, which is a second way to read a vault value under a program name a
+machine's own controls are unlikely to have denied. Its own documentation argued the verb needed no
+fence because "anyone who can run `boom askpass op://…` can run `op read op://…` directly" — false
+on any machine that restricts the vault CLI, which is exactly the machine that most needs the
+guarantee. No configured user was found; the feature was carrying that exposure for nobody.
 
-  One caveat for the unattended case it targets: the `op` backend resolves through *your* 1Password
-  session, so a launchd timer with no unlocked session can't read the vault. Use a backend that
-  needs no session (`env:`), or keep mutating syncs interactive.
+`sudo_askpass` is still **accepted and ignored**, so a boomfile carrying it keeps loading. That is
+deliberate, and it is a different call from `copy.expand`, which is declared `v.never` so the
+failure can name its replacement. That pattern fits when the migration is another config key — the
+error names it and you edit one line. Here the migration is an *environment* action, which no
+config edit expresses, so failing the whole boomfile would strand a machine over a key whose
+replacement isn't in the file at all. A mutating sync warns when the key is set; the key is deleted
+at 1.0.
+
+If you need an unattended escalating sync, export `SUDO_ASKPASS` yourself — it is sudo's variable,
+not boom's, and boom still honors one it inherits: it skips the prompt label and the header relay
+(nothing is going to ask), and appends `-A` to the `sudo` argv it builds itself for apt/dnf, the
+same way Homebrew does for its own. Otherwise keep mutating syncs interactive.
 
 ### Hooks = the resource-type extension contract
 
@@ -486,7 +490,6 @@ src/
     registry.ts            data-driven resource table (phase order) + finalize hooks
     resources/             link · copy · tmpl · secret · dir · pkg · osx · launchd · systemd · run · check · hook
     secrets/backends.ts    pluggable secret backends (op · env · pass · age · sops)
-    secrets/askpass.ts     SUDO_ASKPASS shim: answer a spawned tool's sudo prompt from the vault
     db.ts journal.ts       bun:sqlite store: transaction journal
     state.ts               the owned-destinations manifest (layout lives in lib/paths.ts)
     skill.ts               renders the Claude SKILL.md (commands/skill.ts is the CLI wrapper)

@@ -121,7 +121,12 @@ test("live() is suppressed for JSON (envelope stays clean) and verbose (tool alr
 
 // -------------------------------------------------------------- end-to-end through reconcile
 
-async function brewSandbox(boomfile: string, brewfile: string, brewScript: string) {
+async function brewSandbox(
+  boomfile: string,
+  brewfile: string,
+  brewScript: string,
+  extraEnv: Record<string, string> = {},
+) {
   const root = await base();
   const home = join(root, "home");
   const repo = join(root, "repo");
@@ -139,6 +144,7 @@ async function brewSandbox(boomfile: string, brewfile: string, brewScript: strin
     NO_COLOR: "1",
     GIT_CONFIG_NOSYSTEM: "1",
     PATH: `${bin}:/usr/bin:/bin`,
+    ...extraEnv,
   };
   const buf = { out: "" };
   const write = (s: string): void => {
@@ -190,15 +196,60 @@ test("no SUDO_PROMPT and no relay when a formula-only Brewfile can't escalate", 
   expect(sb.out()).not.toContain("Pouring mise"); // nothing can prompt → nothing to narrate
 });
 
-test("an askpass shim answering means no prompt to label and no relay", async () => {
+// boom stopped installing an askpass shim of its own (`[boom].sudo_askpass` was deleted — it was
+// a second way to print a vault secret to stdout, for a feature nobody had configured). But
+// SUDO_ASKPASS is *sudo's* variable, not boom's, and a user can export it: when they have, nothing
+// will prompt, so there is still no prompt to label and no reason to relay Homebrew's headers.
+// The behaviour is unchanged; only where the variable comes from is.
+test("an inherited SUDO_ASKPASS means no prompt to label and no relay", async () => {
   const root = await base();
   const log = join(root, "prompt");
   const sb = await brewSandbox(
-    `[boom]\nsudo_askpass = "env:PW"\n\n${PKG_SECTION}`,
+    PKG_SECTION,
     'cask "tuple"\n',
     `echo "$SUDO_PROMPT" > ${log}\necho "==> Upgrading cask tuple"\nexit 0\n`,
+    { SUDO_ASKPASS: "/usr/local/bin/some-askpass" },
   );
   expect(await reconcile("sync", sb.ctx, { update: true })).toBe(0);
   expect((await readFile(log, "utf8")).trim()).toBe("");
   expect(sb.out()).not.toContain("Upgrading cask tuple");
+});
+
+// ------------------------------------------------------------------ the retired key
+//
+// `[boom].sudo_askpass` was removed as a feature but is still ACCEPTED by the schema. These two
+// cases are the whole non-breaking claim: an existing boomfile carrying the key must still load
+// and still sync, and the operator must be told the key does nothing — because silently ignoring
+// it would turn a configured machine's unattended sync into an invisible hang at a sudo prompt,
+// which is the exact failure the key existed to prevent.
+
+test("a boomfile carrying the retired sudo_askpass key still loads and syncs", async () => {
+  const sb = await brewSandbox(
+    `[boom]\nsudo_askpass = "op://Private/Mac/password"\n\n${PKG_SECTION}`,
+    'brew "mise"\n',
+    'echo "==> Pouring mise"\nexit 0\n',
+  );
+  // 0, not a config-validation failure: the key parses.
+  expect(await reconcile("sync", sb.ctx, { update: true })).toBe(0);
+});
+
+test("…and says so, rather than ignoring it in silence", async () => {
+  const sb = await brewSandbox(
+    `[boom]\nsudo_askpass = "op://Private/Mac/password"\n\n${PKG_SECTION}`,
+    'brew "mise"\n',
+    'echo "==> Pouring mise"\nexit 0\n',
+  );
+  await reconcile("sync", sb.ctx, { update: true });
+  expect(sb.out()).toContain("sudo_askpass is retired and ignored");
+  expect(sb.out()).toContain("SUDO_ASKPASS");
+});
+
+test("a verify run stays quiet about it — nothing a verify spawns escalates", async () => {
+  const sb = await brewSandbox(
+    `[boom]\nsudo_askpass = "op://Private/Mac/password"\n\n${PKG_SECTION}`,
+    'brew "mise"\n',
+    'echo "==> Pouring mise"\nexit 0\n',
+  );
+  await reconcile("verify", sb.ctx, {});
+  expect(sb.out()).not.toContain("sudo_askpass is retired");
 });
