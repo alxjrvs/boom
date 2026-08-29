@@ -8,7 +8,14 @@ import { basename, join } from "node:path";
 import { detectOs } from "../../config/profile.ts";
 import type { Launchd } from "../../config/schema.ts";
 import { displayPath, expandTilde, linkTarget, pathExists } from "../../lib/fs.ts";
-import { agentLoaded, launchAgentsDir, plistLabel, reloadAgent, unloadAgent } from "../../lib/launchd.ts";
+import {
+  agentLastExit,
+  agentLoaded,
+  launchAgentsDir,
+  plistLabel,
+  reloadAgent,
+  unloadAgent,
+} from "../../lib/launchd.ts";
 import { journalRemove } from "../journal.ts";
 import type { ReconcileCtx } from "../types.ts";
 import { applyLink } from "./filesystem.ts";
@@ -61,8 +68,29 @@ export async function reconcileLaunchd(entry: Launchd, ctx: ReconcileCtx): Promi
         return;
       }
       const label = await labelOf(src);
-      if (label && !agentLoaded(label, ctx.env)) report.warn(`${disp} linked but agent ${label} not loaded`);
-      else report.skip(label ? `${disp} (agent ${label} loaded)` : disp);
+      if (label && !agentLoaded(label, ctx.env)) {
+        report.warn(`${disp} linked but agent ${label} not loaded`);
+        return;
+      }
+      // Linked AND loaded still isn't "working". A job can fire on schedule and fail every single
+      // run, reporting only into its own log — which nobody watches, by definition of the job
+      // being scheduled. `[boom] schedule` timers have asserted this since `code fetch` failed on
+      // four remotes for a month; this resource did not, so a hand-authored plist was the one
+      // scheduled thing on a machine with no liveness assertion behind it.
+      //
+      // That asymmetry has a scalp: a nightly `boom verify` agent sat dead for 28 days behind a
+      // `~` launchd never expands (EX_CONFIG 78). It was linked. It was loaded. `verify` said so
+      // and was right about both, while every guardrail the job carried went unrun.
+      //
+      // A never-run job is NOT a failure. A freshly provisioned machine and a calendar job whose
+      // hour has not come both read as no exit status, legitimately — and a check that cries wolf
+      // on day one is one you have learned to ignore by day two.
+      const last = label ? agentLastExit(label, ctx.env) : undefined;
+      if (last !== undefined && last !== 0) {
+        report.warn(`${disp} agent ${label} last run FAILED (exit ${last}) — firing and failing`);
+      } else {
+        report.skip(label ? `${disp} (agent ${label} loaded)` : disp);
+      }
       return;
     }
     case "uninstall": {
