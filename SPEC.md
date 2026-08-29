@@ -210,10 +210,27 @@ Resources:
   "skip when the path exists", which is usually backwards — use `unless` there). `creates` is
   evaluated in a dry run; `unless` is **not** — a preview never executes user shell, it reports
   that it couldn't tell
-- `check = [{ path, present?, absent?, message?, missing_file?, repair? }]` — content
+- `check = [{ path, present?, absent?, json?, message?, missing_file?, repair? }]` — content
   assertions: every `present` regex must match and every `absent` must not. On `verify` this
   folds into the exit code + JSON report; on `sync`, `repair` (a shell command, run only when
   the assertion currently fails) converges it. `missing_file` defaults to `fail`
+- `json = [{ key, equals? | present? | absent? | contains? }]` on a `check` — assertions
+  against the **parsed** document rather than its text. `key` is a dot path where a numeric
+  segment indexes an array (`hooks.PreToolUse.0.matcher`); exactly one predicate per entry.
+  A regex over JSON text means writing `'"model"\s*:\s*"[^"]*fable'` and hoping the formatting
+  never changes, and it cannot express "this array contains that element" at all — which is why
+  consumers reach for `jq` inside `run` steps instead. `absent` and a `null` value are
+  deliberately different answers, because `null` is a thing a config can mean. A document that
+  does not parse fails once with the parse error, rather than once per assertion
+- `check = [{ cmd, exit?, stdout_present?, stdout_absent?, message?, repair? }]` — the same
+  resource asserting about a **command** instead of a file: it must exit `exit` (default 0) and
+  its combined output must match every `stdout_present` regex and no `stdout_absent` one.
+  stderr counts as output, since a tool that reports a problem on stderr and still exits 0 is
+  exactly what such an assertion is written to catch. The `run`-with-`unless` shape reported
+  through a shell exit code; this reports through the drift report, the exit code and `--json`
+  like every other resource. **Read-only by contract** — it runs during `verify`, so a mutating
+  `cmd` turns a read-only drift check into a write; the mutating half is `repair`. Exactly one
+  of `path` or `cmd` per entry
 - `absent = [{ path, message?, recursive? }]` — a path that must **not** exist: `sync` removes
   it, `verify` fails while it is there, `uninstall` leaves it alone (boom did not create it).
   The inverse of `check`, and the shape `check` cannot express — `missing_file = "pass"` says
