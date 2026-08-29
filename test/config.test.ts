@@ -180,6 +180,46 @@ pkg = [
   expect(cfg.section[0]?.pkg?.[1]?.remove_on_uninstall).toBe(false);
 });
 
+test("loadConfig accepts `cleanup` on brew only, and only with a known mode", async () => {
+  const dir = await sandbox();
+
+  // brew-only: the key wraps `brew bundle cleanup`, which the other managers have no
+  // equivalent for. Rejecting it loudly beats accepting it and silently doing nothing.
+  for (const mgr of ["mise", "apt", "npm"]) {
+    await writeFile(
+      join(dir, "boomfile.toml"),
+      `[[section]]\nname = "x"\npkg = [{ manager = "${mgr}", cleanup = "check" }]\n`,
+    );
+    const err = await loadConfig(dir).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(BoomConfigError);
+    expect((err as Error).message).toContain("cleanup");
+  }
+
+  // A typo'd mode must fail at load, not at the point where it would have removed something.
+  await writeFile(
+    join(dir, "boomfile.toml"),
+    `[[section]]\nname = "x"\npkg = [{ manager = "brew", cleanup = "remove" }]\n`,
+  );
+  expect(await loadConfig(dir).catch((e: unknown) => e)).toBeInstanceOf(BoomConfigError);
+
+  await writeFile(
+    join(dir, "boomfile.toml"),
+    `[[section]]
+name = "x"
+pkg = [{ manager = "brew", file = "Brewfile", cleanup = "uninstall" }]
+`,
+  );
+  const cfg = await loadConfig(dir);
+  expect(cfg.section[0]?.pkg?.[0]?.cleanup).toBe("uninstall");
+
+  // Absent stays absent — today's behaviour is the default, so no existing boomfile changes.
+  await writeFile(
+    join(dir, "boomfile.toml"),
+    `[[section]]\nname = "x"\npkg = [{ manager = "brew", file = "Brewfile" }]\n`,
+  );
+  expect((await loadConfig(dir)).section[0]?.pkg?.[0]?.cleanup).toBeUndefined();
+});
+
 test("loadConfig rejects a non-octal link mode at the schema boundary", async () => {
   const dir = await sandbox();
   await writeFile(

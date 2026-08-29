@@ -204,6 +204,56 @@ test("launchd: non-darwin verify reports macOS-only rather than failing", async 
   expect(sb.out()).toContain("macOS-only"); // verbose: off-platform no-ops are quiet by default
 });
 
+// A fake `launchctl`. Until now the launchd resource had no effect-level test at all — the
+// plist RENDERING was covered in launchd.test.ts and the load/unload path was not, which is how
+// "linked and loaded" could stand in for "working" without anything noticing.
+//
+// `list <label>` prints the plist-ish dict launchctl actually emits, with LastExitStatus taken
+// from LAST_EXIT so a test can choose the outcome; `list` with no label and `load`/`unload`
+// succeed quietly.
+const FAKE_LAUNCHCTL = (lastExit: string) => `case "$1" in
+  list)
+    if [ -n "\${2:-}" ]; then
+      printf '{\\n\\t"Label" = "%s";\\n\\t"LastExitStatus" = ${lastExit};\\n};\\n' "$2"
+    fi
+    ;;
+esac
+exit 0
+`;
+
+async function launchdSandbox(lastExit: string): Promise<Sandbox> {
+  const sb = await sandbox(`[[section]]\nname = "l"\nlaunchd = [{ src = "agent.plist" }]\n`, {
+    BOOM_OS: "darwin",
+  });
+  await writeFile(
+    join(sb.repo, "agent.plist"),
+    "<plist><dict><key>Label</key><string>com.x.agent</string></dict></plist>\n",
+  );
+  const bin = join(sb.repo, ".fakebin");
+  await fakeBin(bin, "launchctl", FAKE_LAUNCHCTL(lastExit));
+  const env = sb.ctx.env as Record<string, string | undefined>;
+  env.PATH = `${bin}:${process.env.PATH ?? ""}`;
+  return sb;
+}
+
+test("launchd: sync links + loads the agent, and verify reports it loaded", async () => {
+  const sb = await launchdSandbox("0");
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  expect(await pathExists(join(sb.home, "Library", "LaunchAgents", "agent.plist"))).toBe(true);
+  expect(await reconcile("verify", sb.ctx, { verbose: true })).toBe(0);
+  expect(sb.out()).toContain("agent com.x.agent loaded");
+});
+
+test("launchd: verify reports an agent that is loaded but whose last run FAILED", async () => {
+  // The gap this closes. A nightly `boom verify` agent sat dead for 28 days behind a `~` launchd
+  // never expands: it was linked, it was loaded, verify said so and was right about both, and
+  // every guardrail it carried went unrun. Loaded is not working.
+  const sb = await launchdSandbox("78"); // EX_CONFIG — the exact code that outage produced
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  await reconcile("verify", sb.ctx, { verbose: true });
+  expect(sb.out()).toContain("last run FAILED (exit 78)");
+});
+
 // ----------------------------------------------------------------- systemd (Linux)
 
 // A stateful fake `systemctl --user`: enable/disable maintain a set of enabled units in a

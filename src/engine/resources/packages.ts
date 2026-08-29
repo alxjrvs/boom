@@ -12,7 +12,7 @@ import type { ReconcileCtx } from "../types.ts";
 export async function reconcilePkg(entry: Pkg, ctx: ReconcileCtx): Promise<void> {
   switch (entry.manager) {
     case "brew":
-      return reconcileBrew(entry.file ?? "Brewfile", ctx);
+      return reconcileBrew(entry.file ?? "Brewfile", entry.cleanup, ctx);
     case "mise":
       return reconcileMise(ctx);
     // The whole `entry` goes down (not just `file`) so the arms can read `remove_on_uninstall`;
@@ -70,7 +70,26 @@ function relayProgress(ctx: ReconcileCtx): ((line: string) => void) | undefined 
   };
 }
 
-async function reconcileBrew(file: string, ctx: ReconcileCtx): Promise<void> {
+// What `brew bundle cleanup` would remove: the installed-but-undeclared set. Without `--force`
+// it only LISTS, which is what makes `cleanup = "check"` safe to run on every verify.
+//
+// Parsed rather than trusted to exit code: `brew bundle cleanup` exits 0 whether or not it found
+// anything, so the presence of output is the signal. Lines look like "Would uninstall formulae:"
+// followed by names, so anything non-empty means drift.
+async function brewCleanupList(path: string, env: Env): Promise<string[]> {
+  const r = captureArgv(["brew", "bundle", "cleanup", `--file=${path}`], env);
+  if (r.code !== 0) return [];
+  return r.stdout
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0 && !l.endsWith(":"));
+}
+
+async function reconcileBrew(
+  file: string,
+  cleanup: "check" | "uninstall" | undefined,
+  ctx: ReconcileCtx,
+): Promise<void> {
   const { report } = ctx;
   if (!hasCommand("brew", ctx.env)) {
     report.fail("brew not installed");
@@ -120,6 +139,27 @@ async function reconcileBrew(file: string, ctx: ReconcileCtx): Promise<void> {
         if (r.code === 0) report.skip("brew bundle satisfied");
         else report.fail(`brew bundle failed${lastLine(r.stderr) ? `: ${lastLine(r.stderr)}` : ""}`);
       }
+      if (cleanup) {
+        const extra = await brewCleanupList(path, ctx.env);
+        if (extra.length === 0) {
+          report.skip("brew bundle cleanup: nothing undeclared");
+        } else if (cleanup === "check") {
+          // `check` never removes, on either verb. Naming them on sync too is the point: this is
+          // where you find out the list is longer than you thought, while it is still only a list.
+          report.warn(`${extra.length} installed but undeclared: ${extra.join(", ")}`);
+        } else {
+          const c = await report.spin("brew bundle cleanup", () =>
+            runArgvAsync(
+              ["brew", "bundle", "cleanup", `--file=${path}`, "--force"],
+              ctx.env,
+              toolIo(ctx.json, ctx.verbose),
+            ),
+          );
+          if (c.code === 0) report.ok(`removed ${extra.length} undeclared: ${extra.join(", ")}`);
+          else
+            report.fail(`brew bundle cleanup failed${lastLine(c.stderr) ? `: ${lastLine(c.stderr)}` : ""}`);
+        }
+      }
       return;
     }
     case "verify": {
@@ -135,6 +175,18 @@ async function reconcileBrew(file: string, ctx: ReconcileCtx): Promise<void> {
       );
       if (check.code === 0) report.skip("brew bundle satisfied");
       else report.warn("brew bundle missing deps — run: boom source");
+      // The other direction, and the one `brew bundle check` structurally cannot see: it asks
+      // "is everything declared installed?", never "is everything installed declared?". So a
+      // package added by hand is invisible to it forever, and a fresh machine reproduces the
+      // machine minus that package — which is the drift that only shows up when you need the box
+      // you no longer have.
+      if (cleanup) {
+        const extra = await brewCleanupList(path, ctx.env);
+        if (extra.length === 0) report.skip("brew bundle cleanup: nothing undeclared");
+        else if (cleanup === "uninstall")
+          report.warn(`${extra.length} installed but undeclared — boom source removes: ${extra.join(", ")}`);
+        else report.warn(`${extra.length} installed but undeclared: ${extra.join(", ")}`);
+      }
       return;
     }
     case "uninstall":

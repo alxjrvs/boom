@@ -65,11 +65,27 @@ const FileSchema = v.strictObject({
 // but must not reclaim. Spelled to match `dir`'s `remove_on_uninstall` rather than a bare
 // `uninstall`. Rejected on brew/mise below — the `v.check` rides on the *object* because the
 // constraint is cross-field (the key's legality depends on `manager`).
+// `cleanup` (brew only) closes the one-directional gap in `brew bundle`: it installs what the
+// Brewfile names and NEVER removes what the Brewfile omits, so a hand-installed package stays
+// forever while a fresh machine silently never gets it. Drift in the direction nothing reports.
+//
+// Absent = today's behavior. `"check"` makes `verify` report installed-but-undeclared as drift.
+// `"uninstall"` additionally lets `sync` remove them (`brew bundle cleanup --force`).
+//
+// Split in two on purpose, and `"check"` is the one to reach for first: `brew bundle cleanup`
+// removes everything the Brewfile does not name, which on a machine that has ever installed
+// something by hand is a much larger set than expected. Seeing the list before authorizing the
+// removal is the whole difference between converging and losing a tool you needed.
+//
+// This is deliberately NOT `remove_on_uninstall`, which is rejected below and stays rejected:
+// that key means "remove exactly what this manifest declares" and `cleanup` is its inverse —
+// remove exactly what it does not.
 const PkgSchema = v.pipe(
   v.strictObject({
     manager: v.picklist(["brew", "mise", "apt", "dnf", "cargo", "npm", "pipx", "gem", "flatpak", "gh"]),
     file: v.optional(v.string()),
     remove_on_uninstall: v.optional(v.boolean()),
+    cleanup: v.optional(v.picklist(["check", "uninstall"])),
   }),
   v.check(
     (p) => p.remove_on_uninstall === undefined || (p.manager !== "brew" && p.manager !== "mise"),
@@ -77,6 +93,12 @@ const PkgSchema = v.pipe(
       "Brewfile / the repo's mise config, and neither has a \"remove exactly what this file " +
       'declares" verb (`brew bundle cleanup` does the opposite). Tear those down with a `run` ' +
       'step bound to `on = "uninstall"`.',
+  ),
+  v.check(
+    (p) => p.cleanup === undefined || p.manager === "brew",
+    "`cleanup` is brew-only — it wraps `brew bundle cleanup`, which has no equivalent in the " +
+      "other managers. For those, the declared set is the manifest and `remove_on_uninstall` " +
+      "governs teardown.",
   ),
 );
 
