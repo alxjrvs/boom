@@ -15,7 +15,6 @@ import { bandsReporter } from "../lib/reporter.ts";
 import { Journal, journalRemove, newRunId, pruneRuns, readRun } from "./journal.ts";
 import { auditLockDrift } from "./pinning.ts";
 import { finalizeResources, reconcileSection } from "./registry.ts";
-import { installAskpass } from "./secrets/askpass.ts";
 import { applyBoomSettings } from "./settings.ts";
 import { type ManifestEntry, readManifest, writeManifest } from "./state.ts";
 import { syncConfigRepo } from "./sync.ts";
@@ -156,7 +155,7 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
   const dryRun = opts.dryRun ?? false;
 
   // `mutating` is narrower than "changes the machine": it also gates the journal, the backup
-  // tree and the askpass shim, none of which any verb but sync opens. The LOCK is a different
+  // tree, none of which any verb but sync opens. The LOCK is a different
   // question — who writes — so it gets its own predicate. An unlocked `uninstall` racing a
   // scheduled sync removes destinations that sync is re-creating, and both call `writeManifest`,
   // which is a full DELETE+reinsert: exactly the ownership-losing race lib/lock.ts's header
@@ -234,9 +233,8 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
 
     // Compose `use` modules + the base repo + the overlay files that match this machine into ONE
     // ordered, origin-stamped section list plus the merged `[vars]`/`[boom]` tables. Above the
-    // askpass block and the rctx literal deliberately: both of those now read from the
-    // composition (`sudo_askpass` can come from an overlay, and `vars` must carry the overlay's
-    // per-machine values). Module resolution has no askpass dependency, so the reorder is safe.
+    // rctx literal deliberately: it reads from the composition, so `vars` carries the
+    // overlay's per-machine values.
     const pc = profileContext(ctx.env, opts.profiles ?? []);
     let composition: Composition;
     try {
@@ -246,18 +244,20 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
       return finish();
     }
 
-    // `[boom].sudo_askpass` — put the vault-backed askpass shim in every spawned tool's
-    // environment, so a tool that shells out to `sudo` on its own (Homebrew does, for any cask
-    // with a launchctl/pkgutil stanza) resolves the password from the vault instead of parking on
-    // a terminal prompt this run's spinner would erase. The environment is the only seam: boom
-    // doesn't build that sudo argv, the tool does. See engine/secrets/askpass.ts.
-    // Mutating runs only — nothing a `verify` spawns escalates, and a dry run writes nothing.
-    let childEnv = ctx.env;
-    const askpassRef = composition.boom?.sudo_askpass;
-    if (askpassRef && mutating) {
-      const shim = await installAskpass(askpassRef, process.execPath, ctx.env);
-      childEnv = { ...ctx.env, SUDO_ASKPASS: shim };
+    // `[boom].sudo_askpass` is retired but still parses, so a boomfile carrying it keeps
+    // loading rather than failing over a key whose replacement is an environment variable. Say
+    // so on a mutating run, which is the only kind that could have escalated: silently doing
+    // nothing here would turn a configured machine's unattended sync into an invisible hang at a
+    // sudo prompt, which is the exact failure the key existed to prevent.
+    if (composition.boom?.sudo_askpass && mutating) {
+      report.warn(
+        "[boom].sudo_askpass is retired and ignored — boom no longer resolves a sudo password " +
+          "from the vault. Export SUDO_ASKPASS yourself if this run must escalate unattended; " +
+          "boom still honours an inherited one. Remove the key to silence this.",
+      );
     }
+
+    const childEnv = ctx.env;
 
     const rctx: ReconcileCtx = {
       repo,

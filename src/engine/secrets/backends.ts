@@ -24,7 +24,7 @@ export type SecretResult =
 // anchor a repo-relative encrypted file — nothing about a destination, a mode, or a verb.
 // A full `Secret`/`ReconcileCtx` still satisfies both structurally, so the `secret` resource
 // passes its own values through unchanged; the narrowing is what lets a non-resource caller
-// (askpass) resolve a bare ref without fabricating a fake destination.
+// resolve a bare ref without fabricating a fake destination.
 type SecretSource = Pick<Secret, "ref" | "template" | "backend">;
 type SecretCtx = Pick<ReconcileCtx, "env" | "repo">;
 
@@ -150,15 +150,4 @@ function pickBackend(entry: SecretSource): SecretBackend {
 // The backend for an entry: an explicit `backend =` wins, else inferred from the ref/template.
 export function getBackend(entry: SecretSource): SecretBackend {
   return entry.backend ? BACKENDS[entry.backend] : pickBackend(entry);
-}
-
-// Resolve one bare reference to its plaintext — the whole backend seam minus the `secret`
-// resource's file-rendering half. For callers that need a value *in the process* rather than on
-// disk (the askpass helper answering a sudo prompt), where writing it to a file would be exactly
-// the wrong move. Missing tool is reported as a failure rather than throwing, matching read().
-export async function resolveRef(ref: string, ctx: SecretCtx): Promise<SecretResult> {
-  const entry: SecretSource = { ref };
-  const backend = getBackend(entry);
-  if (!backend.available(ctx.env)) return { ok: false, err: `${backend.tool} not installed` };
-  return backend.read(entry, ctx);
 }

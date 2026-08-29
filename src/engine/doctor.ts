@@ -111,7 +111,7 @@ async function auditSecrets(ctx: BoomContext, report: Reporter): Promise<void> {
     }
     // A read may be a network round-trip (op) → run it under the spinner. Only `ok`/`err` are
     // inspected: the resolved plaintext is never bound, logged, or reported. It exists in memory
-    // for the life of the call, exactly as it does for the askpass helper, and goes nowhere.
+    // for the life of the call, and goes nowhere.
     const r = await report.spin(`${backend.name} read ${ref}`, () => backend.read(s, { env: ctx.env, repo }));
     if (r.ok) report.ok(`${ref} resolves (${backend.name})`);
     else report.warn(`${ref} — unresolvable (${r.err})`);

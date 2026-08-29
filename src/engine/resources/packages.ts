@@ -89,7 +89,7 @@ async function reconcileBrew(file: string, ctx: ReconcileCtx): Promise<void> {
   // don't read `greedy` as a guarantee that `--update` leaves casks alone (this comment used to
   // claim exactly that, and it cost a ten-minute mystery hang). A cask upgrade is also what
   // reaches for `sudo`, via any `launchctl`/`pkgutil` stanza in the cask — see
-  // engine/secrets/askpass.ts for how a password gets answered when it does.
+  // `withAskpass` below for what happens when the caller has exported SUDO_ASKPASS.
   const noUpgrade = ctx.update ? [] : ["--no-upgrade"];
   switch (ctx.verb) {
     case "sync": {
@@ -99,9 +99,10 @@ async function reconcileBrew(file: string, ctx: ReconcileCtx): Promise<void> {
       }
       {
         // Bundle may want the terminal for a password when a cask is in play — unless an askpass
-        // shim is answering for it, in which case nothing will prompt and the animated spinner is
-        // safe. `ctx.env.SUDO_ASKPASS` is the same seam reconcile used to install it, so the
-        // presentation follows the mechanism automatically.
+        // helper is answering for it, in which case nothing will prompt and the animated spinner is
+        // safe. SUDO_ASKPASS is sudo's own variable: boom no longer installs a helper of its own,
+        // but it still reads one the user has exported, so the presentation follows whatever is
+        // actually going to happen.
         const mayPrompt = !ctx.env.SUDO_ASKPASS && (await declaresCask(path));
         // When a prompt is possible, name the asker: label the prompt itself via SUDO_PROMPT, and
         // relay Homebrew's own "==> …" headers so the line above it says which cask is escalating.
@@ -197,10 +198,10 @@ const LINUX_MGR = {
   },
 } as const;
 
-// boom builds this sudo argv itself, so it has to opt into the askpass shim the way Homebrew does
+// boom builds this sudo argv itself, so it has to opt into an askpass helper the way Homebrew does
 // for its own (`-A` when SUDO_ASKPASS is set — Library/Homebrew/system_command.rb). Without this a
-// Linux sync parks on the same invisible password prompt the shim exists to answer. A no-op when
-// no `[boom].sudo_askpass` is configured, so the default path stays a plain interactive `sudo`.
+// Linux sync parks on an invisible password prompt even though the user has a helper configured.
+// A no-op when SUDO_ASKPASS is unset, so the default path stays a plain interactive `sudo`.
 function withAskpass(argv: readonly string[], env: Env): string[] {
   if (!env.SUDO_ASKPASS || argv[0] !== "sudo") return [...argv];
   return ["sudo", "-A", ...argv.slice(1)];
@@ -255,7 +256,7 @@ async function reconcileLinuxPkgs(mgr: "apt" | "dnf", entry: Pkg, ctx: Reconcile
         return;
       }
       {
-        // Same bargain as brew: this argv literally starts with `sudo`, so without an askpass shim
+        // Same bargain as brew: this argv literally starts with `sudo`, so without an askpass helper
         // it may need the terminal to ask. Here boom *built* the command, so the prompt can name it
         // outright — no output-relaying needed to work out what escalated.
         const mayPrompt = !ctx.env.SUDO_ASKPASS;
