@@ -78,9 +78,10 @@ export function renderAgentPlist(opts: AgentPlist): string {
     lines.push("  <key>StandardOutPath</key>", `  <string>${xml(opts.stdoutPath)}</string>`);
   if (opts.stderrPath)
     lines.push("  <key>StandardErrorPath</key>", `  <string>${xml(opts.stderrPath)}</string>`);
-  // Sorted, so the rendered plist is a pure function of its inputs — verify compares the file
-  // byte-for-byte against a fresh render, and object key order would otherwise make an
-  // unchanged config look like drift on some runs and not others.
+  // Sorted, so the rendered plist is a pure function of its inputs — object key order would
+  // otherwise make an unchanged config look like drift on some runs and not others. (Verify
+  // compares a render against the installed file; it forgives a reordered PATH and nothing
+  // else, so every other byte here still has to be deterministic. See `samePathSet`.)
   const envKeys = Object.keys(opts.environment ?? {}).sort();
   if (envKeys.length > 0) {
     lines.push("  <key>EnvironmentVariables</key>", "  <dict>");
@@ -98,6 +99,48 @@ export function renderAgentPlist(opts: AgentPlist): string {
 export function plistLabel(contents: string): string | undefined {
   const m = contents.match(/<key>\s*Label\s*<\/key>\s*<string>([^<]*)<\/string>/);
   return m?.[1]?.trim() || undefined;
+}
+
+// Pull one EnvironmentVariables value out of a rendered plist, so verify can read back the PATH
+// a previous sync recorded and compare the two as PATHs rather than as strings.
+export function plistEnvValue(contents: string, key: string): string | undefined {
+  const block = contents.match(/<key>\s*EnvironmentVariables\s*<\/key>\s*<dict>([\s\S]*?)<\/dict>/)?.[1];
+  if (!block) return undefined;
+  const esc = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const m = block.match(new RegExp(`<key>\\s*${esc}\\s*</key>\\s*<string>([^<]*)</string>`));
+  return m?.[1];
+}
+
+// Do two PATH strings name the same set of directories?
+//
+// A PATH is a set with a resolution order, and only the SET is a property of the machine — the
+// order is a property of whichever shell happened to build it. On a box using a version manager
+// the same machine yields different orderings under `zsh -i`, `zsh -l` and `zsh -c`, and
+// duplicate entries appear and disappear between them. So comparing a recorded PATH to a
+// freshly-read one byte-for-byte reports drift on a machine where nothing changed, forever.
+//
+// Not hypothetical: it made `boom verify` exit 2 on every run on a fully converged machine, and
+// 7 of 10 recorded syncs rewrote the same two plists without ever converging. A check that cries
+// wolf is worse than no check — it trains you to ignore the alarm — and this is the alarm that
+// carries every other drift signal on that machine.
+//
+// Comparing as a set keeps the property worth having: a PATH that genuinely LOST a directory
+// still reports drift, because the timer really might no longer find `gh` or `git`. Only a
+// reorder or a duplicate is forgiven.
+export function samePathSet(a: string | undefined, b: string | undefined): boolean {
+  if (a === undefined || b === undefined) return a === b;
+  const norm = (p: string) =>
+    new Set(
+      p
+        .split(":")
+        .map((d) => d.replace(/\/+$/, ""))
+        .filter((d) => d.length > 0),
+    );
+  const sa = norm(a);
+  const sb = norm(b);
+  if (sa.size !== sb.size) return false;
+  for (const d of sa) if (!sb.has(d)) return false;
+  return true;
 }
 
 // captureArgv (not runArgv) throughout: it maps a missing `launchctl` (a non-darwin box, a

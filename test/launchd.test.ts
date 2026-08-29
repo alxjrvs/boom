@@ -3,7 +3,14 @@
 // darwin-only and exercised via the resource tests). The upgrade-newer compare used to live here
 // too; it moved into test/version-compare.test.ts with the comparator it now exercises.
 import { expect, test } from "bun:test";
-import { agentLastExit, parseInterval, plistLabel, renderAgentPlist } from "../src/lib/launchd.ts";
+import {
+  agentLastExit,
+  parseInterval,
+  plistEnvValue,
+  plistLabel,
+  renderAgentPlist,
+  samePathSet,
+} from "../src/lib/launchd.ts";
 
 test("parseInterval normalizes s/m/h and bare seconds", () => {
   expect(parseInterval("30s")).toBe(30);
@@ -85,4 +92,80 @@ test("plistLabel extracts the Label, or undefined when absent", () => {
   const p = renderAgentPlist({ label: "com.boomtube.verify", programArgs: ["/b"], startInterval: 60 });
   expect(plistLabel(p)).toBe("com.boomtube.verify");
   expect(plistLabel("<plist><dict></dict></plist>")).toBeUndefined();
+});
+
+// --- PATH comparison: a set, not a string -----------------------------------
+// A recorded PATH was compared to a freshly-read one byte-for-byte, so a machine whose PATH is
+// merely ORDERED differently under `zsh -i` vs `zsh -l` — which is every machine using a version
+// manager — reported timer drift on every run. `boom verify` exited 2 forever on a converged
+// box, and 7 of 10 syncs rewrote the same two plists without reaching a fixed point.
+
+test("samePathSet ignores order and duplicates", () => {
+  expect(samePathSet("/a:/b:/c", "/c:/a:/b")).toBe(true);
+  expect(samePathSet("/a:/b", "/b:/a:/b")).toBe(true);
+  expect(samePathSet("/a:/b", "/a:/b")).toBe(true);
+});
+
+test("samePathSet ignores a trailing slash and empty entries", () => {
+  expect(samePathSet("/a/:/b", "/a:/b")).toBe(true);
+  expect(samePathSet("/a::/b", "/b:/a")).toBe(true);
+});
+
+test("samePathSet still reports a genuinely changed PATH", () => {
+  // The property worth keeping: a directory that DISAPPEARED is real drift, because the timer
+  // may no longer find `gh` or `git`.
+  expect(samePathSet("/a:/b:/c", "/a:/b")).toBe(false);
+  expect(samePathSet("/a:/b", "/a:/b:/c")).toBe(false);
+  expect(samePathSet("/a:/b", "/a:/different")).toBe(false);
+});
+
+test("samePathSet handles undefined on either side", () => {
+  expect(samePathSet(undefined, undefined)).toBe(true);
+  expect(samePathSet("/a", undefined)).toBe(false);
+  expect(samePathSet(undefined, "/a")).toBe(false);
+});
+
+test("plistEnvValue reads back a recorded PATH, and nothing when there is none", () => {
+  const withEnv = renderAgentPlist({
+    label: "com.x",
+    programArgs: ["/b/boom", "verify"],
+    startInterval: 900,
+    environment: { PATH: "/opt/homebrew/bin:/usr/bin" },
+  });
+  expect(plistEnvValue(withEnv, "PATH")).toBe("/opt/homebrew/bin:/usr/bin");
+  expect(plistEnvValue(withEnv, "NOPE")).toBeUndefined();
+
+  const withoutEnv = renderAgentPlist({
+    label: "com.x",
+    programArgs: ["/b/boom", "verify"],
+    startInterval: 900,
+  });
+  expect(plistEnvValue(withoutEnv, "PATH")).toBeUndefined();
+});
+
+test("a reordered PATH re-renders to a plist that differs ONLY in PATH", () => {
+  // This is the equivalence `applyTimer` relies on: re-render with the recorded PATH and the
+  // file must come back byte-identical, which is what proves nothing else drifted.
+  const opts = { label: "com.x", programArgs: ["/b/boom", "verify"], startInterval: 900 } as const;
+  const recorded = renderAgentPlist({ ...opts, environment: { PATH: "/a:/b:/c" } });
+  const fresh = renderAgentPlist({ ...opts, environment: { PATH: "/c:/b:/a" } });
+  expect(recorded).not.toBe(fresh); // byte comparison: drift
+  const readBack = plistEnvValue(recorded, "PATH");
+  expect(renderAgentPlist({ ...opts, environment: { PATH: readBack ?? "" } })).toBe(recorded);
+  expect(samePathSet(readBack, "/c:/b:/a")).toBe(true); // set comparison: no drift
+});
+
+test("a plist that differs beyond PATH is still drift", () => {
+  const opts = { label: "com.x", programArgs: ["/b/boom", "verify"] } as const;
+  const recorded = renderAgentPlist({ ...opts, startInterval: 900, environment: { PATH: "/a" } });
+  // Different interval — re-rendering with the recorded PATH must NOT reproduce the file.
+  const fresh = renderAgentPlist({ ...opts, startInterval: 1800, environment: { PATH: "/a" } });
+  expect(fresh).not.toBe(recorded);
+  expect(
+    renderAgentPlist({
+      ...opts,
+      startInterval: 1800,
+      environment: { PATH: plistEnvValue(recorded, "PATH") ?? "" },
+    }),
+  ).not.toBe(recorded);
 });
