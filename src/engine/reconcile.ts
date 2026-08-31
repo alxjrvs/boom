@@ -13,7 +13,6 @@ import { acquireLock } from "../lib/lock.ts";
 import { backupsDir } from "../lib/paths.ts";
 import { bandsReporter } from "../lib/reporter.ts";
 import { Journal, journalRemove, newRunId, pruneRuns, readRun } from "./journal.ts";
-import { auditLockDrift } from "./pinning.ts";
 import { finalizeResources, reconcileSection } from "./registry.ts";
 import { applyBoomSettings } from "./settings.ts";
 import { type ManifestEntry, readManifest, writeManifest } from "./state.ts";
@@ -334,22 +333,6 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
       }
     }
 
-    // Lockfile drift, verify only. A repo with a `boom.lock` has opted into pinning, so a
-    // drifted package is drift like any other and belongs in the same warning tier — otherwise
-    // `boom lock --check` is a thing you have to remember to run, and the scheduled `boom verify`
-    // that exists to catch drift reports a drifted machine as clean. A no-op (and no `brew list`
-    // spawn) when the repo has no lockfile. Guarded like a resource: never unwinds the run.
-    if (verb === "verify" && !only) {
-      try {
-        report.category = "PINNING";
-        if (await auditLockDrift(repo, config, ctx, report)) {
-          report.note("re-pin with: boom lock");
-        }
-      } catch (e) {
-        report.fail(`lock audit: ${(e as Error).message}`);
-      }
-    }
-
     // End-of-run finalize hooks (each self-gates): the seam where a resource acts on its own
     // accumulated state — e.g. osx restarts Dock/Finder/SystemUIServer once, iff a default
     // actually changed — instead of the core loop reaching into a resource-specific flag.
@@ -358,8 +341,8 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
     // Mark committed only when the run actually succeeded (zero failures) — and only HERE, past
     // the last phase that can still report one. `applyBoomSettings` and `finalizeResources` both
     // can; deciding above them journals a run whose self-wiring failed as clean, which is the
-    // precise mislabelling `committed` exists to prevent, and it is also what `rollback --list`
-    // and `--resume` read to find an interrupted run.
+    // precise mislabelling `committed` exists to prevent, and it is also what `--resume`
+    // reads to find an interrupted run.
     if (writes && report.failures === 0) journal?.markCommitted();
 
     return finish();

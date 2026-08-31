@@ -3,7 +3,7 @@
 **BoomTube** is **declarative dev-machine setup**: a single self-contained binary
 (executable: **`boom`**), compiled from **TypeScript on Bun**, that converges a
 machine to a declared state — dotfiles, packages, and tools from one
-`boomfile.toml`, with drift detection and rollback — then opens portals to your code.
+`boomfile.toml`, with drift detection — and a journal that preserves whatever it displaces.
 Named for Kirby's **Boom Tube** — an instant conduit between worlds —
 it opens a portal to your machine's ideal state, and to your code.
 
@@ -29,14 +29,10 @@ A `boom` invocation does one of two things:
    - `boom source` / `boom source sync` — reconcile the machine to the boomfile, running the `sync` verb (`--fix` repairs drift by overwriting conflicts; `--update` also updates outdated brew formulae)
    - `boom verify` — check drift, exit 0 ok / 2 warn / 1 fail (`--json` for a report; `--ci`
      narrows to a non-interactive schema-check gate, 0/1, no machine walk)
-   - `boom status` — a read-only one-screen dashboard composing the health signals other
-     commands already own (config, config-repo drift, last sync + checkpoints, lock,
-     secrets); introduces no new state
    - `boom uninstall`
    These share **one verb-parameterized loop** (`src/engine/reconcile.ts`) over a
-   resource-type registry — siblings, not separate scripts. `boom rollback` undoes
-   the most recent sync (`--run-id` targets an older one, `--list` enumerates them);
-   `source --resume` continues an interrupted one. A
+   resource-type registry — siblings, not separate scripts. `source --resume` continues an
+   interrupted one. A
    conflicting (non-boom-owned) file at a `link` destination is **skipped by
    default** (boom never clobbers a file it doesn't own); `source --fix` opts into
    overwriting it — that's how drift is repaired, so there's no separate `fix` verb.
@@ -53,8 +49,7 @@ A `boom` invocation does one of two things:
 
 2. **Discovered subcommands** — built-ins are the `@stricli` route map, in `src/cli.ts` order:
    <!-- commands:begin -->
-   `verify`, `status`, `uninstall`, `source`, `where`, `rollback`,
-   `checkpoint`, `upgrade`, `doctor`, `lock`, `skill`.
+   `verify`, `uninstall`, `source`, `upgrade`, `doctor`, `skill`.
    <!-- commands:end -->
    That list is asserted **equal** to `commandNames()` by `test/docs-hygiene.test.ts`, so adding
    a route without naming it here (or naming one that no longer routes) fails CI. `source` is
@@ -66,6 +61,18 @@ A `boom` invocation does one of two things:
    briefs from that same route map for `boom skill` — one source of truth, no parallel table
    to keep in sync. That is why removing a verb is a one-line edit here: the shell completions
    and man page it also fed were derived, and were deleted with their commands.
+
+### The journal, without an undo verb
+
+Every mutation is still journaled, and an overwrite still **displaces** the original into
+`backups/<run-id>/` at 0700 rather than destroying it. What is gone is `boom rollback`: nothing
+replays those records automatically any more. Two consumers keep the journal load-bearing —
+`displace()` is what makes `source --fix` non-destructive, and `--resume` reads the last
+uncommitted run to continue it rather than opening a second.
+
+So a bad sync is recovered by hand, from a backup tree that is still written for exactly that
+purpose. That is the trade: the records cost what they always did, and reading them is now a
+person's job.
 
 ### Config source is a git remote (repo-only)
 
@@ -161,7 +168,7 @@ Resources:
   out of the owned-destinations manifest, so orphan reaping never auto-deletes one. boom never
   journals or backs up the plaintext **it** renders (a fresh render's undo is a plain remove); a
   pre-existing file at `dst` is the user's, so it is **left alone** — replacing it takes
-  `boom source --fix`, which displaces it into the run's backup tree first so `boom rollback`
+  `boom source --fix`, which displaces it into the run's backup tree first so the original
   can put it back
 - `dir = [{ path, mode?, remove_on_uninstall? }]` — ensure a standalone directory exists
   (declarative `mkdir -p`/`chmod`); `remove_on_uninstall = true` removes it on uninstall *only
@@ -185,7 +192,7 @@ Resources:
   opposite) — tear those down with a `run` step bound to `on = "uninstall"`
 - `osx_default = [{ domain, key, value, type? }]` — a `defaults write`; `type` is inferred
   from the TOML value (`bool`/`int`/`float`/`string`) and only stated to override an edge
-  case. The prior value is journaled, so `boom rollback` restores it (or deletes a key boom
+  case. The prior value is journaled, so it can be recovered by hand (including a key boom
   introduced). `boom uninstall` does the same from the recorded *first* prior — the value the
   machine had before boom ever wrote the key — and skips the key untouched when no record
   survives retention, since deleting a default boom may not have introduced is unrecoverable
@@ -233,7 +240,7 @@ Resources:
   absent is *acceptable*, never *required*. For files a tool re-creates behind your back: an
   editor's local override, a credential cache, a `settings.local.json` an agent writes on an
   "always allow" click. Removal goes through the journal, so the file lands in the run's backup
-  tree and `boom rollback` restores it — the difference between this and a `run` step calling
+  tree and is recoverable from there — the difference between this and a `run` step calling
   `rm`, which destroys. A directory needs `recursive = true`, so one typo in a path is not a
   silent recursive delete
 - `hook = [{ name, with? }]` — load `hooks/<name>.ts`, the TS resource-type extension; `with`
@@ -273,7 +280,7 @@ A single top-level `[boom]` table folds boom-invoking-boom behaviors into the re
 boom already runs, so a consumer stops hand-rolling `run`/plist boilerplate for them. Every
 field is opt-in; an absent (or all-off) table changes nothing. The behaviors are work items
 run through the *same* guarded loop as section resources (`runWorkItems`,
-`src/engine/settings.ts`) — so skill + timer writes are journaled and `boom rollback`-able —
+`src/engine/settings.ts`) — so skill writes are journaled and recoverable —
 verb-aware (sync installs/refreshes, verify reports drift, uninstall tears the timers down):
 
 - `skill_on_sync = true` — regenerate `~/.claude/skills/boom/SKILL.md` from the running
@@ -354,7 +361,7 @@ built-in resource gets:
   export. A hook boom cannot load (missing module, broken import) declares nothing, so that run
   skips orphan reaping entirely rather than reaping what the hook would have claimed.
 - **Undo** — `await api.journalWrite(op, file)` writes the transaction's undo record (and backs
-  up whatever is there) *before* the hook writes, so `boom rollback` reverses it. It is a
+  up whatever is there) *before* the hook writes, so the original survives it. It is a
   documented no-op outside a mutating sync, so calling it unconditionally is safe.
 - **`--fix` semantics** — `linkMode` tells a hook whether the user asked to overwrite, so it can
   hold the same never-clobber-an-unowned-file default the core resources hold.
@@ -379,12 +386,12 @@ transaction journal (intent/done rows + undo token, a `committed` flag) and the 
 of owned destinations. Each journal row commits atomically (WAL), so an interrupted run
 leaves whole rows — there's no torn-record to guard against on read. Every run that writes
 holds an exclusive lockfile under the state dir (`src/lib/lock.ts`) — `sync` **and**
-`uninstall`, plus `rollback`, `rollback --to` and `checkpoint` — so concurrent runs can't race
+`uninstall` — so concurrent runs can't race
 on destinations or clobber each other's manifest; a stale lock from a crashed run (dead pid)
-is reclaimed, and a read-only `rollback --dry-run` is deliberately left unlocked. `committed`
+is reclaimed. `committed`
 is set only when the run finished with zero failures, and only *after* the `[boom]`
 self-wiring and the end-of-run finalize phases, both of which can still fail — a failure in
-either leaves the run uncommitted, so `rollback --list` distinguishes a clean run from a
+either leaves the run uncommitted, so `--resume` distinguishes a clean run from a
 half-applied one. Each destructive filesystem op journals its whole undo — intent, the
 displaced original, and the `done` row naming it — *before* the write, so no crash can orphan
 a backup nothing points at. `source --resume` continues the interrupted run in place (its id + backup

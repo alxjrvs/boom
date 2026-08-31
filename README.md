@@ -2,7 +2,7 @@
 
 **BoomTube** is **declarative dev-machine setup** — it converges your machine
 to a state you declare once: dotfiles, packages, and tools from a single
-`boomfile.toml`, with drift detection and rollback. Its executable, **`boom`**,
+`boomfile.toml`, with drift detection. Its executable, **`boom`**,
 runs the reconcile loop — `sync` / `verify` — journals every change so it can be
 rolled back, then gets out of your way and opens portals to your code. One
 self-contained binary, compiled from **TypeScript on [Bun](https://bun.com)**,
@@ -45,18 +45,6 @@ managed cache dir, records a breadcrumb, and syncs it. Pass `--no-sync` to clone
 record only — to review before reconciling, or to re-point at a different repo. The
 fresh-machine one-liner is `curl install.sh | sh && boom source set owner/repo`.
 
-Starting from an already-configured machine instead? `boom adopt` reverse-engineers a
-reviewable `boomfile.toml` proposal — capturing your Homebrew/mise/apt packages and
-common dotfiles — that you turn into your config repo. Migrating off another manager?
-`boom adopt --from chezmoi|stow|yadm|dotbot|nix-darwin` translates its layout into that
-proposal.
-
-Greenfield — no dotfiles repo at all yet? `boom init [owner/repo]` runs the whole cold
-start in one shot: `adopt` to scaffold the proposal, `git init` + commit, create the remote
-(via `gh`), push, and record the breadcrumb — leaving you on a live, boom-managed config
-repo. `--dry-run` previews every step and changes nothing; `--no-push` stops before touching
-a remote.
-
 ## The reconcile loop
 
 `sync` / `verify` / `uninstall` are **one verb-parameterized loop** over
@@ -73,14 +61,13 @@ boom source --resume    # continue an interrupted sync (skips completed steps)
 boom verify             # check for drift — exit 0 ok / 2 warn / 1 fail
 boom verify --json      # …as a structured drift report
 boom verify --ci        # non-interactive config gate for CI (schema-check only; exit 0/1)
-boom status             # one-screen dashboard: config, repo drift, last sync, lock, secrets
-boom rollback           # undo the most recent sync (restores backed-up files)
 ```
 
-`boom status` composes the cheap health signals every other command already owns into a
-single glance — read-only, no machine walk. A shippable GitHub Action wrapping `verify --ci`
-lives in [`examples/github-action/`](examples/github-action/) so a config repo can gate its
-own PRs.
+A shippable GitHub Action wrapping `verify --ci` lives in
+[`examples/github-action/`](examples/github-action/) so a config repo can gate its own PRs.
+
+`verify` reports whether the machine matches the boomfile. It does **not** audit package
+versions against a lockfile — validity, not drift in what brew or mise resolved.
 
 `sync` syncs the config repo against its remote first (`pull --rebase
 --autostash`, so local edits ride along and land back on top). `verify` reports
@@ -112,8 +99,6 @@ boom doctor --config    # parse + schema-check the boomfile; change nothing (exi
 boom doctor             # check boom's own preconditions (tools, keychain, state)
 boom doctor --fix       # …and mend the safe ones (state dir, boom skill)
 boom doctor --secrets   # audit that every secret ref (op:// and pluggable backends) resolves
-boom lock               # pin resolved package versions to boom.lock (--check reports drift)
-boom where config|engine        # resolve where boom keeps things
 boom upgrade            # upgrade the boom binary itself
 boom skill              # emit a Claude Code SKILL.md (--install writes it to ~/.claude)
 ```
@@ -125,13 +110,6 @@ sections that run in phase order
 (`link → copy → tmpl → secret → dir → pkg → osx_default → launchd → systemd → run → check → hook`):
 
 ```toml
-# Optional: compose shared sections from other boom repos before your own (a git
-# remote, or a path relative to this repo). `boom module add <ref>` splices one in;
-# a module may itself `use` further modules — they compose recursively (cycles are broken).
-# A module's paths resolve against the module's own directory, so a module ships its dotfiles.
-# `use` belongs here, in the base file — it is rejected in an overlay (see below).
-use = ["myorg/boom-base", "./modules/node-dev"]
-
 # Optional: named values `tmpl` templates interpolate as ${NAME} (per-machine via overlays).
 [vars]
 git_email = "me@example.com"
@@ -183,7 +161,7 @@ name = "Guardrails"
 # Verify-time content assertions — legible where a grep-in-a-run would be escaping-heavy.
 check = [{ path = "~/.claude/settings.json", absent = ["osxkeychain"], message = "cached-PAT regression" }]
 # And the inverse: a path that must NOT exist. Sync removes it (into the backup tree, so
-# `boom rollback` restores it), verify fails while it is there. For files a tool re-creates
+# it is recoverable from the run's backup tree), verify fails while it is there. For files a tool re-creates
 # behind your back — an agent writing settings.local.json on an "always allow" click.
 absent = [{ path = "~/.claude/settings.local.json", message = "machine-local override" }]
 
