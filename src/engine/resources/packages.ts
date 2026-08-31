@@ -1,7 +1,9 @@
 // The `pkg` resource: satisfy a package manager. One array entry per manager, dispatched
 // here — so a new manager is one `case` plus one picklist member in the schema, not a fresh
-// top-level section key + registry row. Shells out to the stock tools ("native over
-// special"); an absent tool is reported, not fatal — matching engine/run.
+// top-level section key + registry row. Three are supported, and the schema's picklist
+// (`brew|mise|gh`, config/schema.ts) is the list: `brew bundle`, `mise install`, and
+// `gh extension`. Shells out to the stock tools ("native over special"); an absent tool is
+// reported, not fatal — matching engine/run.
 import { join } from "node:path";
 import { detectOs } from "../../config/profile.ts";
 import type { Pkg } from "../../config/schema.ts";
@@ -230,12 +232,12 @@ async function readPackages(file: string, ctx: ReconcileCtx): Promise<string[]> 
     .filter((l) => l.length > 0);
 }
 
-// The user-scoped managers: like apt/dnf they read a newline package list, but install into the
-// *user* toolchain (no sudo, not the OS package set) — a language/app installer per manager. Two
-// query disciplines: most expose a per-package "is it installed" probe whose exit code is the
-// answer; cargo and pipx have no per-package query, so their installed set is parsed once from a
-// list command and membership-tested. Every command shape mirrors adopt.ts's OTHER_MANAGERS so
-// detection (`boom adopt`) and management (`boom sync`) agree on the exact CLIs.
+// The user-scoped managers: they read a newline package list and install into the *user*
+// toolchain (no sudo, not the OS package set). `gh` is the only one today; the table shape is
+// kept because it is what makes adding a second one a data change rather than a code change.
+// Two query disciplines are supported: a per-package "is it installed" probe whose exit code is
+// the answer, or — for a tool with no such probe — one list command parsed into an installed set
+// and membership-tested. `gh extension list` is the list-parsing kind.
 type UserMgrName = "gh";
 
 // A per-package probe (its exit code is the answer) vs. a one-shot list parsed into an installed
@@ -246,7 +248,8 @@ type PkgQuery =
 
 interface UserMgr {
   readonly cli: string;
-  // OS-gated like the Linux system managers: flatpak is a Linux desktop runtime, a no-op on mac.
+  // A manager that only exists on Linux is a reported no-op on mac rather than a failure. No
+  // current entry sets it; it is the hook a Linux-only manager would need.
   readonly linuxOnly?: boolean;
   readonly install: string[]; // base argv; the package name is appended
   readonly uninstall: string[]; // base argv; the package name is appended
@@ -295,7 +298,7 @@ async function reconcileUserPkgs(mgr: UserMgrName, entry: Pkg, ctx: ReconcileCtx
   const { file } = entry;
   const spec = USER_MGR[mgr];
 
-  // OS-gated like the apt/dnf arm: a Linux-only manager on a mac is a reported no-op, not a fail.
+  // A Linux-only manager on a mac is a reported no-op, not a fail.
   if (spec.linuxOnly && detectOs(ctx.env) !== "linux") {
     if (ctx.verb === "verify") report.skip(`${mgr} — Linux-only`);
     return;
@@ -322,7 +325,7 @@ async function reconcileUserPkgs(mgr: UserMgrName, entry: Pkg, ctx: ReconcileCtx
   }
 
   // Resolve "is this package installed" once per run: a list-query manager parses one command's
-  // output into a set (cargo/pipx have no per-package probe); the rest probe each name's exit code.
+  // output into a set (this is `gh`'s discipline); an `each` manager probes each name's exit code.
   const q = spec.query;
   const installed = "list" in q ? q.parse(captureArgv([...q.list], ctx.env).stdout) : undefined;
   // `key` normalizes a declared entry into the spelling the parsed set uses (gh: case-folded).
@@ -335,8 +338,8 @@ async function reconcileUserPkgs(mgr: UserMgrName, entry: Pkg, ctx: ReconcileCtx
 
   switch (ctx.verb) {
     case "sync": {
-      // Unlike apt's batched, idempotent `install <all>`, these managers reinstall/rebuild a
-      // package even when it's current (an expensive no-op for cargo), so install only the misses.
+      // These managers reinstall a package even when it's current, rather than treating an
+      // already-satisfied name as a no-op, so install only the misses.
       const missing = packages.filter((p) => !isInstalled(p));
       if (missing.length === 0) {
         report.skip(`${mgr}: ${packages.length} package(s) satisfied`);

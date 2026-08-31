@@ -15,31 +15,3 @@ export function confirm(question: string, opts: { yes?: boolean } = {}): boolean
   const answer = prompt(`${question} [y/N]`);
   return answer !== null && /^y(es)?$/i.test(answer.trim());
 }
-
-export interface Choice<T extends string> {
-  // The single character typed to pick this. Matched case-insensitively.
-  readonly key: string;
-  // Shown in the prompt next to the key.
-  readonly label: string;
-  readonly value: T;
-}
-
-// Multi-way sibling of confirm(), for "what should I do with this one?" rather than
-// "should I proceed?" — same doctrine: it reads the real terminal, and a non-TTY (pipe,
-// CI, launchd timer) is never prompted and gets `fallback`, which every caller sets to
-// the do-nothing option. Empty input takes the fallback too, so leaning on return is
-// always the safe move. An unrecognized key re-asks rather than guessing, since the
-// choices here are not all reversible.
-export function choose<T extends string>(question: string, choices: readonly Choice<T>[], fallback: T): T {
-  if (!process.stdin.isTTY || choices.length === 0) return fallback;
-  const menu = choices.map((c) => `${c.key}=${c.label}`).join("  ");
-  for (;;) {
-    const answer = prompt(`${question}\n  ${menu}\n  choice`);
-    // null is EOF (stdin closed mid-run) — treat it as "stop asking", not as a pick.
-    if (answer === null) return fallback;
-    const typed = answer.trim().toLowerCase();
-    if (typed === "") return fallback;
-    const hit = choices.find((c) => c.key.toLowerCase() === typed);
-    if (hit) return hit.value;
-  }
-}

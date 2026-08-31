@@ -19,10 +19,10 @@ const DRIFT_MSGS = {
 } as const;
 
 // Fetch, then emit the config-repo drift lines (behind / unpushed / dirty) onto an already-open
-// section band. Factored out of statusConfigRepo so `boom status` (the machine dashboard) reports
-// the exact same clone-vs-origin drift as `boom source status` — one source of truth for what
-// "behind/ahead/dirty" means, so the glance and the dedicated command can't disagree. Assumes the
-// caller has drawn the section header; leaves the finish/exit-code to the caller.
+// section band. Split out of statusConfigRepo so any caller that wants those lines inside its own
+// section band gets the exact same clone-vs-origin drift `boom source status` reports — one
+// source of truth for what "behind/ahead/dirty" means. Assumes the caller has drawn the section
+// header; leaves the finish/exit-code to the caller.
 export async function reportRepoDrift(
   report: Reporter,
   path: string,

@@ -110,7 +110,7 @@ async function ensureParentDir(dir: string, mode: LinkMode, ctx: ReconcileCtx): 
   if (mode !== "overwrite") return false;
   // Undo BEFORE the create, via the one helper that owns that ordering: displace moves the
   // conflicting file into the backup tree, so if mkdir throws (or the process dies) the rows
-  // journalWrite wrote are what let rollback restore it. Inlining this sequence is what used to
+  // journalWrite wrote are what say where it went. Inlining this sequence is what used to
   // leave the intent row's undo NULL, which both orphan readers skip.
   await journalWrite("mkdir", dir, ctx, true);
   await mkdir(dir, { recursive: true });
@@ -307,7 +307,7 @@ async function copyOne(entry: File, place: Placement, ctx: ReconcileCtx): Promis
       }
       // journalWrite only displaces when a file is actually there; with no backup root the undo
       // is a plain remove of the copy we're about to write. Recorded before the write (same
-      // rationale as applyLink): if it throws after a displace, rollback still restores it.
+      // rationale as applyLink): if it throws after a displace, a row still names the original.
       await journalWrite("copy", dst, ctx, true);
       await mkdir(dirname(dst), { recursive: true });
       await copyFile(src, dst);

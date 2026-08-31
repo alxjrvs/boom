@@ -5,7 +5,7 @@
 **BoomTube** is **declarative dev-machine setup** — a single self-contained binary (the
 executable is **`boom`**), compiled from **TypeScript on Bun**, that converges a
 machine to a declared state (dotfiles, packages, tools) from a declarative
-`boomfile.toml`, with drift detection and rollback, then opens portals to your
+`boomfile.toml`, with drift detection and a recoverable teardown, then opens portals to your
 code: reconcile fast, get out of the way, get to work. It is a rewrite of
 the original bash engine (now removed); read [`SPEC.md`](SPEC.md) for the design
 of record.
@@ -40,8 +40,9 @@ of record.
   that receive a `HookApi` ( `with` inputs, `ok`/`warn`/`fail`, `dryRun`, `env`).
 - Mutating runs record a transaction journal in a `bun:sqlite` store
   (`${XDG_STATE_HOME:-~/.local/state}/boom/state.db`, `src/engine/db.ts`) and back up
-  displaced files under `…/backups/<run-id>/`; `boom rollback` replays the journal
-  (`--dry-run` previews it). The owned-destinations manifest lives in the same DB;
+  displaced files under `…/backups/<run-id>/`, so an overwrite or a reap is recoverable and
+  `boom uninstall` can put a macOS default's pre-boom value back. Nothing replays the journal
+  automatically. The owned-destinations manifest lives in the same DB;
   breadcrumbs live beside it under the state dir.
 - Commit messages: `type(scope): summary`. End with the co-author trailer.
 

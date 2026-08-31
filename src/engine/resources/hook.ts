@@ -51,7 +51,7 @@ export interface HookApi {
   // has since edited.
   declare(e: ManifestEntry): void;
   // Record the undo for a file the hook is about to write — intent, displace-to-backup, done —
-  // all BEFORE the write, so `boom rollback` can reverse it.
+  // all BEFORE the write, so what it overwrites is displaced, not destroyed.
   //
   // GOTCHA, and the reason this is a one-line wrapper rather than open-coded here: the helper
   // calls `displace()`, and `displace` with no `backupRoot` REMOVES the path. `journal` and
@@ -108,8 +108,7 @@ export async function reconcileHook(entry: Hook, ctx: ReconcileCtx): Promise<voi
   // longer the ONLY record of a hook's work — `journalWrite` rows are real, replayable undo on top
   // of it — but the marker stays unconditional: a hook is arbitrary code, so journaling part of it
   // never makes all of it reversible, and suppressing the marker once a hook journals anything
-  // would silently promise reversibility for the un-journaled remainder (rollback.ts surfaces it
-  // under "Not reversible").
+  // would silently promise reversibility for the un-journaled remainder.
   if (!ctx.dryRun && ctx.verb === "sync") await ctx.journal?.side("hook", entry.name);
 
   const api: HookApi = {

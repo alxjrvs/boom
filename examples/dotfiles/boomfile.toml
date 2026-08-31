@@ -2,16 +2,15 @@
 # Copy the pieces you need into your own dotfiles repo; `boom doctor --config` checks it.
 
 # A top-level [boom] table folds boom's own self-wiring into the reconcile it already runs:
-# keep the Claude skill fresh, nudge on a new release, and manage scheduled boom timers
-# (macOS) — instead of hand-rolling those as run/plist steps.
+# keep the Claude skill fresh and nudge on a new release, instead of hand-rolling those as
+# run steps.
 [boom]
 skill_on_sync = true             # regenerate ~/.claude/skills/boom/SKILL.md each sync
 upgrade_on_sync = "check"        # warn when a newer boom release ships ("auto" self-upgrades)
-# schedule: a launchd timer per entry (macOS-only) running `boom <cmd>` on `every`.
-schedule = [
-  { cmd = "verify", every = "15m" },      # catch drift every 15m
-  { cmd = "code fetch", every = "15m" },   # keep every `boom code` repo's origin warm
-]
+# `schedule` used to live here, generating a launchd timer per entry. It is RETIRED: still
+# accepted so an old boomfile keeps parsing, but nothing reads it, and no timer is created or
+# reaped. To run boom on a schedule, write the plist yourself and link it with the `launchd`
+# resource (see the macOS section below).
 
 [[section]]
 name = "Shell + git"

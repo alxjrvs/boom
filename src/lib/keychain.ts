@@ -1,11 +1,12 @@
 // The macOS login-keychain item the 1Password service-account path resolves secrets through, and
-// the one probe boom runs against it. Three files declared this same literal independently
-// (`boom doctor`, `boom status`, and the `boom mcp` wrapper it emits); a rename would have had to
-// find all three.
+// the one probe boom runs against it. Several call sites used to declare this same literal
+// independently, so a rename had to find every one of them; it lives here instead. `boom doctor`
+// is the only reader left (engine/doctor.ts).
 //
-// `boom mcp` deliberately does NOT call agentTokenPresent(): what it needs is the *string* — it
-// bakes `security find-generic-password …` into shell text that the MCP client stores and runs
-// later, in another process. It imports AGENT_KEYCHAIN_ITEM and keeps its own interpolation.
+// Both halves are exported on purpose. A caller that needs to *know* whether the token is there
+// calls agentTokenPresent(); a caller that needs the item NAME — to bake a
+// `security find-generic-password …` invocation into text some other process will run later —
+// takes agentKeychainItem() and does its own interpolation.
 
 import type { Env } from "./paths.ts";
 

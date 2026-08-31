@@ -205,7 +205,7 @@ export async function reconcileCheck(entry: Check, ctx: ReconcileCtx): Promise<v
     return;
   }
   // A repair is arbitrary shell — journal it as a non-reversible side effect (mutating sync
-  // only), like `run`/`hook`, so rollback can warn that replaying it can't be undone. Run from
+  // only), like `run`/`hook`, so the run's record shows it cannot be undone. Run from
   // the repo so a repair command is cwd-independent, matching the `run` resource.
   await ctx.journal?.side("check-repair", entry.repair);
   const { code, timedOut } = runShell(entry.repair, ctx.env, { quietStdout: ctx.json, cwd: ctx.repo });

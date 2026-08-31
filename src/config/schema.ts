@@ -112,9 +112,9 @@ const PkgSchema = v.pipe(
 // file being committed but never stops it existing — so a permission nobody reviewed lives on
 // disk, invisible to every gate that reads tracked files.
 //
-// Removal goes through the journal, so the file lands in the run's backup tree and
-// `boom rollback` restores it. `recursive` is required for a directory: without it one typo in
-// a path is a silent recursive delete on the next sync.
+// Removal goes through the journal, so the file lands in the run's backup tree rather than
+// being destroyed, with a row naming where it went. `recursive` is required for a directory:
+// without it one typo in a path is a silent recursive delete on the next sync.
 const AbsentSchema = v.strictObject({
   path: v.string(),
   message: v.optional(v.string()),
