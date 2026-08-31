@@ -2,14 +2,11 @@
 // checkpoints, boom.lock, drift notifications, and doctor --fix. Each is exercised
 // against a fully sandboxed $HOME + state dir (never the real machine), like engine.test.ts.
 import { expect, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, readFile, stat, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { chmod, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { run } from "@stricli/core";
 import { app } from "../src/cli.ts";
 import { loadConfig } from "../src/config/load.ts";
-import { resolveModule } from "../src/config/modules.ts";
-import { insertUseRef } from "../src/config/registry.ts";
 import type { BoomContext } from "../src/context.ts";
 import { doctor } from "../src/engine/doctor.ts";
 import {
@@ -38,11 +35,14 @@ import { notifyArgv } from "../src/lib/notify.ts";
 import { backupsDir } from "../src/lib/paths.ts";
 import { makeSandbox, type Sandbox } from "./support/sandbox.ts";
 
-const sandbox = (boomfile: string, opts: { emptyPath?: boolean } = {}): Promise<Sandbox> =>
+const sandbox = (
+  boomfile: string,
+  opts: { emptyPath?: boolean; env?: Record<string, string> } = {},
+): Promise<Sandbox> =>
   makeSandbox(boomfile, {
     prefix: "boom-feat-",
     emptyPath: opts.emptyPath ?? false,
-    env: { BOOM_HOST: "testhost" },
+    env: { BOOM_HOST: "testhost", ...(opts.env ?? {}) },
   });
 
 // A sandbox like engine.test's, plus an `emptyPath` switch: point PATH at a dir with no tools so
@@ -283,137 +283,6 @@ test("secret pass backend: sync writes the value `pass show` returns", async () 
   expect(sb.out()).not.toContain("pass-provided-secret");
 });
 
-// --- use modules --------------------------------------------------------------------------
-
-test("modules: reconcile composes a local module's sections before the repo's own", async () => {
-  const sb = await sandbox('use = ["./mod"]\n[[section]]\nname = "local"\n');
-  const mod = join(sb.repo, "mod");
-  await mkdir(mod, { recursive: true });
-  await writeFile(
-    join(mod, "boomfile.toml"),
-    '[[section]]\nname = "shared"\ndir = [{ path = "~/.config/shared" }]\n',
-  );
-  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
-  expect(await pathExists(join(sb.home, ".config", "shared"))).toBe(true);
-});
-
-test("modules: an unresolvable module warns and is skipped, never sinking the reconcile", async () => {
-  const sb = await sandbox('use = ["./missing"]\n[[section]]\nname = "local"\n');
-  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
-  expect(sb.out()).toContain("module ./missing");
-});
-
-test("resolveModule: a local path without a boomfile is an error, not a throw", async () => {
-  const sb = await sandbox('[[section]]\nname = "x"\n');
-  const m = await resolveModule(sb.env, sb.repo, "./nope");
-  expect(m.dir).toBeUndefined();
-  expect(m.error).toContain("no boomfile.toml");
-});
-
-// --- nested modules + cycle detection -----------------------------------------------------
-
-test("modules: a nested module (A uses B) resolves both, composing B's sections too", async () => {
-  const sb = await sandbox('use = ["./mod-a"]\n[[section]]\nname = "local"\n');
-  const modA = join(sb.repo, "mod-a");
-  const modB = join(modA, "mod-b");
-  await mkdir(modB, { recursive: true });
-  // mod-a itself `use`s mod-b (one level deeper than the old cap allowed).
-  await writeFile(
-    join(modA, "boomfile.toml"),
-    'use = ["./mod-b"]\n[[section]]\nname = "shared-a"\ndir = [{ path = "~/.config/shared-a" }]\n',
-  );
-  await writeFile(
-    join(modB, "boomfile.toml"),
-    '[[section]]\nname = "shared-b"\ndir = [{ path = "~/.config/shared-b" }]\n',
-  );
-  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
-  // Both the nested (B) and intermediate (A) module sections applied.
-  expect(await pathExists(join(sb.home, ".config", "shared-b"))).toBe(true);
-  expect(await pathExists(join(sb.home, ".config", "shared-a"))).toBe(true);
-});
-
-test("modules: a cycle (A uses B, B uses A) terminates and warns instead of hanging", async () => {
-  const sb = await sandbox('use = ["./mod-a"]\n[[section]]\nname = "local"\n');
-  const modA = join(sb.repo, "mod-a");
-  const modB = join(sb.repo, "mod-b");
-  await mkdir(modA, { recursive: true });
-  await mkdir(modB, { recursive: true });
-  await writeFile(join(modA, "boomfile.toml"), 'use = ["../mod-b"]\n[[section]]\nname = "a"\n');
-  await writeFile(join(modB, "boomfile.toml"), 'use = ["../mod-a"]\n[[section]]\nname = "b"\n');
-  // If cycle detection failed this would recurse forever; a bounded resolve returns cleanly.
-  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
-  expect(sb.out()).toContain("cycle detected");
-});
-
-// --- module-shipped files (section origin) ------------------------------------------------
-
-test("modules: a module ships a file beside its own boomfile", async () => {
-  // The audit's exact reproduction: before sections carried an origin, `src = "vimrc"` resolved
-  // against the BASE repo and the module's own file reported "source missing — not linked".
-  const sb = await sandbox('use = ["./mod"]\n[[section]]\nname = "local"\n');
-  const mod = join(sb.repo, "mod");
-  await mkdir(mod, { recursive: true });
-  await writeFile(join(mod, "vimrc"), 'set nocompatible"\n');
-  await writeFile(
-    join(mod, "boomfile.toml"),
-    '[[section]]\nname = "vim"\nlink = [{ src = "vimrc", dst = "~/.vimrc" }]\n',
-  );
-  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
-  expect(await linkTarget(join(sb.home, ".vimrc"))).toBe(join(mod, "vimrc"));
-});
-
-test("modules: a NESTED module's file resolves against the NESTED module's dir", async () => {
-  const sb = await sandbox('use = ["./mod-a"]\n[[section]]\nname = "local"\n');
-  const modA = join(sb.repo, "mod-a");
-  const modB = join(modA, "mod-b");
-  await mkdir(modB, { recursive: true });
-  await writeFile(join(modA, "boomfile.toml"), 'use = ["./mod-b"]\n[[section]]\nname = "a"\n');
-  await writeFile(join(modB, "gitconfig"), "[user]\n");
-  await writeFile(
-    join(modB, "boomfile.toml"),
-    '[[section]]\nname = "b"\nlink = [{ src = "gitconfig", dst = "~/.gitconfig" }]\n',
-  );
-  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
-  // Not mod-a: the recursion stamps each level with its OWN dir.
-  expect(await linkTarget(join(sb.home, ".gitconfig"))).toBe(join(modB, "gitconfig"));
-});
-
-test("modules: a module-shipped link is reaped once the module leaves `use`", async () => {
-  // The module lives OUTSIDE the config repo, so reaping cannot fall back on "the target starts
-  // with the repo path" — it has to match the src the manifest recorded.
-  const mod = await mkdtemp(join(tmpdir(), "boom-mod-"));
-  const sb = await sandbox(`use = ["${mod}"]\n[[section]]\nname = "local"\n`);
-  await writeFile(join(mod, "vimrc"), "set nocompatible\n");
-  await writeFile(
-    join(mod, "boomfile.toml"),
-    '[[section]]\nname = "vim"\nlink = [{ src = "vimrc", dst = "~/.vimrc" }]\n',
-  );
-  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
-  expect(await linkTarget(join(sb.home, ".vimrc"))).toBe(join(mod, "vimrc"));
-
-  await writeFile(join(sb.repo, "boomfile.toml"), '[[section]]\nname = "local"\n');
-  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
-  expect(await pathExists(join(sb.home, ".vimrc"))).toBe(false);
-  expect(sb.out()).toContain("reaped orphan");
-});
-
-test("modules: a module section whose dst resolves into the module dir is refused", async () => {
-  // Pins that Layer 1's repo-self-link guard follows the origin swap: `~/.config/nvim` is a
-  // symlink INTO the module, so the module's own link would land inside the module's sources.
-  const sb = await sandbox('use = ["./mod"]\n[[section]]\nname = "local"\n');
-  const mod = join(sb.repo, "mod");
-  await mkdir(join(mod, "nvim"), { recursive: true });
-  await writeFile(join(mod, "nvim", "init.lua"), "-- init\n");
-  await writeFile(
-    join(mod, "boomfile.toml"),
-    '[[section]]\nname = "nvim"\nlink = [{ src = "nvim/init.lua", dst = "~/.config/nvim/init.lua" }]\n',
-  );
-  await mkdir(join(sb.home, ".config"), { recursive: true });
-  await symlink(join(mod, "nvim"), join(sb.home, ".config", "nvim"));
-  expect(await reconcile("sync", sb.ctx, { linkMode: "overwrite" })).toBe(1);
-  expect(sb.out()).toContain("refusing to link the repo into itself");
-});
-
 // --- overlays carry vars + [boom], not just sections ---------------------------------------
 
 test("overlays: a vars-only overlay loads and its value wins over the base's", async () => {
@@ -427,69 +296,6 @@ test("overlays: a vars-only overlay loads and its value wins over the base's", a
   await writeFile(join(sb.repo, "boomfile.testhost.toml"), '[vars]\nEMAIL = "host"\n');
   expect(await reconcile("sync", sb.ctx, {})).toBe(0);
   expect(await readFile(join(sb.home, ".gitconfig"), "utf8")).toContain("email = host");
-});
-
-// --- module add ---------------------------------------------------------------------------
-
-test("module add takes a real ref and refuses a bare word", async () => {
-  // `add` used to resolve a name against a curated registry whose five packs all pointed at
-  // repositories that do not exist — so the command's whole job was splicing a dead ref into
-  // the user's committed config. It now takes the ref itself, and shape-checks it.
-  const sb = await sandbox('[[section]]\nname = "x"\n');
-  const file = join(sb.repo, "boomfile.toml");
-
-  expect(await run(app, ["module", "add", "github:o/r"], sb.ctx)).toBeUndefined();
-  expect(await readFile(file, "utf8")).toContain('use = ["github:o/r"]');
-
-  // idempotent — a second add of the same ref changes nothing
-  const before = await readFile(file, "utf8");
-  await run(app, ["module", "add", "github:o/r"], sb.ctx);
-  expect(await readFile(file, "utf8")).toBe(before);
-
-  // a bare word (the old pack-name shape) is refused rather than written in as a ref
-  await run(app, ["module", "add", "node-dev"], sb.ctx);
-  expect(await readFile(file, "utf8")).not.toContain("node-dev");
-  expect(sb.out()).toContain("is not a module ref");
-});
-
-test("insertUseRef: idempotent + least-destructive across the three shapes", () => {
-  // no `use` yet → prepend a fresh line.
-  const created = insertUseRef('[[section]]\nname = "x"\n', {}, "github:o/r");
-  expect(created.added).toBe(true);
-  expect(created.text).toContain('use = ["github:o/r"]');
-  // already present → no change.
-  const same = insertUseRef(created.text, { use: ["github:o/r"] }, "github:o/r");
-  expect(same.added).toBe(false);
-  expect(same.text).toBe(created.text);
-  // existing single-line array → splice in, preserving the comment after it.
-  const spliced = insertUseRef('use = ["a"] # keep\n[[section]]\nname="x"\n', { use: ["a"] }, "b");
-  expect(spliced.text).toContain("# keep");
-  expect(spliced.text).toContain('"b"');
-});
-
-test("module add: appends the ref to `use`, is idempotent, and loadConfig sees it", async () => {
-  const sb = await sandbox('[[section]]\nname = "x"\n');
-  const ref = "github:someone/boom-mod-node";
-  await run(app, ["module", "add", ref], sb.ctx);
-  expect(sb.ctx.process.exitCode).toBe(0);
-  expect((await loadConfig(sb.repo)).use).toContain(ref);
-  expect(sb.out()).toContain(ref);
-
-  // second add → skip, not a duplicate.
-  sb.ctx.process.exitCode = 0;
-  await run(app, ["module", "add", ref], sb.ctx);
-  expect(sb.ctx.process.exitCode).toBe(0);
-  const use = (await loadConfig(sb.repo)).use ?? [];
-  expect(use.filter((r) => r === ref)).toHaveLength(1);
-  expect(sb.out()).toContain("already");
-});
-
-test("module add: a bare word is refused rather than written in as a ref", async () => {
-  const sb = await sandbox('[[section]]\nname = "x"\n');
-  await run(app, ["module", "add", "no-such-pack"], sb.ctx);
-  expect(sb.ctx.process.exitCode).toBe(1);
-  expect(sb.out()).toContain("is not a module ref");
-  expect((await loadConfig(sb.repo)).use ?? []).toHaveLength(0);
 });
 
 // --- fleet awareness ----------------------------------------------------------------------
@@ -819,13 +625,15 @@ test("verify --ci fails (exit 1) when no config repo resolves (strict gate)", as
 
 // --- precedence: duplicate destinations resolve last-wins, end to end -----------------------
 
-// A sandbox whose repo `use`s a local module, with both layers' link source files on disk.
-// `modSection` / `baseSection` are the two `[[section]]` bodies that will fight over a dst.
-async function twoLayerSandbox(modSection: string, baseSection: string): Promise<Sandbox> {
-  const sb = await sandbox(`use = ["./mod"]\n${baseSection}`);
-  await mkdir(join(sb.repo, "mod"), { recursive: true });
-  await writeFile(join(sb.repo, "mod", "boomfile.toml"), modSection);
-  await writeFile(join(sb.repo, "mod", "dotfile"), "from the module\n");
+// Two composition layers fighting over one destination, weakest first.
+//
+// This used to build the weak layer from a local module (`use = ["./mod"]`). With modules gone,
+// an OS overlay is the remaining second layer, and it drives the same `resolveDuplicates` path:
+// an overlay composes AFTER the base, so the second argument is still the winner and every
+// assertion below keeps its meaning.
+async function twoLayerSandbox(weakSection: string, strongSection: string): Promise<Sandbox> {
+  const sb = await sandbox(weakSection, { env: { BOOM_OS: "linux" } });
+  await writeFile(join(sb.repo, "boomfile.linux.toml"), strongSection);
   await writeFile(join(sb.repo, "dotfile"), "from the base repo\n");
   return sb;
 }
@@ -866,7 +674,9 @@ test("precedence: an override is reported as a CONFIG note and rides in the JSON
   const quiet = await twoLayers();
   expect(await reconcile("sync", quiet.ctx, {})).toBe(0);
   expect(quiet.out()).toContain("CONFIG");
-  expect(quiet.out()).toContain("~/.zshrc — link from ./mod overridden by link in boomfile.toml");
+  expect(quiet.out()).toContain(
+    "~/.zshrc — link from boomfile.toml overridden by link in boomfile.linux.toml",
+  );
 
   const structured = await twoLayers();
   expect(await reconcile("sync", structured.ctx, { json: true })).toBe(0);
@@ -911,11 +721,12 @@ test("precedence: a secret never evicts the copy that owns the same dst", async 
   expect(await reconcile("sync", sb.ctx, {})).toBe(0);
   expect(await pathExists(dst)).toBe(true); // run 1 places it and takes ownership
 
-  // The user then adds the documented cross-kind override to their own boomfile.
+  // The user then adds the documented cross-kind override to the STRONGER layer — the overlay,
+  // which composes after the base and so is where an override belongs.
   sb.env.MY_NETRC = "rendered\n";
   await writeFile(
-    join(sb.repo, "boomfile.toml"),
-    `use = ["./mod"]\n[[section]]\nname = "Base"\nsecret = [{ dst = "~/.netrc", ref = "env:MY_NETRC" }]\n`,
+    join(sb.repo, "boomfile.linux.toml"),
+    `[[section]]\nname = "Base"\nsecret = [{ dst = "~/.netrc", ref = "env:MY_NETRC" }]\n`,
   );
   expect(await reconcile("sync", sb.ctx, {})).toBe(0);
   expect(await pathExists(dst)).toBe(true);

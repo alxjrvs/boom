@@ -333,16 +333,6 @@ test("a sync-only hook reports unchecked on verify instead of passing silently",
   expect(sb.out()).toContain("unchecked");
 });
 
-test("a module-shipped hook resolves from the module's own directory", async () => {
-  const sb = await sandbox(`use = ["./mod"]\n[[section]]\nname = "local"\n`);
-  const mod = join(sb.repo, "mod");
-  await mkdir(join(mod, "hooks"), { recursive: true });
-  await writeFile(join(mod, "boomfile.toml"), `[[section]]\nname = "shared"\nhook = [{ name = "greet" }]\n`);
-  await writeFile(join(mod, "hooks/greet.ts"), `export function sync(api) { api.ok("from the module"); }\n`);
-  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
-  expect(sb.out()).toContain("from the module");
-});
-
 // A fake `brew` on PATH that just logs its argv — real `brew bundle` isn't installable
 // in CI, but the argv it's invoked with is exactly the behavior under test: plain
 // sync must not silently upgrade outdated formulae (Homebrew Bundle's own default),

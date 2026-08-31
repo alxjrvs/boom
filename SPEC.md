@@ -54,13 +54,13 @@ A `boom` invocation does one of two things:
 2. **Discovered subcommands** — built-ins are the `@stricli` route map, in `src/cli.ts` order:
    <!-- commands:begin -->
    `verify`, `status`, `plan`, `uninstall`, `source`, `where`, `edit`, `rollback`,
-   `checkpoint`, `upgrade`, `doctor`, `lock`, `fleet`, `module`, `code`,
+   `checkpoint`, `upgrade`, `doctor`, `lock`, `fleet`, `code`,
    `mcp`, `completions`, `man`, `skill`.
    <!-- commands:end -->
    That list is asserted **equal** to `commandNames()` by `test/docs-hygiene.test.ts`, so adding
    a route without naming it here (or naming one that no longer routes) fails CI. `source`,
-   `fleet`, `module`, `code` and `mcp` are themselves
-   nested route maps (`fleet drift|diff`, `module list|add`). User commands
+   `fleet`, `code` and `mcp` are themselves
+   nested route maps (`fleet drift|diff`). User commands
    resolve at runtime from `<config>/commands/<name>.ts`.
    The route map is the **single registry, with no hardcoded dispatch anywhere**: `mcp`
    is an ordinary route (its `-- <server args>` ride through verbatim via the scanner's
@@ -251,22 +251,10 @@ files `boomfile.<os|host|profile>.toml` are merged onto the base. `--profile`
 overlay only** (a vars-only overlay is legal; a base `boomfile.toml` with no sections is still
 a hard load error, so an empty or half-written one can never read as "declare nothing" and
 have every managed file reaped), and because `[boom].schedule` is an array a shallow last-wins
-merge **replaces** the base's timer list rather than appending to it. `use` in an overlay is a
-hard error — see below.
+merge **replaces** the base's timer list rather than appending to it.
 
-A top-level `use = [<module>, …]` composes other boom config repos — a git remote
-(`owner/repo[@ref]`, a URL) or a path relative to this repo — whose sections are merged in
-**before** this repo's own (so the repo can override a module). Modules resolve during
-reconcile (remotes clone into a cache; a failed resolve warns and is skipped, never fatal);
-`boom module` lists them and `--update` re-fetches. A module may itself declare `use`, composed
-**recursively** (a resolution-stack guard breaks cycles). A module's sections resolve their
-repo-relative paths against the **module's own directory**, so a module ships the dotfiles it
-declares; its `[vars]` are the weakest layer (a nested module is weaker still, and the base
-repo always wins a collision). Because modules compose *before* the base and an overlay loads
-*last*, `use` in an overlay would invert that order — so it is rejected at load rather than
-silently dropped. `boom module add <ref>` splices a module ref into `use` (idempotently), taking
-the ref itself — `github:owner/repo`, a git URL, or a path. A top-level `[vars]` table (a name→string map) supplies the
-values `tmpl` resources interpolate.
+A top-level `[vars]` table (a name→string map) supplies the values `tmpl` resources
+interpolate.
 
 **Duplicate file destinations resolve last-wins** across `[modules…, base, overlays…]` — and only
 among the sections that *apply to this run*. `link`, `copy`, `tmpl` and (on macOS) `launchd` are
@@ -380,8 +368,6 @@ built-in resource gets:
   dry run's "would …" tier, so a converged hook prints nothing until `-v`.
 - **The run's profile** — `os`/`host`/`profiles` come from the run's context, which
   `process.platform` cannot reproduce (it sees neither `--profile` nor `BOOM_OS`/`BOOM_HOST`).
-- **Module-shippable** — a hook resolves from the declaring section's origin, so a `use`d module
-  ships `hooks/<name>.ts` alongside the sections that name it.
 
 A hook is still arbitrary code, so the `hook` side-effect marker stays in the journal regardless:
 journaling part of a hook's work never makes all of it reversible.
@@ -492,7 +478,7 @@ src/
     skill.ts               renders the Claude SKILL.md (commands/skill.ts is the CLI wrapper)
     pinning.ts             boom lock / --check: resolved package versions in boom.lock
     rollback.ts code.ts discovery.ts
-  config/  schema.ts load.ts compose.ts remote.ts profile.ts modules.ts registry.ts (the `use` splicer)
+  config/  schema.ts load.ts compose.ts remote.ts profile.ts
   lib/     reporter.ts color.ts fs.ts paths.ts proc.ts git.ts release.ts version.ts
 test/                       bun test (unit + sandboxed integration)
 examples/dotfiles/          a runnable boomfile.toml example
