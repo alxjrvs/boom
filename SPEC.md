@@ -177,23 +177,19 @@ Resources:
 - `dir = [{ path, mode?, remove_on_uninstall? }]` — ensure a standalone directory exists
   (declarative `mkdir -p`/`chmod`); `remove_on_uninstall = true` removes it on uninstall *only
   if empty*
-- `pkg = [{ manager, file?, remove_on_uninstall? }]` — satisfy a package manager. `brew` runs `brew bundle` over
-  `file` (default `Brewfile`); `mise` runs `mise install`; `apt`/`dnf`/`cargo`/`npm` (global)/
-  `pipx`/`gem`/`flatpak` install a newline-separated `file` package list, each gating on its
-  CLI being present (a missing tool is a reported failure, not a crash). `gh` installs `gh` CLI
-  extensions from the same newline list, one owner-qualified `owner/repo` per line (four forks
-  answer to `gh-stack`, so the owner is the identity) — `gh extension install`, verify diffs
-  `gh extension list`, uninstall removes by bare name; declare it *after* the manager that
-  installs `gh`, since there is no cross-section dependency mechanism. One array entry per
+- `pkg = [{ manager, file?, remove_on_uninstall? }]` — satisfy a package manager. `brew` runs
+  `brew bundle` over `file` (default `Brewfile`); `mise` runs `mise install`; `gh` installs `gh`
+  CLI extensions from a newline-separated `file` list, one owner-qualified `owner/repo` per line
+  (four forks answer to `gh-stack`, so the owner is the identity) — `gh extension install`,
+  verify diffs `gh extension list`, uninstall removes by bare name; declare it *after* the
+  manager that installs `gh`, since there is no cross-section dependency mechanism. Each gates on
+  its CLI being present (a missing tool is a reported failure, not a crash). One array entry per
   manager; a new manager is one dispatch arm, not a new section key.
-  `remove_on_uninstall` decides what `boom uninstall` reclaims, per entry. Omitted, it is
-  today's behavior: the user-scoped managers remove what they installed, `apt`/`dnf` never do.
-  `= true` opts a system manager **in** (`sudo apt-get remove -y <declared>`, only for packages
-  actually installed) — opt-in because system packages are shared machine state, so the flag is
-  a declaration of ownership. `= false` opts a user-scoped manager **out**. It is a load-time
-  error on `brew`/`mise`: their declared set lives in a Brewfile / the repo's mise config and
-  neither has a "remove exactly what this file declares" verb (`brew bundle cleanup` does the
-  opposite) — tear those down with a `run` step bound to `on = "uninstall"`
+  `remove_on_uninstall` decides what `boom uninstall` reclaims, per entry. Omitted, `gh` removes
+  what it installed; `= false` opts it out. It is a load-time error on `brew`/`mise`: their
+  declared set lives in a Brewfile / the repo's mise config and neither has a "remove exactly
+  what this file declares" verb (`brew bundle cleanup` does the opposite) — tear those down with
+  a `run` step bound to `on = "uninstall"`
 - `osx_default = [{ domain, key, value, type? }]` — a `defaults write`; `type` is inferred
   from the TOML value (`bool`/`int`/`float`/`string`) and only stated to override an edge
   case. The prior value is journaled, so it can be recovered by hand (including a key boom
@@ -332,8 +328,7 @@ at 1.0.
 
 If you need an unattended escalating sync, export `SUDO_ASKPASS` yourself — it is sudo's variable,
 not boom's, and boom still honors one it inherits: it skips the prompt label and the header relay
-(nothing is going to ask), and appends `-A` to the `sudo` argv it builds itself for apt/dnf, the
-same way Homebrew does for its own. Otherwise keep mutating syncs interactive.
+(nothing is going to ask). Otherwise keep mutating syncs interactive.
 
 ### Hooks = the resource-type extension contract
 

@@ -82,7 +82,7 @@ const FileSchema = v.strictObject({
 // remove exactly what it does not.
 const PkgSchema = v.pipe(
   v.strictObject({
-    manager: v.picklist(["brew", "mise", "apt", "dnf", "cargo", "npm", "pipx", "gem", "flatpak", "gh"]),
+    manager: v.picklist(["brew", "mise", "gh"]),
     file: v.optional(v.string()),
     remove_on_uninstall: v.optional(v.boolean()),
     cleanup: v.optional(v.picklist(["check", "uninstall"])),
