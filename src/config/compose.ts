@@ -12,8 +12,7 @@ import { basename, join } from "node:path";
 import { displayPath, expandTilde, isGlobPattern } from "../lib/fs.ts";
 import { launchAgentsDir } from "../lib/launchd.ts";
 import type { Env } from "../lib/paths.ts";
-import { BoomConfigError, CONFIG_FILE, loadOverlayFile } from "./load.ts";
-import { resolveModules } from "./modules.ts";
+import { CONFIG_FILE, loadOverlayFile } from "./load.ts";
 import { overlayFiles, type ProfileContext, sectionApplies } from "./profile.ts";
 import type { Boomfile, BoomSettings, Section } from "./schema.ts";
 
@@ -52,19 +51,12 @@ export async function composeConfig(
   pc: ProfileContext,
   notify: ComposeNotifier,
 ): Promise<Composition> {
-  // A module that won't resolve (offline, typo, invalid) is warned and skipped — one bad module
-  // never sinks the reconcile. The wording is load-bearing: it is what `boom module` users see.
-  const modules = config.use
-    ? await resolveModules(env, repo, config.use, (ref, why) =>
-        notify.warn(`module ${ref}: ${why} — skipped`),
-      )
-    : { sections: [], vars: {} };
-
-  const sections: ComposedSection[] = [
-    ...modules.sections,
-    ...config.section.map((s) => ({ ...s, origin: repo, source: CONFIG_FILE })),
-  ];
-  let vars: Record<string, string> = { ...modules.vars, ...(config.vars ?? {}) };
+  const sections: ComposedSection[] = config.section.map((s) => ({
+    ...s,
+    origin: repo,
+    source: CONFIG_FILE,
+  }));
+  let vars: Record<string, string> = { ...(config.vars ?? {}) };
   let boom = config.boom;
 
   for (const name of overlayFiles(pc)) {
@@ -72,16 +64,6 @@ export async function composeConfig(
     // `[[section]]` (OverlaySchema). The base above went through the strict loader.
     const overlay = await loadOverlayFile(join(repo, name));
     if (!overlay) continue;
-    // `use` is the one top-level key whose meaning is POSITIONAL: modules compose *before* the
-    // base repo's own sections. An overlay loads LAST, so honoring a `use` here would silently
-    // hand a per-host module higher precedence than the repo's own sections — the exact inversion
-    // the ordering exists to prevent. Reject it loudly rather than merge it or drop it silently
-    // (dropping is what happened before this seam, and it looked like it worked).
-    if (overlay.use && overlay.use.length > 0) {
-      throw new BoomConfigError(
-        `${name}: \`use\` is not allowed in an overlay — modules compose before the base repo's own sections, so an overlay cannot declare one without inverting that order; move it to ${CONFIG_FILE}`,
-      );
-    }
     sections.push(...overlay.section.map((s) => ({ ...s, origin: repo, source: name })));
     vars = { ...vars, ...(overlay.vars ?? {}) };
     // `[boom]` is a flat table, so it merges shallowly, last-wins PER KEY. The gotcha:

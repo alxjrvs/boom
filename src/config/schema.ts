@@ -415,20 +415,8 @@ const BoomSettingsSchema = v.strictObject({
   notify: v.optional(v.boolean()),
 });
 
-// A reusable config module: another boom config repo (`owner/repo[@ref]`, a git URL, or a
-// path relative to this repo) whose sections are merged in after the base boomfile — so a
-// team can compose a machine from vetted, shared pieces instead of authoring every section
-// by hand. Resolved + merged during reconcile (not at every config load), and fetched into a
-// modules cache; a module's own sections still gate by their `when`. See config/modules.ts.
-const UseSchema = v.pipe(
-  v.string(),
-  v.regex(/\S/, "a module reference must be a non-empty owner/repo, git URL, or path"),
-);
-
 export const BoomfileSchema = v.strictObject({
   boom: v.optional(BoomSettingsSchema),
-  // Modules to compose in before this repo's own sections (resolved during reconcile).
-  use: v.optional(v.array(UseSchema)),
   // Machine-global substitution values for the `tmpl` resource. A flat string→string map,
   // typically differentiated per machine via a `boomfile.<profile>.toml` overlay — the whole
   // point of `tmpl` over N overlay files is that only these values change, not the template.

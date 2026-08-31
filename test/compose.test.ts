@@ -1,4 +1,4 @@
-// composeConfig: the one seam that turns [modules…, base, overlays…] into a single ordered,
+// composeConfig: the one seam that turns [base, overlays…] into a single ordered,
 // origin-stamped section list plus the merged `[vars]` / `[boom]` tables. Asserted on the
 // returned Composition, so no reconcile runs and no self-wiring executes.
 import { expect, test } from "bun:test";
@@ -6,7 +6,7 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type ComposeNotifier, composeConfig } from "../src/config/compose.ts";
-import { BoomConfigError, loadConfig } from "../src/config/load.ts";
+import { loadConfig } from "../src/config/load.ts";
 import { profileContext } from "../src/config/profile.ts";
 
 // Both overlay names are pinned (BOOM_OS + BOOM_HOST) so overlayFiles is deterministic on any
@@ -59,16 +59,6 @@ test("compose: an overlay's [vars] win over the base's", async () => {
   expect(c.vars.NAME).toBe("base"); // untouched keys survive the merge
 });
 
-test("compose: a module's [vars] are the weakest layer", async () => {
-  const repo = await repoWith({
-    "boomfile.toml": 'use = ["./mod"]\n[vars]\nEMAIL = "base"\n[[section]]\nname = "x"\n',
-    "mod/boomfile.toml": '[vars]\nEMAIL = "mod"\nONLY_MOD = "mod"\n[[section]]\nname = "m"\n',
-  });
-  const c = await compose(repo);
-  expect(c.vars.EMAIL).toBe("base");
-  expect(c.vars.ONLY_MOD).toBe("mod"); // but a module still *contributes* names
-});
-
 test("compose: an overlay's [boom] merges per key over the base's", async () => {
   const repo = await repoWith({
     "boomfile.toml": '[boom]\nskill_on_sync = true\n[[section]]\nname = "x"\n',
@@ -92,93 +82,67 @@ test("compose: an overlay's [boom].schedule REPLACES the base's array", async ()
   expect(c.boom?.schedule?.[0]?.every).toBe("1h");
 });
 
-test("compose: `use` in an overlay is a named error, never a silent drop", async () => {
+test("compose: base and overlay sections are stamped with origin + source", async () => {
   const repo = await repoWith({
-    "boomfile.toml": '[[section]]\nname = "x"\n',
-    "boomfile.testhost.toml": 'use = ["./mod"]\n',
-    "mod/boomfile.toml": '[[section]]\nname = "m"\n',
-  });
-  const err = await compose(repo).then(
-    () => undefined,
-    (e: unknown) => e as Error,
-  );
-  expect(err).toBeInstanceOf(BoomConfigError);
-  expect(err?.message).toContain("boomfile.testhost.toml");
-  expect(err?.message).toContain("`use`");
-});
-
-test("compose: base, overlay and module sections are stamped with origin + source", async () => {
-  const repo = await repoWith({
-    "boomfile.toml": 'use = ["./mod"]\n[[section]]\nname = "base"\n',
+    "boomfile.toml": '[[section]]\nname = "strong"\n',
+    "boomfile.linux.toml": '[[section]]\nname = "os"\n',
     "boomfile.testhost.toml": '[[section]]\nname = "overlaid"\n',
-    "mod/boomfile.toml": '[[section]]\nname = "shared"\n',
   });
   const c = await compose(repo);
-  // Modules first, then the base, then overlays — composition order IS precedence order.
-  expect(c.sections.map((s) => s.name)).toEqual(["shared", "base", "overlaid"]);
-  expect(c.sections.find((s) => s.name === "shared")?.origin).toBe(join(repo, "mod"));
-  expect(c.sections.find((s) => s.name === "shared")?.source).toBe("./mod");
-  expect(c.sections.filter((s) => s.name !== "shared").every((s) => s.origin === repo)).toBe(true);
-  expect(c.sections.find((s) => s.name === "base")?.source).toBe("boomfile.toml");
+  // The base, then each matching overlay in overlayFiles order — composition order IS
+  // precedence order.
+  expect(c.sections.map((s) => s.name)).toEqual(["strong", "os", "overlaid"]);
+  // Every section's paths resolve against the one repo now; `origin` stayed on ComposedSection
+  // because it is what the resources join against, and an overlay's sections need it too.
+  expect(c.sections.every((s) => s.origin === repo)).toBe(true);
+  expect(c.sections.find((s) => s.name === "strong")?.source).toBe("boomfile.toml");
+  expect(c.sections.find((s) => s.name === "os")?.source).toBe("boomfile.linux.toml");
   expect(c.sections.find((s) => s.name === "overlaid")?.source).toBe("boomfile.testhost.toml");
-});
-
-test("compose: an unresolvable module warns through `notify` and is skipped", async () => {
-  const repo = await repoWith({ "boomfile.toml": 'use = ["./missing"]\n[[section]]\nname = "x"\n' });
-  const { notify, warns } = notifier();
-  const config = await loadConfig(repo);
-  const c = await composeConfig(ENV, repo, config, profileContext(ENV, []), notify);
-  expect(c.sections).toHaveLength(1);
-  expect(warns.join("\n")).toContain("module ./missing");
 });
 
 // --- precedence: duplicate destinations resolve last-wins -----------------------------------
 
 test("compose: duplicate dst — the LAST declaration wins and the loser is dropped", async () => {
   const repo = await repoWith({
-    "boomfile.toml":
-      'use = ["./mod"]\n[[section]]\nname = "base"\nlink = [{ src = "repo/zshrc", dst = "~/.zshrc" }]\n',
-    "mod/boomfile.toml": '[[section]]\nname = "shared"\nlink = [{ src = "mod/zshrc", dst = "~/.zshrc" }]\n',
+    "boomfile.linux.toml": '[[section]]\nname = "strong"\nlink = [{ src = "repo/zshrc", dst = "~/.zshrc" }]\n',
+    "boomfile.toml": '[[section]]\nname = "weak"\nlink = [{ src = "weak/zshrc", dst = "~/.zshrc" }]\n',
   });
   const c = await compose(repo);
   expect(linkDsts(c.sections)).toEqual(["~/.zshrc"]); // exactly one survivor
-  expect(c.sections.find((s) => s.name === "base")?.link?.[0]?.src).toBe("repo/zshrc");
-  expect(c.sections.find((s) => s.name === "shared")?.link).toEqual([]);
+  expect(c.sections.find((s) => s.name === "strong")?.link?.[0]?.src).toBe("repo/zshrc");
+  expect(c.sections.find((s) => s.name === "weak")?.link).toEqual([]);
 });
 
-test("compose: duplicate dst across kinds — a base `copy` beats a module `link`", async () => {
+test("compose: duplicate dst across kinds — the stronger layer's `copy` beats a `link`", async () => {
   const repo = await repoWith({
-    "boomfile.toml":
-      'use = ["./mod"]\n[[section]]\nname = "base"\ncopy = [{ src = "repo/npmrc", dst = "~/.npmrc" }]\n',
-    "mod/boomfile.toml": '[[section]]\nname = "shared"\nlink = [{ src = "mod/npmrc", dst = "~/.npmrc" }]\n',
+    "boomfile.linux.toml": '[[section]]\nname = "strong"\ncopy = [{ src = "repo/npmrc", dst = "~/.npmrc" }]\n',
+    "boomfile.toml": '[[section]]\nname = "weak"\nlink = [{ src = "weak/npmrc", dst = "~/.npmrc" }]\n',
   });
   const c = await compose(repo);
   // Both kinds own their destination, so they share one keyspace — same file, same manifest
   // primary key, one winner. (The kinds that own nothing are partitioned out; see below.)
-  expect(c.sections.find((s) => s.name === "shared")?.link).toEqual([]);
-  expect(c.sections.find((s) => s.name === "base")?.copy).toHaveLength(1);
+  expect(c.sections.find((s) => s.name === "weak")?.link).toEqual([]);
+  expect(c.sections.find((s) => s.name === "strong")?.copy).toHaveLength(1);
 });
 
 test("compose: an override emits a note naming both sides", async () => {
   const repo = await repoWith({
-    "boomfile.toml":
-      'use = ["./mod"]\n[[section]]\nname = "base"\ncopy = [{ src = "repo/zshrc", dst = "~/.zshrc" }]\n',
-    "mod/boomfile.toml": '[[section]]\nname = "shared"\nlink = [{ src = "mod/zshrc", dst = "~/.zshrc" }]\n',
+    "boomfile.linux.toml": '[[section]]\nname = "strong"\ncopy = [{ src = "repo/zshrc", dst = "~/.zshrc" }]\n',
+    "boomfile.toml": '[[section]]\nname = "weak"\nlink = [{ src = "weak/zshrc", dst = "~/.zshrc" }]\n',
   });
   const { notify, notes } = notifier();
   await compose(repo, { notify });
   expect(notes).toHaveLength(1);
   expect(notes[0]).toContain("~/.zshrc");
-  expect(notes[0]).toContain("link from ./mod");
-  expect(notes[0]).toContain("copy in boomfile.toml");
+  expect(notes[0]).toContain("link from boomfile.toml");
+  expect(notes[0]).toContain("copy in boomfile.linux.toml");
 });
 
 test("compose: a glob `src` is never keyed", async () => {
   const repo = await repoWith({
-    "boomfile.toml":
-      'use = ["./mod"]\n[[section]]\nname = "base"\nlink = [{ src = "repo/*.lua", dst = "~/.config/nvim" }]\n',
-    "mod/boomfile.toml":
-      '[[section]]\nname = "shared"\nlink = [{ src = "mod/*.lua", dst = "~/.config/nvim" }]\n',
+    "boomfile.linux.toml":
+      '[[section]]\nname = "strong"\nlink = [{ src = "repo/*.lua", dst = "~/.config/nvim" }]\n',
+    "boomfile.toml": '[[section]]\nname = "weak"\nlink = [{ src = "weak/*.lua", dst = "~/.config/nvim" }]\n',
   });
   const c = await compose(repo);
   // A glob's `dst` is a DIRECTORY the matches land under, not a destination — both survive.
@@ -187,12 +151,11 @@ test("compose: a glob `src` is never keyed", async () => {
 
 test("compose: a section emptied by dedupe is kept, so `--only` and `when` still resolve", async () => {
   const repo = await repoWith({
-    "boomfile.toml":
-      'use = ["./mod"]\n[[section]]\nname = "base"\nlink = [{ src = "repo/zshrc", dst = "~/.zshrc" }]\n',
-    "mod/boomfile.toml": '[[section]]\nname = "shared"\nlink = [{ src = "mod/zshrc", dst = "~/.zshrc" }]\n',
+    "boomfile.linux.toml": '[[section]]\nname = "strong"\nlink = [{ src = "repo/zshrc", dst = "~/.zshrc" }]\n',
+    "boomfile.toml": '[[section]]\nname = "weak"\nlink = [{ src = "weak/zshrc", dst = "~/.zshrc" }]\n',
   });
   const c = await compose(repo);
-  expect(c.sections.map((s) => s.name)).toEqual(["shared", "base"]);
+  expect(c.sections.map((s) => s.name)).toEqual(["weak", "strong"]);
 });
 
 // The destructive path the gate exists for: a winner that never runs must not take the
@@ -200,22 +163,22 @@ test("compose: a section emptied by dedupe is kept, so `--only` and `when` still
 // the file. Both directions are asserted, so the gate can't be "fixed" by simply disabling it.
 test("compose: a gated-out section is never a dedupe winner", async () => {
   const files = {
-    "boomfile.toml":
-      'use = ["./mod"]\n[[section]]\nname = "work"\nwhen = { profile = "work" }\nlink = [{ src = "repo/npmrc", dst = "~/.npmrc" }]\n',
-    "mod/boomfile.toml": '[[section]]\nname = "shared"\nlink = [{ src = "mod/npmrc", dst = "~/.npmrc" }]\n',
+    "boomfile.linux.toml":
+      '[[section]]\nname = "work"\nwhen = { profile = "work" }\nlink = [{ src = "repo/npmrc", dst = "~/.npmrc" }]\n',
+    "boomfile.toml": '[[section]]\nname = "weak"\nlink = [{ src = "weak/npmrc", dst = "~/.npmrc" }]\n',
   };
 
   const repo = await repoWith(files);
   const off = notifier();
   const without = await compose(repo, { notify: off.notify });
   // No `--profile work`: the gated section never runs, so the module keeps the destination.
-  expect(without.sections.find((s) => s.name === "shared")?.link).toHaveLength(1);
+  expect(without.sections.find((s) => s.name === "weak")?.link).toHaveLength(1);
   expect(without.sections.find((s) => s.name === "work")?.link).toHaveLength(1);
   expect(off.notes).toEqual([]);
 
   const on = notifier();
   const active = await compose(repo, { profiles: ["work"], notify: on.notify });
-  expect(active.sections.find((s) => s.name === "shared")?.link).toEqual([]);
+  expect(active.sections.find((s) => s.name === "weak")?.link).toEqual([]);
   expect(active.sections.find((s) => s.name === "work")?.link).toHaveLength(1);
   expect(on.notes).toHaveLength(1);
 });
@@ -225,16 +188,16 @@ test("compose: a gated-out section is never a dedupe winner", async () => {
 // that owns nothing must not evict the loser that does, or reapOrphans deletes the file.
 test("compose: a kind that owns no destination never evicts one that does", async () => {
   const repo = await repoWith({
+    "boomfile.linux.toml":
+      '[[section]]\nname = "strong"\nsecret = [{ dst = "~/.netrc", ref = "env:NETRC" }]\nlaunchd = [{ src = "repo/a.plist", dst = "~/.npmrc" }]\n',
     "boomfile.toml":
-      'use = ["./mod"]\n[[section]]\nname = "base"\nsecret = [{ dst = "~/.netrc", ref = "env:NETRC" }]\nlaunchd = [{ src = "repo/a.plist", dst = "~/.npmrc" }]\n',
-    "mod/boomfile.toml":
-      '[[section]]\nname = "shared"\ncopy = [{ src = "mod/netrc", dst = "~/.netrc" }]\nlink = [{ src = "mod/npmrc", dst = "~/.npmrc" }]\n',
+      '[[section]]\nname = "weak"\ncopy = [{ src = "weak/netrc", dst = "~/.netrc" }]\nlink = [{ src = "weak/npmrc", dst = "~/.npmrc" }]\n',
   });
   const { notify, notes } = notifier();
   const c = await compose(repo, { notify });
-  expect(c.sections.find((s) => s.name === "shared")?.copy).toHaveLength(1);
-  expect(c.sections.find((s) => s.name === "shared")?.link).toHaveLength(1);
-  expect(c.sections.find((s) => s.name === "base")?.secret).toHaveLength(1);
+  expect(c.sections.find((s) => s.name === "weak")?.copy).toHaveLength(1);
+  expect(c.sections.find((s) => s.name === "weak")?.link).toHaveLength(1);
+  expect(c.sections.find((s) => s.name === "strong")?.secret).toHaveLength(1);
   expect(notes).toEqual([]);
 });
 
@@ -243,13 +206,14 @@ test("compose: a kind that owns no destination never evicts one that does", asyn
 // winning after the first had already touched the file.
 test("compose: two secrets at one dst still resolve last-wins", async () => {
   const repo = await repoWith({
-    "boomfile.toml":
-      'use = ["./mod"]\n[[section]]\nname = "base"\nsecret = [{ dst = "~/.netrc", ref = "env:BASE" }]\n',
-    "mod/boomfile.toml": '[[section]]\nname = "shared"\nsecret = [{ dst = "~/.netrc", ref = "env:MOD" }]\n',
+    "boomfile.linux.toml": '[[section]]\nname = "strong"\nsecret = [{ dst = "~/.netrc", ref = "env:BASE" }]\n',
+    "boomfile.toml": '[[section]]\nname = "weak"\nsecret = [{ dst = "~/.netrc", ref = "env:MOD" }]\n',
   });
   const { notify, notes } = notifier();
   const c = await compose(repo, { notify });
-  expect(c.sections.find((s) => s.name === "shared")?.secret).toEqual([]);
-  expect(c.sections.find((s) => s.name === "base")?.secret).toHaveLength(1);
-  expect(notes[0]).toContain("~/.netrc — secret from ./mod overridden by secret in boomfile.toml");
+  expect(c.sections.find((s) => s.name === "weak")?.secret).toEqual([]);
+  expect(c.sections.find((s) => s.name === "strong")?.secret).toHaveLength(1);
+  expect(notes[0]).toContain(
+    "~/.netrc — secret from boomfile.toml overridden by secret in boomfile.linux.toml",
+  );
 });
