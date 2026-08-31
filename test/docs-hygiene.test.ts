@@ -83,7 +83,7 @@ test("the prose docs name only verbs that exist in the Verb union", () => {
 // SPEC.md enumerates the route map by hand. Set *equality*, not containment, so both directions
 // of drift fail: adding a route without naming it in SPEC, and leaving a name in SPEC after its
 // route is gone. The <!-- commands:begin/end --> markers give the assertion an unambiguous region
-// and are invisible in the marked-rendered Pages output.
+// and are invisible in the rendered markdown output.
 test("SPEC.md's command list equals the route map's", () => {
   const spec = readFileSync(join(import.meta.dir, "..", "SPEC.md"), "utf8");
   const region = /<!-- commands:begin -->([\s\S]*?)<!-- commands:end -->/.exec(spec);

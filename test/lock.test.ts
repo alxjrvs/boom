@@ -4,7 +4,7 @@ import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { acquireLock, LockHeldError, withLock } from "../src/lib/lock.ts";
+import { acquireLock, LockHeldError } from "../src/lib/lock.ts";
 import { boomStateDir } from "../src/lib/paths.ts";
 
 async function stateEnv(): Promise<Record<string, string>> {
@@ -41,15 +41,4 @@ test("a truncated/empty lock file (crash mid-write) is reclaimed", async () => {
   const env = await stateEnv();
   await writeFile(join(boomStateDir(env), "lock"), ""); // no pid → unreadable owner
   acquireLock(env)();
-});
-
-test("withLock releases the lock on success and on throw", async () => {
-  // The shared spelling every mutating entry point now routes through. A body that throws must
-  // still release, or one failed `source set` wedges every later run behind a stale lock.
-  const env = await stateEnv();
-  await withLock(env, () => Promise.resolve(1));
-  acquireLock(env)(); // free after a clean body
-
-  await expect(withLock(env, () => Promise.reject(new Error("nope")))).rejects.toThrow("nope");
-  acquireLock(env)(); // free after a throwing one
 });

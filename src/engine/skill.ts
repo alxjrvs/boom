@@ -53,7 +53,7 @@ description: >-
 
 boom reconciles your machine from a declarative \`boomfile.toml\` that lives in a
 git-remote **config repo** (the *source*). It symlinks/copies dotfiles, installs
-packages, runs steps and hooks, and can undo any change.
+packages, runs steps and hooks, and tears down what it made on \`uninstall\`.
 
 ## Mental model
 

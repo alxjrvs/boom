@@ -52,3 +52,15 @@ wrapper for a built-in is the highest-value change boom can make.
 
 If PR-mode push turns out to be missed, it is a revert rather than a rewrite: it lived in two
 self-contained modules and its history is intact.
+
+## Also removed: the pre-sqlite manifest import
+
+`readManifest` used to fall back to reading a legacy TSV at
+`~/.local/state/boom/manifest` when the sqlite manifest came back empty, importing it
+once. That path is gone.
+
+It only ever mattered for a machine upgrading from a pre-v0.4.0 boom (then named `botu`)
+that had not synced since. If that is you, the symptom is silent rather than loud: boom
+forgets which destinations it owns, so **orphan reaping stops** — files a removed
+`boomfile.toml` entry used to place are left behind instead of being reaped. One
+`boom source` rebuilds the manifest from the current boomfile and restores reaping.

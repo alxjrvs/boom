@@ -26,8 +26,8 @@ behavior a running machine depends on, the upgrade path is a migration note besi
   the retirement of `copy.expand`, the two new load-time errors, and the behavior changes to
   `secret`, `rollback`, `uninstall` and glob placement. Written while `rollback` still existed.
 
-*(Absolute links, not repo-relative ones: this file is also rendered as a standalone docs page,
-where a relative path into `docs/` would not resolve.)*
+*(Absolute links, not repo-relative ones: this file is read on GitHub and from the installed
+binary's own help, where a relative path into `docs/` would not resolve.)*
 
 ## The model (decided — don't relitigate)
 

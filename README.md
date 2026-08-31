@@ -3,15 +3,14 @@
 **BoomTube** is **declarative dev-machine setup** — it converges your machine
 to a state you declare once: dotfiles, packages, and tools from a single
 `boomfile.toml`, with drift detection. Its executable, **`boom`**,
-runs the reconcile loop — `sync` / `verify` — journals every change so it can be
-rolled back, then gets out of your way and opens portals to your code. One
-self-contained binary, compiled from **TypeScript on [Bun](https://bun.com)**,
-with zero runtime dependencies on your machine.
+runs the reconcile loop — `sync` / `verify` — journaling every change it makes so
+`uninstall` can tear it back down. One self-contained binary, compiled from
+**TypeScript on [Bun](https://bun.com)**, with zero runtime dependencies on your
+machine.
 
 Named for Jack Kirby's **Boom Tube** (the Fourth World portal): boom opens a
-portal to your machine's ideal state, and to your code.
+portal to your machine's ideal state.
 
-📖 **Docs site → [alxjrvs.github.io/boom](https://alxjrvs.github.io/boom/)**  ·
 📐 Design of record → [`SPEC.md`](SPEC.md)
 
 > Status: **early** — a TypeScript rewrite of the original bash engine, extracted

@@ -1,7 +1,7 @@
 {
   "name": "boom",
   "version": "0.33.0",
-  "description": "BoomTube \u2014 declarative dev-machine setup (executable: boom). Converge your machine from a declarative boomfile.toml \u2014 dotfiles, packages, and tools (sync/verify) with drift detection and rollback \u2014 then open portals to your code.",
+  "description": "BoomTube \u2014 declarative dev-machine setup (executable: boom). Converge your machine from a declarative boomfile.toml \u2014 dotfiles, packages, and tools (sync/verify) with drift detection.",
   "type": "module",
   "private": true,
   "bin": {

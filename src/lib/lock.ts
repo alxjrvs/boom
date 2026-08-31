@@ -101,17 +101,3 @@ export function acquireLock(env: Env): () => void {
     }
   };
 }
-
-// Run `body` holding the exclusive run lock, releasing it even if `body` throws. The shared
-// spelling of "this mutates the machine or the managed config repo, so it must not overlap
-// another run" — hoisted out of the single command that first had it, so the other mutating
-// entry points (`source set`, and the git-operation verbs while they existed) could stop
-// being the exceptions.
-export async function withLock<T>(env: Env, body: () => Promise<T>): Promise<T> {
-  const release = acquireLock(env);
-  try {
-    return await body();
-  } finally {
-    release();
-  }
-}

@@ -5,7 +5,7 @@
 // into the engine just to spell a path. Layout:
 //   ${XDG_STATE_HOME:-~/.local/state}/boom/
 //     state.db          bun:sqlite store (manifest + journal) — see engine/db.ts
-//     backups/<run-id>/ files displaced by an overwrite, so uninstall can restore
+//     backups/<run-id>/ files displaced by an overwrite — recovered by hand, not by a verb
 //     lock              the run mutex — see lib/lock.ts
 import { join } from "node:path";
 
