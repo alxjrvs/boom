@@ -55,15 +55,13 @@ A `boom` invocation does one of two things:
    <!-- commands:begin -->
    `verify`, `status`, `plan`, `uninstall`, `source`, `where`, `edit`, `rollback`,
    `checkpoint`, `upgrade`, `doctor`, `lock`, `code`,
-   `mcp`, `completions`, `man`, `skill`.
+   `completions`, `man`, `skill`.
    <!-- commands:end -->
    That list is asserted **equal** to `commandNames()` by `test/docs-hygiene.test.ts`, so adding
    a route without naming it here (or naming one that no longer routes) fails CI. `source`,
-   `code` and `mcp` are themselves nested route maps. User commands
+   `code` is itself a nested route map. User commands
    resolve at runtime from `<config>/commands/<name>.ts`.
-   The route map is the **single registry, with no hardcoded dispatch anywhere**: `mcp`
-   is an ordinary route (its `-- <server args>` ride through verbatim via the scanner's
-   argument-escape sequence, so it needs no pre-Stricli passthrough), and `index.ts`
+   The route map is the **single registry, with no hardcoded dispatch anywhere**: `index.ts`
    decides built-in-vs-discovered by asking the route map itself
    (`getRoutingTargetForInput`). `src/commands/catalog.ts` *derives* command names +
    briefs from that same route map for shell completions, the man page, and `boom skill`

@@ -10,7 +10,6 @@ import { doctorCommand } from "./commands/doctor.ts";
 import { editCommand } from "./commands/edit.ts";
 import { lockCommand } from "./commands/lock.ts";
 import { manCommand } from "./commands/man.ts";
-import { mcpRouteMap } from "./commands/mcp.ts";
 import { planCommand } from "./commands/plan.ts";
 import { uninstallCommand, verifyCommand } from "./commands/reconcile.ts";
 import { rollbackCommand } from "./commands/rollback.ts";
@@ -36,7 +35,6 @@ export const routes = buildRouteMap({
     doctor: doctorCommand,
     lock: lockCommand,
     code: codeRouteMap,
-    mcp: mcpRouteMap,
     completions: completionsCommand,
     man: manCommand,
     skill: skillCommand,

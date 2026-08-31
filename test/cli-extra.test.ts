@@ -33,8 +33,7 @@ function ctxFor(env: Record<string, string | undefined>, cwd: string): { ctx: Bo
 test("command list (derived from the route map) is unique and includes the core verbs", () => {
   const names = commandNames();
   expect(new Set(names).size).toBe(names.length);
-  // mcp is a real route now, so it must appear in the derived list like any other.
-  for (const v of ["verify", "uninstall", "source", "mcp", "doctor"]) {
+  for (const v of ["verify", "uninstall", "source", "doctor"]) {
     expect(names).toContain(v);
   }
   // `validate` was folded into `doctor --config`; it must not resurface as a command.
@@ -75,7 +74,7 @@ test("subcommandGroups derives nested routes from the route map", () => {
   expect(groups.find((g) => g.parent === "code")?.children.map((c) => c.name)).toContain("claude");
 });
 
-test("completions complete the second level (source|code|mcp subcommands)", () => {
+test("completions complete the second level (source|code subcommands)", () => {
   const bash = completionScript("bash");
   expect(bash).toContain("COMP_WORDS[1]"); // dispatches on the namespace word
   expect(bash).toContain("status"); // a source subcommand reachable only via the 2nd level
