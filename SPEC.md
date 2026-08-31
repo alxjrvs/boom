@@ -158,8 +158,8 @@ Resources:
   the two-line migration
 - `secret = [{ dst, ref? | template?, mode?, backend? }]` — render a secret to a file at sync
   time; `mode` defaults to `0600`. The `backend` is inferred from the ref scheme (`op://`→op,
-  `env:`→env, `pass:`→pass, `*.age`→age, `*.sops`→sops) or set explicitly — 1Password
-  (`op read`/`op inject`), a plain env var, `pass`, or an age/sops-encrypted file. Secrets stay
+  `env:`→env) or set explicitly — 1Password (`op read`/`op inject`) or a plain env var.
+  Secrets stay
   out of the owned-destinations manifest, so orphan reaping never auto-deletes one. boom never
   journals or backs up the plaintext **it** renders (a fresh render's undo is a plain remove); a
   pre-existing file at `dst` is the user's, so it is **left alone** — replacing it takes
@@ -455,7 +455,7 @@ src/
     overview.ts            boom status (read-only dashboard composing the existing readers)
     registry.ts            data-driven resource table (phase order) + finalize hooks
     resources/             link · copy · tmpl · secret · dir · pkg · osx · launchd · run · check · hook
-    secrets/backends.ts    pluggable secret backends (op · env · pass · age · sops)
+    secrets/backends.ts    pluggable secret backends (op · env)
     db.ts journal.ts       bun:sqlite store: transaction journal
     state.ts               the owned-destinations manifest (layout lives in lib/paths.ts)
     skill.ts               renders the Claude SKILL.md (commands/skill.ts is the CLI wrapper)

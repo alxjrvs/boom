@@ -261,20 +261,6 @@ test("secret backend inference: a bare op:// ref still routes to op (fails clean
   expect(sb.out()).toContain("op (1Password CLI) not installed");
 });
 
-test("secret pass backend: sync writes the value `pass show` returns", async () => {
-  const sb = await sandbox(
-    '[[section]]\nname = "s"\nsecret = [{ dst = "~/.tok", ref = "pass:svc/token", backend = "pass" }]\n',
-    { emptyPath: true },
-  );
-  // Fake `pass show svc/token` → the secret (with a trailing newline the resolver strips).
-  await fakeBinEmpty(sb.base, "pass", 'echo "pass-provided-secret"\n');
-  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
-  const tok = join(sb.home, ".tok");
-  expect(await Bun.file(tok).text()).toBe("pass-provided-secret");
-  expect(((await stat(tok)).mode & 0o777).toString(8)).toBe("600");
-  expect(sb.out()).not.toContain("pass-provided-secret");
-});
-
 // --- overlays carry vars + [boom], not just sections ---------------------------------------
 
 test("overlays: a vars-only overlay loads and its value wins over the base's", async () => {
