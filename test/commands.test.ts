@@ -59,7 +59,7 @@ function ctxFor(
   };
 }
 
-// The guard four `boom code` subcommands used to hand-copy. It is the *only* place that error
+// The guard four now-removed `boom code` subcommands used to hand-copy. It is the *only* place that error
 // string lives now, so this pins its wording, its stream and the bail-out contract at once.
 test("runUserCommand dispatches a config-supplied command", async () => {
   const repo = await base();

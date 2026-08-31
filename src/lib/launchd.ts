@@ -1,8 +1,8 @@
-// launchd helpers — the one place the "manage a macOS LaunchAgent" incantation lives, shared
-// by the `launchd` resource (link + lifecycle a user-authored plist) and the boom-owned
-// schedulers (`[boom] schedule`, which generates its own plist). Every
-// launchctl call is darwin-only; callers OS-gate before reaching here. Pure builders
-// (parseInterval/renderAgentPlist/plistLabel) are unit-tested without touching launchctl.
+// launchd helpers — the one place the "manage a macOS LaunchAgent" incantation lives, used by
+// the `launchd` resource to link and drive the lifecycle of a USER-AUTHORED plist. boom no
+// longer generates plists of its own: `[boom] schedule` was removed, and with it the renderer,
+// the interval parser and the PATH-snapshot comparison that only a generated plist needed.
+// Every launchctl call is darwin-only; callers OS-gate before reaching here.
 import { join } from "node:path";
 import type { Env } from "./paths.ts";
 import { captureArgv } from "./proc.ts";
@@ -13,134 +13,11 @@ export function launchAgentsDir(env: Env): string | undefined {
   return env.HOME ? join(env.HOME, "Library", "LaunchAgents") : undefined;
 }
 
-// Normalize a schedule interval ("15m", "1h", "30s", or bare seconds) into whole seconds for
-// launchd's StartInterval. The regex in schema.ts (IntervalSchema) already constrains the
-// shape, so a malformed value fails at config load, not here.
-export function parseInterval(spec: string): number {
-  const m = spec.match(/^(\d+)([smh]?)$/);
-  if (!m) return 0;
-  const n = Number(m[1]);
-  switch (m[2]) {
-    case "h":
-      return n * 3600;
-    case "m":
-      return n * 60;
-    default:
-      return n; // "s" or bare seconds
-  }
-}
-
-// XML-escape a value going into a plist <string>. Paths and argv can contain & or <.
-function xml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-interface AgentPlist {
-  readonly label: string;
-  readonly programArgs: readonly string[];
-  readonly startInterval: number;
-  // Run once immediately when the agent is (re)loaded, in addition to the interval. Default
-  // false — a scheduled check shouldn't fire a heavy pass at every login/sync.
-  readonly runAtLoad?: boolean;
-  // Where the agent's stdout/stderr go (a log under the state dir), so a failing scheduled
-  // run leaves a trace instead of vanishing.
-  readonly stdoutPath?: string;
-  readonly stderrPath?: string;
-  // Environment for the job. launchd does NOT give an agent the user's shell environment — it
-  // hands it a minimal PATH — so a scheduled command that shells out to a tool installed
-  // anywhere but /usr/bin simply cannot find it, and says so only in a log nobody reads.
-  // Emitted as EnvironmentVariables; omitted entirely when empty, so plists that need nothing
-  // stay byte-identical to what earlier versions wrote (no churn on upgrade).
-  readonly environment?: Readonly<Record<string, string>>;
-}
-
-// Render a minimal, well-formed LaunchAgent plist. Deterministic (no timestamps) so an
-// unchanged config re-renders byte-identical and the sync is a no-op.
-export function renderAgentPlist(opts: AgentPlist): string {
-  const args = opts.programArgs.map((a) => `    <string>${xml(a)}</string>`).join("\n");
-  const lines = [
-    '<?xml version="1.0" encoding="UTF-8"?>',
-    '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
-    '<plist version="1.0">',
-    "<dict>",
-    "  <key>Label</key>",
-    `  <string>${xml(opts.label)}</string>`,
-    "  <key>ProgramArguments</key>",
-    "  <array>",
-    args,
-    "  </array>",
-    "  <key>StartInterval</key>",
-    `  <integer>${Math.max(1, Math.trunc(opts.startInterval))}</integer>`,
-    "  <key>RunAtLoad</key>",
-    `  <${opts.runAtLoad ? "true" : "false"}/>`,
-  ];
-  if (opts.stdoutPath)
-    lines.push("  <key>StandardOutPath</key>", `  <string>${xml(opts.stdoutPath)}</string>`);
-  if (opts.stderrPath)
-    lines.push("  <key>StandardErrorPath</key>", `  <string>${xml(opts.stderrPath)}</string>`);
-  // Sorted, so the rendered plist is a pure function of its inputs — object key order would
-  // otherwise make an unchanged config look like drift on some runs and not others. (Verify
-  // compares a render against the installed file; it forgives a reordered PATH and nothing
-  // else, so every other byte here still has to be deterministic. See `samePathSet`.)
-  const envKeys = Object.keys(opts.environment ?? {}).sort();
-  if (envKeys.length > 0) {
-    lines.push("  <key>EnvironmentVariables</key>", "  <dict>");
-    for (const k of envKeys) {
-      lines.push(`    <key>${xml(k)}</key>`, `    <string>${xml(opts.environment?.[k] ?? "")}</string>`);
-    }
-    lines.push("  </dict>");
-  }
-  lines.push("</dict>", "</plist>", "");
-  return lines.join("\n");
-}
-
 // Pull the <key>Label</key><string>…</string> value out of a plist's text, so verify can ask
 // launchctl whether *that* agent is loaded. Undefined if the plist has no Label.
 export function plistLabel(contents: string): string | undefined {
   const m = contents.match(/<key>\s*Label\s*<\/key>\s*<string>([^<]*)<\/string>/);
   return m?.[1]?.trim() || undefined;
-}
-
-// Pull one EnvironmentVariables value out of a rendered plist, so verify can read back the PATH
-// a previous sync recorded and compare the two as PATHs rather than as strings.
-export function plistEnvValue(contents: string, key: string): string | undefined {
-  const block = contents.match(/<key>\s*EnvironmentVariables\s*<\/key>\s*<dict>([\s\S]*?)<\/dict>/)?.[1];
-  if (!block) return undefined;
-  const esc = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const m = block.match(new RegExp(`<key>\\s*${esc}\\s*</key>\\s*<string>([^<]*)</string>`));
-  return m?.[1];
-}
-
-// Do two PATH strings name the same set of directories?
-//
-// A PATH is a set with a resolution order, and only the SET is a property of the machine — the
-// order is a property of whichever shell happened to build it. On a box using a version manager
-// the same machine yields different orderings under `zsh -i`, `zsh -l` and `zsh -c`, and
-// duplicate entries appear and disappear between them. So comparing a recorded PATH to a
-// freshly-read one byte-for-byte reports drift on a machine where nothing changed, forever.
-//
-// Not hypothetical: it made `boom verify` exit 2 on every run on a fully converged machine, and
-// 7 of 10 recorded syncs rewrote the same two plists without ever converging. A check that cries
-// wolf is worse than no check — it trains you to ignore the alarm — and this is the alarm that
-// carries every other drift signal on that machine.
-//
-// Comparing as a set keeps the property worth having: a PATH that genuinely LOST a directory
-// still reports drift, because the timer really might no longer find `gh` or `git`. Only a
-// reorder or a duplicate is forgiven.
-export function samePathSet(a: string | undefined, b: string | undefined): boolean {
-  if (a === undefined || b === undefined) return a === b;
-  const norm = (p: string) =>
-    new Set(
-      p
-        .split(":")
-        .map((d) => d.replace(/\/+$/, ""))
-        .filter((d) => d.length > 0),
-    );
-  const sa = norm(a);
-  const sb = norm(b);
-  if (sa.size !== sb.size) return false;
-  for (const d of sa) if (!sb.has(d)) return false;
-  return true;
 }
 
 // captureArgv (not runArgv) throughout: it maps a missing `launchctl` (a non-darwin box, a
@@ -168,10 +45,14 @@ export function agentLoaded(label: string, env: Env): boolean {
 // never run, or launchctl said something we don't recognize.
 //
 // This exists because "loaded" and "working" are different questions, and boom only ever asked
-// the first. A timer can be installed, loaded, firing on schedule and failing every single time
-// — which is precisely what `code fetch` did for a month, reporting only into its own log. The
-// whole point of a scheduled check is that nobody is watching, so a failing one has to be able
-// to reach the drift report the way any other drift does.
+// the first. An agent can be installed, loaded, firing and failing every single time, reporting
+// only into its own log — which is exactly what a since-removed fetch timer did for a month.
+//
+// Worth stating plainly now that `schedule` is gone: this is a weaker check than it was. It
+// covers whatever hand-authored agents a boomfile links, and those are typically RunAtLoad
+// rather than timers, so "last exit" says much less about them than it did about a job firing
+// on an interval with nobody watching. Kept because it costs one launchctl call and still
+// answers the question for any agent that does fail.
 export function agentLastExit(label: string, env: Env): number | undefined {
   const r = captureArgv(["launchctl", "list", label], env);
   if (r.code !== 0) return undefined;

@@ -249,8 +249,8 @@ files `boomfile.<os|host|profile>.toml` are merged onto the base. `--profile`
 **last-wins per key** as well as appending its sections, `[[section]]` is optional **in an
 overlay only** (a vars-only overlay is legal; a base `boomfile.toml` with no sections is still
 a hard load error, so an empty or half-written one can never read as "declare nothing" and
-have every managed file reaped), and because `[boom].schedule` is an array a shallow last-wins
-merge **replaces** the base's timer list rather than appending to it.
+have every managed file reaped), and because a shallow last-wins merge on an ARRAY key is a
+replace rather than an append, an overlay declaring one drops the base's entries entirely.
 
 A top-level `[vars]` table (a name→string map) supplies the values `tmpl` resources
 interpolate.
@@ -282,13 +282,15 @@ verb-aware (sync installs/refreshes, verify reports drift, uninstall tears the t
   binary each sync, so the self-describing skill can't lag a `boom upgrade`.
 - `upgrade_on_sync = "check" | "auto"` — after a sync, warn when a newer release ships
   (offline-safe, never fails the sync), or actually self-upgrade.
-- `schedule = [{ cmd, every }]` — install/refresh a launchd timer (macOS-only) that runs
-  `boom <cmd>` on the interval, e.g. `{ cmd = "verify", every = "15m" }` to catch drift or
-  `{ cmd = "code fetch", every = "15m" }` to keep `origin/HEAD` warm for agent worktree cuts —
-  without a hand-authored plist. Removing an entry unloads its timer on the next sync.
-- `notify = true` — when a (typically scheduled) `boom verify` finds drift, raise a desktop
-  notification (macOS `osascript` / Linux `notify-send`) so the signal doesn't die in a timer
-  log. Best-effort; a platform with no notifier is a silent no-op.
+- `schedule` — **RETIRED.** boom used to generate and reap `com.boomtube.*` launchd timers
+  from this array. The key is still *accepted* (parsed, ignored) rather than rejected, because
+  `[boom]` is a strict table and failing a whole boomfile over a key that used to work is the
+  worse outcome. To run boom on a timer now, author a plist and link it with the `launchd`
+  resource, which owns the load/unload lifecycle.
+- `notify = true` — when `boom verify` finds drift, raise a desktop notification (macOS
+  `osascript` / Linux `notify-send`) so the signal doesn't die in a log. Verb-driven, not
+  schedule-gated: a hand-run verify notifies the same way. Best-effort; a platform with no
+  notifier is a silent no-op.
 ### Escalation, and why there is no askpass key
 
 A tool boom spawns can escalate on its own — Homebrew runs `sudo` for any cask carrying a
@@ -411,21 +413,6 @@ not machine state (which is why it lives beside the boomfile and not under the s
 `boom lock --check` compares the machine against that file and exits on the usual warning-tier
 ladder (0 clean / 2 drift / 1 failure), so it works as a CI gate. Distinct from `src/lib/lock.ts`,
 which is the run mutex above — same word, unrelated concept.
-
-### `boom code` — portals to the code dir
-
-`boom code` crawls the code dir (`BOOM_CODE` → breadcrumb → `~/Code`) by the leaf rule: a git
-repo is a leaf, never descended into. Two subcommands ride that crawl:
-
-- **`boom code fetch`** — fan out `git fetch` across every repo, so `origin/HEAD` is warm when an
-  agent cuts a worktree from it. Cheap and idempotent; the canonical `[boom] schedule` entry.
-- **`boom code reap`** — sweep spent agent worktrees. It re-decides by *content* (git patch-id),
-  not SHA identity, because a squash-merge rewrites history and leaves a fully-merged branch's
-  commits existing nowhere by SHA. It removes only a worktree that is clean, unlocked (or locked
-  by a dead pid), and either fully pushed or already merged; it deletes the directory, never the
-  branch ref, so it cannot lose a commit. Default answer is *keep*; `--dry-run` classifies without
-  touching anything, `--push` publishes a clean-but-unpushed worktree first, and `-i` decides per
-  worktree.
 
 ## Stack
 

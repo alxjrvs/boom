@@ -1,8 +1,8 @@
 // End-to-end reconcile tests for the resources/behaviors added for the dotFiles cleanup
-// sweep: `dir` (#54), `check` (#53), and the `[boom]` table's skill refresh (#55) + timer
-// scheduling (#57/#58). Sandboxed $HOME + repo, driving reconcile() directly (the same
-// oracle style as engine.test.ts). launchctl itself is never invoked here — the timer paths
-// are exercised via dry-run/off-platform, and the effectful primitives are darwin-only.
+// sweep: `dir` (#54), `check` (#53), and the `[boom]` table's skill refresh (#55). Sandboxed
+// $HOME + repo, driving reconcile() directly (the same oracle style as engine.test.ts).
+// The timer-scheduling cases these once covered went with `[boom] schedule`; what remains of
+// that key is one case asserting it parses and does nothing.
 import { expect, test } from "bun:test";
 import { chmod, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -379,21 +379,22 @@ test("[boom] skill_on_sync: sync installs the skill; verify reports it current",
   expect(sb.out()).toContain("skill current"); // verbose: "current" is a quiet skip by default
 });
 
-test("[boom] schedule: dry-run plans each timer; off-platform reports macOS-only", async () => {
-  const darwin = await sandbox(
-    `[boom]\nschedule = [{ cmd = "verify", every = "15m" }, { cmd = "code fetch", every = "1h" }]\n\n[[section]]\nname = "s"\n`,
+// `schedule` is retired: parsed, ignored, no longer generating launchd timers. Two things have
+// to hold, and neither is the absence of a test — a deleted case would assert nothing.
+//
+//   1. A boomfile still carrying it PARSES. BoomSettingsSchema is a strictObject, so the only
+//      alternative to accepting the key is failing the entire config on it.
+//   2. It DOES NOTHING. No timer is planned, and with no other field set the self-wiring header
+//      does not appear at all.
+test("[boom] schedule: a retired key parses and is inert", async () => {
+  const sb = await sandbox(
+    `[boom]\nschedule = [{ cmd = "verify", every = "15m" }]\n\n[[section]]\nname = "s"\n`,
     { BOOM_OS: "darwin" },
   );
-  expect(await reconcile("sync", darwin.ctx, { dryRun: true })).toBe(0);
-  expect(darwin.out()).toContain("would schedule verify every 15m");
-  expect(darwin.out()).toContain("would schedule code fetch every 1h");
-
-  const linux = await sandbox(
-    `[boom]\nschedule = [{ cmd = "code fetch", every = "15m" }]\n\n[[section]]\nname = "s"\n`,
-    { BOOM_OS: "linux" },
-  );
-  expect(await reconcile("sync", linux.ctx, { verbose: true })).toBe(0);
-  expect(linux.out()).toContain("macOS-only"); // verbose: off-platform no-ops are quiet by default
+  expect(await reconcile("sync", sb.ctx, { dryRun: true })).toBe(0);
+  expect(sb.out()).not.toContain("schedule");
+  expect(sb.out()).not.toContain("timer");
+  expect(sb.out()).not.toContain("self-wiring");
 });
 
 test("[boom] an absent table changes nothing (no self-wiring header)", async () => {

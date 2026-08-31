@@ -74,7 +74,7 @@ boom source --resume    # continue an interrupted sync (skips completed steps)
 boom verify             # check for drift — exit 0 ok / 2 warn / 1 fail
 boom verify --json      # …as a structured drift report
 boom verify --ci        # non-interactive config gate for CI (schema-check only; exit 0/1)
-boom status             # one-screen dashboard: config, repo drift, last sync, fleet, lock, secrets
+boom status             # one-screen dashboard: config, repo drift, last sync, lock, secrets
 boom rollback           # undo the most recent sync (restores backed-up files)
 boom checkpoint <name>  # name the current state; boom rollback --to <name> returns to it
 ```
@@ -117,7 +117,6 @@ boom doctor             # check boom's own preconditions (tools, keychain, state
 boom doctor --fix       # …and mend the safe ones (state dir, boom skill)
 boom doctor --secrets   # audit that every secret ref (op:// and pluggable backends) resolves
 boom lock               # pin resolved package versions to boom.lock (--check reports drift)
-boom fleet              # every machine's last-sync summary; fleet drift | diff <a> <b> for more
 boom module             # list `use` modules; module add <ref> splices one into your boomfile
 boom where config|code|engine   # resolve where boom keeps things
 boom upgrade            # upgrade the boom binary itself
@@ -187,7 +186,7 @@ launchd = [{ src = "launchd/com.me.agent.plist" }]   # link + launchctl load -w,
 name = "Linux services"
 when = { os = "linux" }
 # A generated systemd *user* unit (the Linux twin of launchd) + an optional OnCalendar timer.
-systemd = [{ name = "sync-code", exec = "boom code fetch", timer = "hourly" }]
+systemd = [{ name = "nightly-backup", exec = "/usr/local/bin/backup", timer = "daily" }]
 
 [[section]]
 name = "Guardrails"
@@ -210,7 +209,7 @@ express. Multi-machine setups gate sections with `when`, layer overlay files
 (`boomfile.<os|host|profile>.toml`), or compose shared `use` modules. An overlay may carry
 `[vars]` and `[boom]` as well as sections — they merge over the base last-wins per key, and a
 `[vars]`-only overlay is the lightest way to differentiate a machine. Two things to know: a
-`[boom].schedule` in an overlay **replaces** the base's timer list (it's an array, not a table),
+a last-wins merge on an array key **replaces** rather than appends,
 and `use` in an overlay is an error — modules compose *before* your own sections, so declaring
 one in the file that loads *last* would invert that; put it in `boomfile.toml`. When two layers
 declare the same destination, the **last one wins** and the other is dropped before the run
@@ -218,20 +217,14 @@ declare the same destination, the **last one wins** and the other is dropped bef
 repo, instead of a losing link surfacing as a verify failure nothing could ever converge.
 
 A top-level `[boom]` table folds boom's own self-wiring into the reconcile — refresh the
-Claude skill, nudge/auto-upgrade when a newer boom ships, record a fleet summary,
-desktop-notify on drift, answer a tool's `sudo` prompt from the vault, and manage scheduled
-`boom` launchd timers (macOS) — so you stop hand-rolling those as `run`/plist boilerplate:
+Claude skill, nudge/auto-upgrade when a newer boom ships, and desktop-notify on drift — so
+you stop hand-rolling those as `run` boilerplate:
 
 ```toml
 [boom]
 skill_on_sync   = true            # regenerate ~/.claude/skills/boom/SKILL.md each sync
 upgrade_on_sync = "check"         # "check" warns on a newer release; "auto" self-upgrades
-fleet           = true            # record this machine's summary into the repo for `boom fleet`
-notify          = true            # desktop-notify when a scheduled `boom verify` finds drift
-schedule = [
-  { cmd = "verify",     every = "15m" },   # launchd timer: boom verify every 15m (macOS)
-  { cmd = "code fetch", every = "15m" },   # keep every code repo's origin warm for agents
-]
+notify          = true            # desktop-notify when `boom verify` finds drift
 ```
 
 
@@ -247,91 +240,6 @@ any other program on the machine deciding it wants one:
 The prompt line itself comes from `SUDO_PROMPT`; the specific cask comes from relaying Homebrew's
 own `==>` headlines (sudo's prompt escapes can't name a command, so the tool's output has to).
 
-
-## Code portals
-
-`boom code` opens portals to the repos under your code dir (default `~/Code`):
-
-```sh
-boom code init ~/Code    # record your code dir
-boom code claude         # symlink every repo into one dir, open `claude agents` there
-boom code cmux           # one cmux workspace per repo
-boom code fetch          # git fetch every repo (keep origin warm for agent worktrees)
-boom code reap           # remove spent agent worktrees (keeps every branch)
-boom code reap -i        # ...and ask what to do with the ones it won't touch
-```
-
-`code claude` flattens every repo into a symlink farm so each is `@`-taggable for
-agent dispatch even with no running agents; `code cmux` opens one workspace per
-repo. All honor `--dry-run` and only spawn the backend tool when it's present.
-
-`code reap` cleans up after agent worktrees. Claude Code refuses to remove a
-worktree whose HEAD commits exist on no remote — but it tests *SHA* identity, so a
-squash-merged branch always fails it: the content landed on the default branch under
-a new SHA, and the branch's own commits genuinely exist nowhere by SHA even though
-every line of them is merged. Worktrees therefore pile up and sessions can't be
-closed. `reap` re-asks the question by **content**, using git's patch-id equivalence,
-and removes a worktree only when it is clean, unlocked (or locked by a dead process),
-and either fully pushed or already merged. It deletes the directory and never the
-branch ref, so nothing it does can lose a *commit* — the one thing removal does discard
-is the worktree's stacked-PR topology (below), which `gh stack checkout <n>` re-attaches.
-
-`reap` is **stack-aware**. `gh stack` records its state per worktree, in that worktree's
-own admin dir, and a stack's layers land as *N separate* squash commits — which the
-whole-tree content test can never match, so a fully-merged stack used to be kept forever.
-When a worktree's checked-out branch is a member of its recorded stack, `reap` judges it
-**layer by layer**: removed only when every layer's content is provably in the default
-branch, otherwise skipped with the count of layers still open (the answer to a half-landed
-stack is `gh stack merge`, not a per-worktree question). A worktree that holds stack state
-whose branch is *not* a member — an admin dir left over from earlier work — is judged as an
-ordinary single branch, unpushed-commits gate and all. Either way, `--push` never publishes
-a worktree holding stack state: a stack is published by `gh stack submit`, so pushing one
-layer is at best a no-op and at worst re-creates a branch the merge deliberately deleted.
-
-Its default answer is *keep* — anything it cannot prove safe stays exactly where it
-is, and a removal failure is a warning rather than an error, so a scheduled sweep
-can never wedge. `--dry-run` classifies without touching anything.
-
-A killed session leaves its worktree *locked*, and git won't remove a locked tree even
-under `--force`. When the lock names a process that is no longer alive, `reap` clears
-the stale lock and reclaims the worktree; a lock whose holder is still running is left
-strictly alone. Removal failures report git's own reason rather than a generic error.
-
-`--push` closes the remaining gap. A clean worktree held back only because its
-commits exist nowhere but this machine is *published* first (`git push -u origin
-<branch>`, never forced), which makes the work verifiably safe and lets it reap on
-the same rule as everything else. It applies only to that one case — never to a
-dirty tree, a live session, a detached HEAD (which has no branch to publish), or a
-worktree holding stack state. If the push fails for any reason, the worktree is kept.
-
-`--interactive` / `-i` works the kept pile by hand. After the sweep has proved it
-can't clear a worktree, it asks — one at a time, naming the reason and the branch:
-
-```
-SU-SRD/rail-top-right — 2 commit(s) not on any remote
-  p=push & remove  d=DELETE worktree + branch rail-top-right — loses these commits
-  s=skip (keep it)  q=stop asking
-  choice
-
-boom/audit-remediation — uncommitted changes [stack #112: never-destroy #108 → journal-lock #109 → config-compose #110]
-  d=DELETE worktree + branch config-compose — orphans 2 other stack branch(es) (#108, #109); loses these commits
-  s=skip (keep it)  q=stop asking
-  choice
-```
-
-`p` is offered only when there's something publishable; `d` is the one genuinely
-destructive action in the command (`git branch -D` after the directory is gone, since
-git won't drop a checked-out branch); `s` is the default, so pressing return always
-keeps. `q` stops the questions without stopping the safe cleanup. Only worktrees the
-sweep *kept* are ever offered — a live session or an unreadable repo is skipped
-silently, because there the right answer is never a question. A non-TTY is never
-prompted and takes the do-nothing answer, so `-i` is harmless in a launchd timer.
-
-A stacked worktree names its layers in the prompt, and `d` says what it really costs:
-`git branch -D` still drops only the checked-out branch, but once the directory is gone
-the siblings have no worktree, so the sweep can never surface them again. Only a *dirty*
-stacked worktree ever reaches this prompt — a clean one resolves to reap or skip, and
-neither is asked about.
 
 ## Security model
 

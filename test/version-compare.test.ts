@@ -17,7 +17,7 @@ test("compareVersions orders release strings", () => {
 });
 
 // `Bun.semver.order` throws `Invalid SemVer` where the component-wise compare produced NaN. The
-// input is reachable: `boom fleet` reads `m.boom` out of another machine's JSON summary, so a
+// input is reachable: the since-removed `boom fleet` read `m.boom` out of another machine's JSON summary, so a
 // truncated or hand-edited file lands here. 0 keeps the sort stable and flags nothing.
 test("an unparseable version compares as 0 rather than throwing", () => {
   expect(compareVersions("", "1.0.0")).toBe(0);
