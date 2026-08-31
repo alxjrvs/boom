@@ -54,14 +54,13 @@ A `boom` invocation does one of two things:
 2. **Discovered subcommands** — built-ins are the `@stricli` route map, in `src/cli.ts` order:
    <!-- commands:begin -->
    `verify`, `status`, `plan`, `uninstall`, `source`, `where`, `edit`, `rollback`,
-   `checkpoint`, `upgrade`, `doctor`, `lock`, `adopt`, `init`, `fleet`, `module`, `code`,
+   `checkpoint`, `upgrade`, `doctor`, `lock`, `fleet`, `module`, `code`,
    `mcp`, `completions`, `man`, `skill`.
    <!-- commands:end -->
    That list is asserted **equal** to `commandNames()` by `test/docs-hygiene.test.ts`, so adding
    a route without naming it here (or naming one that no longer routes) fails CI. `source`,
    `fleet`, `module`, `code` and `mcp` are themselves
-   nested route maps (`fleet drift|diff`, `module list|add`). `boom init` is the greenfield
-   cold-start (adopt → `git init` + commit → create remote → push → breadcrumb). User commands
+   nested route maps (`fleet drift|diff`, `module list|add`). User commands
    resolve at runtime from `<config>/commands/<name>.ts`.
    The route map is the **single registry, with no hardcoded dispatch anywhere**: `mcp`
    is an ordinary route (its `-- <server args>` ride through verbatim via the scanner's
@@ -484,9 +483,7 @@ src/
     push.ts reset.ts       boom source push / boom source reset
     pr.ts                  the GitHub half of source push (slug, branch name, gh)
     overview.ts            boom status (read-only dashboard composing the existing readers)
-    init.ts                boom init (greenfield: adopt → git init + commit → remote → breadcrumb)
     fleet.ts               boom fleet (list · drift · diff) over .boom/machines/<host>.json
-    importers.ts           boom adopt --from (stow · chezmoi · yadm · dotbot · nix-darwin)
     registry.ts            data-driven resource table (phase order) + finalize hooks
     resources/             link · copy · tmpl · secret · dir · pkg · osx · launchd · systemd · run · check · hook
     secrets/backends.ts    pluggable secret backends (op · env · pass · age · sops)
