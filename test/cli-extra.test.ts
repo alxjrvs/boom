@@ -88,6 +88,24 @@ test("skill doc is a SKILL.md with frontmatter naming every command", () => {
   expect(s).toContain("source reset --force");
 });
 
+// The inverse of the case above, and the one that was missing. skill.ts's own header says the
+// command reference "is generated from the catalog so it can never document a command that
+// doesn't exist" — but adds that "the guidance around it is hand-written", and the hand-written
+// half is exactly where a dead verb survives.
+//
+// It did. After `rollback` was removed, the guidance still told agents that `boom uninstall` is
+// journaled "so `boom rollback` can replay it", and the frontmatter description — billed to
+// every session that loads the skill — still offered "rolling back a boom change". The generated
+// half was correct the whole time, which is why nothing caught it.
+test("the skill names no command that isn't a route", () => {
+  const s = skillDoc("9.9.9");
+  const real = new Set(commandNames());
+  const mentioned = [...s.matchAll(/`boom ([a-z][a-z-]*)/g)].map((m) => m[1] as string);
+  expect(mentioned.length).toBeGreaterThan(0); // guard the guard
+  const ghosts = [...new Set(mentioned)].filter((v) => !real.has(v));
+  expect(ghosts).toEqual([]);
+});
+
 test("skill --install writes SKILL.md under the Claude config dir", async () => {
   const cfg = await base(); // stand in for ~/.claude via CLAUDE_CONFIG_DIR
   const { ctx, out } = ctxFor({ CLAUDE_CONFIG_DIR: cfg, NO_COLOR: "1" }, cfg);

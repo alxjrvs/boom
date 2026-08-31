@@ -45,8 +45,8 @@ name: boom
 description: >-
   Drive boom, declarative dev-machine setup (dotfiles, packages, tools) that converges a machine
   from a declarative boomfile.toml in a git-remote config repo. Use when bootstrapping
-  or updating a machine's dotfiles, checking for configuration drift, operating the
-  managed config repo (diff/commit/push/reset), or rolling back a boom change.
+  or updating a machine's dotfiles, checking for configuration drift, or operating the
+  managed config repo (diff/commit/push/reset).
 ---
 
 # boom (v${version})
@@ -79,9 +79,10 @@ config repo. Run \`boom <command> --help\` for flags.
   report (with a \`schemaVersion\`); parse that instead of scraping stdout.
 - **Scope a run** with \`--only <section>\` (repeatable) and \`--profile <name>\`.
 - **Destructive commands to use with care:** \`boom source reset --force\` discards local
-  commits no remote has and is **irreversible** — it is not journaled, so \`boom rollback\`
-  cannot undo it. \`boom uninstall\` removes what boom installed and *is* journaled, so
-  \`boom rollback\` can replay it.
+  commits no remote has and is **irreversible** — nothing records it. \`boom uninstall\`
+  removes what boom installed; it *is* journaled, so a file it overwrites is displaced into
+  \`backups/<run-id>/\` rather than destroyed. There is no undo verb, so putting one back is
+  a manual copy out of that tree.
 - **Conflicts** at a link destination are skipped by default (boom never clobbers a file it
   doesn't own); \`boom source --fix\` overwrites them to repair drift.
 
