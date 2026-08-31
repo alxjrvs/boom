@@ -10,7 +10,7 @@
 // when that surface did. Everything boom prints now tints from a COSMIC hex.
 const RESET = "\x1b[0m";
 
-// The "cosmic" palette — the site's design tokens (site/index.html) ported to the terminal
+// The "cosmic" palette — the brand design tokens, ported to the terminal
 // as 24-bit truecolor, so the CLI and the landing page share one identity. Brand hues use the
 // lightened tints the site uses for small text on the dark cosmic ground (#0A0712), where the
 // pure #7A3CFF violet / #FF2E86 magenta go too dark. Used only by the Reporter's bands mode;
