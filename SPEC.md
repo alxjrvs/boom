@@ -13,6 +13,9 @@ to TypeScript; this document is the design of record for that engine.
 This document describes the **current** design, not how it got here. When a release changes
 behavior a running machine depends on, the upgrade path is a migration note beside it:
 
+- [`docs/MIGRATING-0.32.md`](https://github.com/alxjrvs/boom/blob/main/docs/MIGRATING-0.32.md) —
+  `systemd`, seven package managers and three secret backends removed. Unlike 0.31 these ARE
+  load-time errors: a boomfile naming one fails to parse until it is edited.
 - [`docs/MIGRATING-0.31.md`](https://github.com/alxjrvs/boom/blob/main/docs/MIGRATING-0.31.md) —
   ten verbs removed and `[boom] schedule` retired. No config edit is required, but a machine that
   had `schedule` keeps its LaunchAgents loaded, because the reaper went with the generator.
