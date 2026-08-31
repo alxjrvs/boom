@@ -1,20 +1,20 @@
-// `boom where <config|code|engine>` — single source of truth for resolving boom's
-// paths, so commands never re-derive breadcrumb logic. config resolves now (M1);
-// code lands in M5; engine reports the running binary's directory.
+// `boom where <config|engine>` — single source of truth for resolving boom's
+// paths, so commands never re-derive breadcrumb logic. config resolves the managed
+// config repo; engine reports the running binary's directory. A `code` target
+// existed until the `code` verb was removed; it went with it.
 
 import { dirname } from "node:path";
 import { buildCommand } from "@stricli/core";
 import { NO_CONFIG_REPO_MSG, resolveConfigDir } from "../config/load.ts";
 import type { BoomContext } from "../context.ts";
-import { resolveCodeDir } from "../engine/code.ts";
 import { str } from "./flags.ts";
 
 export const whereCommand = buildCommand<Record<never, never>, [string], BoomContext>({
-  docs: { brief: "Print a resolved boom path: config | code | engine" },
+  docs: { brief: "Print a resolved boom path: config | engine" },
   parameters: {
     positional: {
       kind: "tuple",
-      parameters: [{ parse: str, placeholder: "target", brief: "config | code | engine" }],
+      parameters: [{ parse: str, placeholder: "target", brief: "config | engine" }],
     },
   },
   async func(_flags, target) {
@@ -28,14 +28,8 @@ export const whereCommand = buildCommand<Record<never, never>, [string], BoomCon
       case "engine":
         this.process.stdout.write(`${dirname(process.execPath)}\n`);
         return;
-      case "code": {
-        const dir = await resolveCodeDir(this.env);
-        if (!dir) return new Error("no code dir — run `boom code init`");
-        this.process.stdout.write(`${dir}\n`);
-        return;
-      }
       default:
-        return new Error(`unknown target: ${target} (expected config | code | engine)`);
+        return new Error(`unknown target: ${target} (expected config | engine)`);
     }
   },
 });

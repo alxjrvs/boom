@@ -72,7 +72,10 @@ test("subcommandGroups derives nested routes from the route map", () => {
   const source = groups.find((g) => g.parent === "source");
   const names = source?.children.map((c) => c.name) ?? [];
   for (const sub of ["set", "status", "diff", "push", "reset"]) expect(names).toContain(sub);
-  expect(groups.find((g) => g.parent === "code")?.children.map((c) => c.name)).toContain("claude");
+  // `code` is gone, so its group must be too. Asserted rather than merely deleted:
+  // this is the case that catches the route map and a derived surface drifting
+  // apart, and it has to hold in the absence direction as well as the presence one.
+  expect(groups.find((g) => g.parent === "code")).toBeUndefined();
 });
 
 test("completions complete the second level (source|code|mcp subcommands)", () => {

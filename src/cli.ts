@@ -4,7 +4,6 @@
 // the man page, and the skill. There is no hardcoded dispatch and no parallel table.
 import { buildApplication, buildRouteMap } from "@stricli/core";
 import { checkpointCommand } from "./commands/checkpoint.ts";
-import { codeRouteMap } from "./commands/code.ts";
 import { completionsCommand } from "./commands/completions.ts";
 import { doctorCommand } from "./commands/doctor.ts";
 import { editCommand } from "./commands/edit.ts";
@@ -35,7 +34,6 @@ export const routes = buildRouteMap({
     upgrade: upgradeCommand,
     doctor: doctorCommand,
     lock: lockCommand,
-    code: codeRouteMap,
     mcp: mcpRouteMap,
     completions: completionsCommand,
     man: manCommand,
