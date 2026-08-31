@@ -7,8 +7,8 @@ import type { Env } from "./paths.ts";
 // Move `src` → `dst`, surviving a cross-filesystem boundary. `rename(2)` is atomic but
 // throws EXDEV when the two paths live on different mounts — which the backup tree does
 // whenever `$XDG_STATE_HOME` sits on a different device than `$HOME` (tmpfs state, a
-// bind-mounted home). Without this, every overwrite-with-backup *and* every rollback
-// restore would fail on those layouts. Fall back to a recursive copy + remove (dst can be
+// bind-mounted home). Without this, every overwrite-with-backup *and* every restore out of
+// the backup tree would fail on those layouts. Fall back to a recursive copy + remove (dst can be
 // a directory, so this is cp -r, not a file-only Bun.write). Assumes dst's parent exists.
 async function moveAcross(src: string, dst: string): Promise<void> {
   try {
@@ -79,7 +79,7 @@ export async function ensureSymlink(src: string, dst: string): Promise<void> {
 }
 
 // Move `dst` into the per-run backup tree (preserving its path) and return the backup
-// location, so a later rollback can restore a file that an overwrite displaced.
+// location, so a file an overwrite displaced is recoverable rather than destroyed.
 // `mode: 0o700` is load-bearing, not hygiene: the tree can hold a displaced *secret*, and
 // `rename` preserves that file's 0600 while the directories above it would otherwise land at
 // 0755 and expose its name and path. The gotcha that makes this one argument sufficient:
@@ -91,26 +91,6 @@ export async function backupTo(dst: string, backupRoot: string): Promise<string>
   await mkdir(dirname(target), { recursive: true, mode: 0o700 });
   await moveAcross(dst, target);
   return target;
-}
-
-// Restore a backed-up file to `dst`, replacing whatever boom currently has there — without
-// destroying the current file until the backup is safely in place. The old order (rm dst,
-// then move the backup in) lost the current file outright if the move failed (backup
-// pruned, EXDEV copy error, EACCES). Instead: move the current file aside, move the backup
-// in, and only then drop the aside copy — restoring the aside file if the move fails, so a
-// failed rollback leaves `dst` exactly as it was rather than empty.
-export async function restoreFrom(from: string, dst: string): Promise<void> {
-  await mkdir(dirname(dst), { recursive: true });
-  const aside = `${dst}.boom-restore.${process.pid}`;
-  const hadCurrent = await pathExists(dst);
-  if (hadCurrent) await moveAcross(dst, aside);
-  try {
-    await moveAcross(from, dst);
-  } catch (e) {
-    if (hadCurrent) await moveAcross(aside, dst); // put the current file back
-    throw e;
-  }
-  if (hadCurrent) await rm(aside, { recursive: true, force: true });
 }
 
 // Byte-equal compare of two files (for `copy` verify); false if either is unreadable.

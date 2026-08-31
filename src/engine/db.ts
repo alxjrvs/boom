@@ -12,8 +12,8 @@ function dbPath(env: Env): string {
   return join(stateHome(env), "boom", "state.db");
 }
 
-// Open the state DB (creating the dir + schema on first touch). WAL so a reader (rollback,
-// verify's drift check) never blocks the writer mid-sync. Callers close it when done; the
+// Open the state DB (creating the dir + schema on first touch). WAL so a reader (verify's
+// drift check, a resumed run reading the prior one) never blocks the writer mid-sync. Callers close it when done; the
 // Journal holds one open for a run's lifetime, one-shot readers open+close.
 export function openDb(env: Env): Database {
   mkdirSync(join(stateHome(env), "boom"), { recursive: true });
@@ -23,10 +23,11 @@ export function openDb(env: Env): Database {
   // single statement. All idempotent (IF NOT EXISTS), so this is a no-op after first open.
   db.run("CREATE TABLE IF NOT EXISTS manifest (dst TEXT PRIMARY KEY, kind TEXT NOT NULL, src TEXT NOT NULL)");
   db.run("CREATE TABLE IF NOT EXISTS runs (run_id TEXT PRIMARY KEY, committed INTEGER NOT NULL DEFAULT 0)");
-  // A `label` names a run as a checkpoint (`boom checkpoint <name>`): it survives pruning and is
-  // a stable target for `boom rollback --to <name>`. Added by migration because CREATE TABLE IF
-  // NOT EXISTS never alters an existing table — a state.db from before checkpoints has the old
-  // shape, so add the column when it's missing (ALTER twice would throw on the duplicate).
+  // A `label` exempts a run from pruning. Nothing writes one any more — the verbs that did were
+  // removed at 0.31 — but the column stays: dropping it would rewrite the `runs` table on every
+  // existing user's state.db to reclaim nothing. Added by migration because CREATE TABLE IF NOT
+  // EXISTS never alters an existing table — a state.db from before the column has the old shape,
+  // so add it when it's missing (ALTER twice would throw on the duplicate).
   if (!columnExists(db, "runs", "label")) db.run("ALTER TABLE runs ADD COLUMN label TEXT");
   // ops.t is 'intent' | 'done'; undo is a JSON UndoToken, present for 'done' rows.
   db.run(

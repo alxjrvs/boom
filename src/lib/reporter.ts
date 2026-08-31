@@ -511,8 +511,8 @@ export class Reporter {
   }
 
   // The one place the 0/2/1 exit contract lives: write a trailing blank line + a summary
-  // line at the right severity, and return the exit code — so reconcile/doctor/validate/
-  // rollback stop each re-implementing the same failures→1 / warnings→2 / ok→0 ladder with
+  // line at the right severity, and return the exit code — so reconcile/doctor/validate
+  // stop each re-implementing the same failures→1 / warnings→2 / ok→0 ladder with
   // subtly different wording. Callers pass only the varying messages. Omitting `warn` means
   // "no warning tier" (warnings don't change the exit code) — the mutating/validate case.
   // Exit code is decided from the counts *before* the summary line is emitted, so the

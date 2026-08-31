@@ -393,28 +393,13 @@ half-applied one. Each destructive filesystem op journals its whole undo — int
 displaced original, and the `done` row naming it — *before* the write, so no crash can orphan
 a backup nothing points at. `source --resume` continues the interrupted run in place (its id + backup
 tree) rather than opening a new one. Mutating runs also
-**back up** any displaced file under `…/backups/<run-id>/`. `boom rollback` replays a run's
-`done` rows in reverse (remove created links, restore backups, re-apply a macOS default's
-prior value) — like a Mother Box, it remembers everything and can put it back; `--dry-run`
-previews the replay. It never claims an undo it did not perform: a directory boom created is
-reversed with `rmdir` (one the user has since filled is left in place and reported, never
-recursively deleted), and a `defaults` restore that exits nonzero is a reported failure, not
-a green line. `boom rollback --to <checkpoint>` exits 2 with a warning when the journal was
-pruned past the checkpoint, so a partial rewind is never mistaken for a complete one. The manifest
-drives orphan reaping (verify warns; sync reaps), and a legacy TSV manifest is
-imported once on upgrade. Breadcrumbs (`config`, `code`) record the config repo (path +
-remote) and code dir.
-
-### `boom.lock` — version pinning
-
-A boomfile declares *what* to install, not *which version*, so two machines syncing the same
-config a week apart can land on different packages. `boom lock` (`src/engine/pinning.ts`) closes
-that gap without changing the model: it resolves every declared package to the version actually
-installed and writes them to `boom.lock` in the config repo — a committed, reviewable artifact,
-not machine state (which is why it lives beside the boomfile and not under the state dir).
-`boom lock --check` compares the machine against that file and exits on the usual warning-tier
-ladder (0 clean / 2 drift / 1 failure), so it works as a CI gate. Distinct from `src/lib/lock.ts`,
-which is the run mutex above — same word, unrelated concept.
+**back up** any displaced file under `…/backups/<run-id>/`. No command replays those rows (see
+*The journal, without an undo verb* above); what the record buys is that nothing an overwrite
+or a reap replaced was destroyed, and a row names where each original went. `boom uninstall`
+undoes what boom installed by removing it — reading the `meta` stash for the one non-file
+effect, a macOS default's pre-boom prior (`defaults write` it back, or `defaults delete` a key
+boom introduced). The manifest drives orphan reaping (verify warns; sync reaps). The `config`
+breadcrumb records the config repo (path + remote).
 
 ## Stack
 
@@ -438,11 +423,9 @@ src/
                            sync verb — `--fix` overwrites conflicts — and namespaces
                            the set/status/diff/push/reset
                            route map — set is the bootstrap),
-                           where, rollback, upgrade, doctor (--config folds in the
-                           former validate), code, mcp (add
-                           route), completions, man, skill
+                           upgrade, doctor (--config folds in the former validate), skill;
                            catalog.ts (names+briefs + nested subcommands derived from the
-                           route map for completions + man + skill); flags.ts (shared parsers)
+                           route map, for `boom skill`); flags.ts (shared parsers)
   engine/
     reconcile.ts           the one verb loop
     sync.ts                pre-reconcile config-repo fetch/pull(--rebase --autostash)-and-report
@@ -451,15 +434,14 @@ src/
     status.ts              boom source status (read-only drift vs origin, shared reportRepoDrift)
     push.ts reset.ts       boom source push / boom source reset
     pr.ts                  the GitHub half of source push (slug, branch name, gh)
-    overview.ts            boom status (read-only dashboard composing the existing readers)
     registry.ts            data-driven resource table (phase order) + finalize hooks
     resources/             link · copy · tmpl · secret · dir · pkg · osx · launchd · run · check · hook
     secrets/backends.ts    pluggable secret backends (op · env)
     db.ts journal.ts       bun:sqlite store: transaction journal
     state.ts               the owned-destinations manifest (layout lives in lib/paths.ts)
     skill.ts               renders the Claude SKILL.md (commands/skill.ts is the CLI wrapper)
-    pinning.ts             boom lock / --check: resolved package versions in boom.lock
-    rollback.ts code.ts discovery.ts
+    settings.ts            the `[boom]` self-wiring table (skill install/refresh)
+    doctor.ts validate.ts types.ts discovery.ts
   config/  schema.ts load.ts compose.ts remote.ts profile.ts
   lib/     reporter.ts color.ts fs.ts paths.ts proc.ts git.ts release.ts version.ts
 test/                       bun test (unit + sandboxed integration)

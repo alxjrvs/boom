@@ -4,7 +4,7 @@
 // (`op read`), `template` a repo-relative file whose embedded `op://…` references are filled
 // in (`op inject`). Two disciplines set it apart from `copy`:
 //   • the plaintext boom RENDERS is never journaled or backed up — a fresh render's undo is a
-//     plain remove, so a rollback deletes the rendered secret rather than restoring a copy of
+//     plain remove, so undoing it deletes the rendered secret rather than restoring a copy of
 //     it from the backup tree, which would leave plaintext on disk outside the vault. A file
 //     boom did NOT render is the user's, so displacing it into the backup tree leaks nothing
 //     boom introduced and is what makes `--fix` recoverable. Accepted cost: secrets carry no
@@ -113,7 +113,7 @@ export async function reconcileSecret(entry: Secret, ctx: ReconcileCtx): Promise
       // One shared helper, not a fourth hand-inlined copy of the invariant — and its
       // `pathExists ? displace : {kind:"remove"}` is exactly this resource's discipline: a fresh
       // render journals a remove-only undo, so boom's own plaintext never reaches the backup
-      // tree and rollback deletes it; an overwrite (only reachable under `--fix`, and only for
+      // tree and the undo is to delete it; an overwrite (only reachable under `--fix`, and only for
       // content that actually differs) displaces first, because that file is the user's, not
       // something boom put there. The whole undo record lands BEFORE the write either way.
       await journalWrite("secret", dst, ctx);
@@ -163,7 +163,7 @@ export async function reconcileSecret(entry: Secret, ctx: ReconcileCtx): Promise
       else {
         // Deliberately a plain rm, NOT journalRemove — the one resource that must not route
         // through it. Every other uninstall arm now displaces into the run's backup tree so
-        // rollback can restore it; doing that here would write the rendered plaintext to disk
+        // what it removes stays recoverable; doing that here would write the rendered plaintext to disk
         // under `backups/<run-id>/` and leave it there, which is exactly the persistence this
         // file's header discipline exists to prevent. A secret is re-renderable from its
         // backend, so it needs no backup: `boom source` puts it back.

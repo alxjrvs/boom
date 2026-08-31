@@ -1,7 +1,7 @@
 // The `launchd` resource: link a user-authored LaunchAgent plist into ~/Library/LaunchAgents
 // and own its launchctl lifecycle — collapsing the copy-pasted "link the plist, then
 // `launchctl unload …; load -w`" boilerplate every macOS agent needs into one stanza. The
-// plist link is journaled + manifest-owned (reused from the filesystem resource), so rollback
+// plist link is journaled + manifest-owned (reused from the filesystem resource), so uninstall
 // and orphan-reaping treat it like any other link; the launchctl load/unload rides on top.
 // OS-gated to darwin — a no-op with a note elsewhere, like osx_default.
 import { basename, join } from "node:path";

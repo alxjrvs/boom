@@ -5,7 +5,7 @@
 //   sync    → install/refresh (regenerate the skill, check/auto-upgrade)
 //   verify  → report drift (skill stale) and notify on it
 // Each field is opt-in; an absent/empty `[boom]` table emits nothing. Skill writes are
-// journaled like any file mutation, so `boom rollback` reverses them.
+// journaled like any file mutation, so a skill they overwrite is displaced, not destroyed.
 //
 // `schedule` lived here too, generating and reaping `com.boomtube.*` launchd timers. It was
 // removed once its last consumer went; the `launchd` RESOURCE, which links and drives a
@@ -108,7 +108,7 @@ async function applySkill(ctx: ReconcileCtx): Promise<void> {
     return;
   }
   // Journal the write in full before touching disk: displace a prior skill into the backup tree
-  // (rollback restores it), or record a plain remove for a fresh install. The `done` row used to
+  // (recoverable), or record a plain remove for a fresh install. The `done` row used to
   // land after `Bun.write`, so a failure in between — the `mkdir` throwing ENOTDIR is enough —
   // left the displaced original in the backup tree with nothing naming it.
   await journalWrite("skill", file, ctx);

@@ -52,10 +52,9 @@ export function osxMatches(type: OsxType, current: string, value: OsxValue): boo
 // Gotcha for the uninstall arm below: uninstall is not a journaled run (`mutating = verb ===
 // "sync" && !dryRun`, reconcile.ts), so `ctx.journal` is undefined here. That arm therefore
 // *reads* the recorded undo through `ctx.env` instead of writing one, and its own mutation is
-// not itself rollback-able — the same deal every other resource's uninstall makes. It reuses
-// the sync arm's `cleanEnv` + `Bun.spawnSync` shape rather than borrowing rollback.ts's
-// restoreOsx: that module owns the replay-a-run direction, and a sandboxed test needs the
-// PATH-resolved `defaults` this one gets.
+// not itself recorded — the same deal every other resource's uninstall makes. It reuses the
+// sync arm's `cleanEnv` + `Bun.spawnSync` shape, which a sandboxed test needs for the
+// PATH-resolved `defaults` it gets.
 export async function reconcileOsxDefault(entry: OsxDefault, ctx: ReconcileCtx): Promise<void> {
   if (detectOs(ctx.env) !== "darwin") return;
   const { report } = ctx;
@@ -91,7 +90,7 @@ export async function reconcileOsxDefault(entry: OsxDefault, ctx: ReconcileCtx):
         return;
       }
       // Journal the prior value (or `null` if the key was unset) before writing, so `boom
-      // rollback` can `defaults write` it back — or `defaults delete` a key boom introduced.
+      // uninstall` can `defaults write` it back — or `defaults delete` a key boom introduced.
       // Recorded before the write, like the file resources: a crash mid-write is still
       // reversible (restoring the unchanged prior is a harmless no-op).
       const undo: Extract<UndoToken, { kind: "osx" }> = {

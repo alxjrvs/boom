@@ -1,13 +1,12 @@
 // Pluggable secret backends. The `secret` resource used to be hardwired to 1Password (`op`);
-// this file is the seam that lets a boomfile source a secret's plaintext from 1Password OR a
-// plain env var OR `pass` OR an age/sops-encrypted file. Everything the resource does with the
-// resolved plaintext (0600 write, never-journal-the-plaintext, remove-only undo, keep-out-of-
-// manifest) is backend-agnostic and lives in resources/secret.ts — a backend's ONLY job is
-// `ref`/`template` → plaintext.
+// this file is the seam that lets a boomfile source a secret's plaintext from somewhere else.
+// Two backends exist: 1Password (`op`) and the process environment (`env:`). Everything the
+// resource does with the resolved plaintext (0600 write, never-journal-the-plaintext,
+// remove-only undo, keep-out-of-manifest) is backend-agnostic and lives in resources/secret.ts
+// — a backend's ONLY job is `ref`/`template` → plaintext.
 //
-// Backend selection: an explicit `backend = "…"` wins; otherwise it's inferred from the ref's
-// Two backends: 1Password (`op`) and the process environment (`env:`)
-// untouched. See pickBackend().
+// Backend selection: an explicit `backend = "…"` wins; otherwise it is inferred from the ref's
+// scheme. See getBackend() at the bottom.
 import { join } from "node:path";
 import type { Secret } from "../../config/schema.ts";
 import type { Env } from "../../lib/paths.ts";
@@ -31,10 +30,10 @@ interface SecretBackend {
   // Short id — used in spinner + freshness messages.
   readonly name: string;
   // Human label for the underlying tool, folded into the "not installed" failure so a missing
-  // backend names the thing to install (e.g. "pass not installed").
+  // backend names the thing to install (e.g. "op (1Password CLI) not installed").
   readonly tool: string;
-  // Is the backend usable on this machine? (op needs its CLI on PATH; env never does
-  // does — that's the CI / airgapped / no-vault path.)
+  // Is the backend usable on this machine? (op needs its CLI on PATH; env never does —
+  // that's the CI / airgapped / no-vault path.)
   available(env: Env): boolean;
   // Resolve the secret's plaintext. Never logs or returns anything but the value on success.
   read(entry: SecretSource, ctx: SecretCtx): Promise<SecretResult>;
@@ -80,10 +79,6 @@ const op: SecretBackend = {
 
 const BACKENDS: Record<Secret["backend"] & string, SecretBackend> = { op, env };
 
-// One backend, so there is nothing to infer: an `op://…` ref, a bare ref, and an explicit
-// `backend = "op"` all resolve the same way. The seam (`SecretBackend`, `BACKENDS`, this
-// function) is deliberately kept rather than inlined — it is what a second backend plugs into,
-// and it costs a table of one.
 // Infer from the ref scheme when a boomfile doesn't state one, so `op://…` and `env:…` route
 // themselves and no config needs a `backend =` key. A bare ref stays 1Password, which is the
 // back-compat default every existing boomfile relies on.

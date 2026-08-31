@@ -75,8 +75,8 @@ export async function reconcileRun(entry: Run, ctx: ReconcileCtx): Promise<void>
     ctx.report.skip(`${stepLabel(entry.cmd)} — skipped (${unlessSkip})`);
     return;
   }
-  // Journal the shell step as a non-reversible side effect so rollback can warn that
-  // re-running it won't be undone. Only a mutating sync carries a journal — and only the
+  // Journal the shell step as a non-reversible side effect, so the run's record shows what
+  // undoing its file mutations would NOT undo. Only a mutating sync carries a journal — and only the
   // mutation: a guard that skipped the step is a condition, not a side effect, so it records
   // nothing (both guards return above this line).
   if (ctx.verb === "sync") await ctx.journal?.side("run", entry.cmd);

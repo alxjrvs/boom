@@ -16,10 +16,10 @@
 // override, a `.DS_Store` policy — anywhere the fix is "this must not be here" rather than
 // "this must say X".
 //
-// REMOVAL GOES THROUGH THE JOURNAL, so the file lands in the run's backup tree and
-// `boom rollback` puts it back. That is the difference between this and a `run` step calling
-// `rm`: the shell step destroys, this one displaces. A user who did want that file gets it
-// back with one command rather than from memory.
+// REMOVAL GOES THROUGH THE JOURNAL, so the file lands in the run's backup tree with a row
+// naming where it went. That is the difference between this and a `run` step calling `rm`:
+// the shell step destroys, this one displaces. A user who did want that file can still get it
+// back out of `backups/<run-id>/` rather than from memory.
 //
 // UNINSTALL IS A NO-OP, deliberately. boom did not create this file and does not own it;
 // removing someone else's file during teardown would be boom taking a parting shot at a
@@ -66,7 +66,7 @@ export async function reconcileAbsent(entry: Absent, ctx: ReconcileCtx): Promise
     return;
   }
 
-  // Displaced into the backup tree rather than unlinked, so `boom rollback` restores it.
+  // Displaced into the backup tree rather than unlinked, so the file is recoverable.
   await journalRemove("absent", path, ctx, entry.recursive ?? false);
   report.ok(`${disp} removed`);
 }

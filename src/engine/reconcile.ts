@@ -1,6 +1,6 @@
 // The reconcile core: load + validate the config, run each section under a verb, reap
 // orphaned links, and return the exit code (verify: 0/2/1; mutating verbs: 0/1). For
-// sync it opens a transaction journal (+ backups) so the run is rollback-able and
+// sync it opens a transaction journal (+ backups) so the run is recoverable and
 // resumable, and persists the manifest of owned destinations.
 import { join } from "node:path";
 import { type Composition, composeConfig } from "../config/compose.ts";
@@ -78,9 +78,9 @@ async function reapOrphans(ctx: ReconcileCtx, prior: readonly ManifestEntry[]): 
     if (ctx.verb === "verify") ctx.report.warn(`${disp} ${why} — boom source --fix to reap`);
     else if (ctx.dryRun) ctx.report.note(`would reap ${disp}`);
     else {
-      // Same transaction as every other mutation here: journaled with a backup, so
-      // `boom rollback` can restore a reaped file instead of the deletion being a
-      // silent, un-undoable side effect outside the run's safety net.
+      // Same transaction as every other mutation here: journaled with a backup, so a reaped
+      // file lands in the run's backup tree with a row naming it, instead of the deletion
+      // being a silent, un-undoable side effect outside the run's safety net.
       await journalRemove("reap", dst, ctx);
       ctx.report.ok(`reaped orphan ${disp}`);
     }
@@ -196,8 +196,8 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
     let backupRoot: string | undefined;
     // `writes`, not `mutating`: uninstall is the most destructive verb boom has and it used to
     // run with NO journal and NO backup tree, so every removal was unrecorded and permanent —
-    // `rollback` afterwards read the previous *sync's* run and could not name, let alone undo,
-    // anything the teardown deleted. Nothing about the transaction machinery is sync-specific;
+    // the only run on record afterwards was the previous *sync's*, which could not name, let
+    // alone recover, anything the teardown deleted. Nothing about the machinery is sync-specific;
     // it was only ever gated that way. Resources that already journal their removals (systemd's
     // uninstall arm writes intent/displace/done verbatim) start working the moment the envelope
     // exists — their `ctx.journal?.` calls were silently no-oping.
@@ -205,15 +205,15 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
       let runId = newRunId();
       // --resume continues INTO the interrupted run — reuse its id and backup dir — rather
       // than opening a fresh run. A fresh run would leave the interrupted pass's displaced
-      // originals attached to the OLD run's rows: invisible to `rollback` (which reads the
-      // latest run) and reapable by prune. Only an uncommitted (genuinely interrupted) run
+      // originals attached to the OLD run's rows: invisible to every reader that takes the
+      // latest run, and reapable by prune. Only an uncommitted (genuinely interrupted) run
       // is resumable; a committed one has nothing to resume, so fall through to a new run.
       // Re-application itself needs no journal-based skip list: reconcile is naturally
       // idempotent (an already-correct link/copy is skipped by the reality checks in
       // filesystem.ts), so resume just re-runs and only touches what isn't already in place.
       // Sync only: `--resume` continues an interrupted *sync*. An uninstall must never adopt a
-      // prior sync's run id, or its removals would be appended to that run's rows and rollback
-      // would replay a single run that both created and destroyed the same destinations.
+      // prior sync's run id, or its removals would be appended to that run's rows, leaving one
+      // run that claims to have both created and destroyed the same destinations.
       if (opts.resume && verb === "sync") {
         const prior = await readRun(ctx.env);
         if (prior && !prior.committed) runId = prior.runId;

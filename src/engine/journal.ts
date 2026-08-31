@@ -1,8 +1,9 @@
 // The sync transaction journal, backed by bun:sqlite (db.ts). Each mutation writes an
 // `intent` then a `done` (with an undo token); a clean run marks the run `committed`.
-// rollback replays `done` rows in reverse; --resume skips destinations already done. Each
-// row commits atomically (WAL), so an interrupted run leaves whole rows — no torn-line
-// recovery hazard the old NDJSON log had.
+// `--resume` skips destinations already done, and every row names where the original it
+// displaced was put, so nothing an overwrite replaced is destroyed. Each row commits
+// atomically (WAL), so an interrupted run leaves whole rows — no torn-line recovery hazard
+// the old NDJSON log had.
 import type { Database } from "bun:sqlite";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -13,12 +14,12 @@ import type { ReconcileCtx } from "./types.ts";
 
 // How to reverse one mutation: remove what we created, rmdir a directory we created, restore a
 // backed-up file, or — for the one non-file effect — re-apply a macOS default's prior value
-// (`prior: null` means the key was unset, so rollback deletes it). Timer plists roll back as
+// (`prior: null` means the key was unset, so `uninstall` deletes it). Timer plists are undone as
 // ordinary file writes (the next reconcile re-settles their launchctl state), so they need no
 // dedicated kind.
 //
 // `rmdir` exists because reversing a `mkdir` with `rm -rf` is the one undo that can destroy data
-// boom never touched: by rollback time the user may have filled the directory boom created.
+// boom never touched: by undo time the user may have filled the directory boom created.
 // rmdir(2) refuses a non-empty directory, so the failure mode is a report, not a deletion.
 export type UndoToken =
   | { kind: "remove" }
@@ -28,7 +29,7 @@ export type UndoToken =
 
 // Displace whatever currently sits at `dst` so a create can take its place, and return how
 // to reverse it. With a backup root, move the existing file into the run's backup tree
-// (rollback restores it); without one, remove it (rollback just deletes what we create).
+// (recoverable); without one, remove it (the undo is just to delete what we create).
 // This is the transaction's most safety-critical branch — one copy here instead of the four
 // subtly-different hand-inlined versions it replaced across reconcile.ts + filesystem.ts.
 // Assumes `dst` exists (every mutating caller has already confirmed a conflict); `recursive`
@@ -48,7 +49,7 @@ export async function displace(
 // token back and let the caller write `done` *after* the write "succeeded", which sounds
 // careful and is the opposite: `displace` has already moved the prior file into the backup
 // tree, so a crash between the two orphans it with no row pointing at it — unrecoverable,
-// because rollback only knows what the journal names. Undo-before-create is the invariant
+// because the backup tree is only navigable through what the journal names. Undo-before-create is the invariant
 // filesystem.ts:84-88 states verbatim; this is the one helper every other writer routes through.
 //
 // The no-journal guard lives HERE, not at the call sites: `displace` with an undefined
@@ -108,8 +109,8 @@ interface DoneRecord {
   undo: UndoToken;
 }
 
-// A non-reversible side effect (a `run` step or `hook`) — recorded so rollback can warn the
-// operator that replaying the run cannot undo it.
+// A non-reversible side effect (a `run` step or `hook`) — recorded so a reader of the run can
+// see that undoing the file mutations does not undo everything the run did.
 interface SideRecord {
   op: string;
   label: string;
@@ -140,8 +141,8 @@ export class Journal {
   // `plan` is the undo token this mutation is ABOUT to become — written now, before the
   // displace, so the intent row is self-sufficient. Without it an intent recorded only "we
   // were about to touch this path": `displace` had already moved the original into the backup
-  // tree, and a crash before `done` left that file with no row naming where it went, so
-  // rollback restored nothing and reported a clean run. The token is knowable in advance
+  // tree, and a crash before `done` left that file with no row naming where it went, so the
+  // run read back as clean with the original unrecoverable. The token is knowable in advance
   // because `backupTo`'s destination is a pure `join(backupRoot, dst)`.
   intent(op: string, dst: string, plan?: UndoToken): Promise<void> {
     this.db.run("INSERT INTO ops (run_id, t, op, dst, undo) VALUES (?, 'intent', ?, ?, ?)", [
@@ -167,7 +168,7 @@ export class Journal {
   }
   // Mark the run cleanly committed. Split from close() so the caller only sets this when the
   // run actually succeeded (zero failures) — a run that reached the end with failed items
-  // stays committed=0, which is exactly what `rollback --list` reads as "interrupted /
+  // stays committed=0, which is exactly what a run listing reads as "interrupted /
   // needs attention" (a half-applied run being labelled clean was the old trap).
   markCommitted(): void {
     this.db.run("UPDATE runs SET committed = 1 WHERE run_id = ?", [this.runId]);
@@ -182,38 +183,21 @@ export class Journal {
   }
 }
 
-// Label a run as a named checkpoint (or clear it with null). Used by `boom checkpoint <name>`:
-// a labelled run survives pruning and is the target `boom rollback --to <name>` resolves.
-export async function setRunLabel(env: Env, runId: string, label: string | null): Promise<void> {
-  withDb(env, (db) => db.run("UPDATE runs SET label = ? WHERE run_id = ?", [label, runId]));
-}
-
-// Resolve a checkpoint name to its run id (or undefined). The lookup `boom rollback --to <name>`
-// and `boom checkpoint` (to detect a name already in use) go through.
-export async function findRunByLabel(env: Env, label: string): Promise<string | undefined> {
-  return withDb(env, (db) => {
-    const row = db.query("SELECT run_id FROM runs WHERE label = ?").get(label) as
-      | { run_id: string }
-      | undefined;
-    return row?.run_id;
-  });
-}
-
-// Keep the last `keep` runs; delete older runs (rows + their backup trees). Rollback only
-// ever reads the most recent run, so unbounded history is pure accumulation. Runs are
-// deleted oldest-first — run ids sort chronologically. Called after a clean commit.
+// Keep the last `keep` runs; delete older runs (rows + their backup trees). Only the most
+// recent run is ever read back (`--resume`), so unbounded history is pure accumulation. Runs
+// are deleted oldest-first — run ids sort chronologically. Called after a clean commit.
 export async function pruneRuns(env: Env, keep = 10): Promise<void> {
   const stale = withDb(env, (db) => {
-    // Labelled runs (checkpoints) are exempt from the count bound entirely — that's the whole
-    // point of a checkpoint, a known-good state that survives however many syncs run after it.
-    // Only unlabelled history is pruned, oldest-first, down to the kept window.
+    // A run carrying a `label` is exempt from the count bound entirely; nothing sets one today
+    // (the column outlives the verb that wrote it — see db.ts), so in practice every run is
+    // unlabelled and history is pruned oldest-first down to the kept window.
     const ids = (
       db.query("SELECT run_id FROM runs WHERE label IS NULL ORDER BY run_id").all() as { run_id: string }[]
     ).map((r) => r.run_id);
     // Pure count-bound (drop oldest beyond `keep`), committed or not — this bounds growth
-    // even when a run fails every sync. The most-recent run (the only one `--resume` or an
-    // untargeted `rollback` ever reaches) is always inside the kept window, so its backups
-    // are never reaped out from under it; older interrupted runs are superseded history.
+    // even when a run fails every sync. The most-recent run (the only one `--resume` ever
+    // reaches) is always inside the kept window, so its backups are never reaped out from
+    // under it; older interrupted runs are superseded history.
     const drop = ids.slice(0, Math.max(0, ids.length - keep));
     const delRun = db.query("DELETE FROM runs WHERE run_id = ?");
     const delOps = db.query("DELETE FROM ops WHERE run_id = ?");
@@ -223,11 +207,11 @@ export async function pruneRuns(env: Env, keep = 10): Promise<void> {
       delSides.run(id);
       delRun.run(id);
     }
-    // Record how far history was destroyed, in the same callback that destroys it. Deleting the
-    // rows erases the only evidence they existed, so `rollback --to` could not otherwise tell
-    // "there was never a run after this checkpoint" from "the runs after it are unreversible".
-    // The conditional upsert keeps the horizon monotonic (run ids sort chronologically), so a
-    // later prune of *older* rows can never walk it backwards.
+    // Record how far history was destroyed, in the same callback that destroys it: deleting the
+    // rows erases the only evidence they ever existed. No command reads `prune_horizon` today,
+    // but it is the sole record that a run id older than it was pruned rather than never run,
+    // and it costs one row. The conditional upsert keeps the horizon monotonic (run ids sort
+    // chronologically), so a later prune of *older* rows can never walk it backwards.
     const newest = drop.at(-1);
     if (newest !== undefined)
       db.run(
@@ -237,19 +221,6 @@ export async function pruneRuns(env: Env, keep = 10): Promise<void> {
     return drop;
   });
   for (const id of stale) await rm(`${backupsDir(env)}/${id}`, { recursive: true, force: true });
-}
-
-// The newest run id `pruneRuns` has ever deleted, or undefined if nothing was ever pruned.
-// `rollback --to <checkpoint>` reads it to distinguish absent history from destroyed history:
-// a checkpoint older than the horizon can only be rewound partially, and saying so is the
-// difference between a best-effort rewind and a silent one.
-export async function pruneHorizon(env: Env): Promise<string | undefined> {
-  return withDb(env, (db) => {
-    const row = db.query("SELECT value FROM meta WHERE key = 'prune_horizon'").get() as
-      | { value: string }
-      | undefined;
-    return row?.value;
-  });
 }
 
 // The `meta` key under which a macOS default's true pre-boom prior is stashed. The composite
@@ -297,7 +268,7 @@ export async function firstOsxUndo(
 }
 
 // Read a run's `done` + `side` records (the most recent run if `runId` is omitted). done
-// rows come back in insertion order (ORDER BY id), so rollback's reverse replay is correct.
+// rows come back in insertion order (ORDER BY id), so a reader replaying them in reverse is correct.
 export async function readRun(
   env: Env,
   runId?: string,
@@ -322,7 +293,7 @@ export async function readRun(
     // Intents with no matching `done` — the run died in the window between "original displaced
     // into the backup tree" and "row written that says where it went". These used to be
     // invisible (every reader filtered `t = 'done'`), so an interrupted run reported zero ops
-    // and rollback silently restored nothing.
+    // and the displaced original was silently unaccounted for.
     //
     // The completing `done` must come AFTER the intent (`d.id > i.id`), not merely share its
     // (op, dst). Without that, a destination touched twice in one run has its second, genuinely
@@ -347,15 +318,15 @@ export async function readRun(
   });
 }
 
-// One-line summary of a recorded run, for `boom rollback --list`: how many reversible ops
-// it holds, how many non-reversible side effects, and whether it reached a clean committed
-// state (an uncommitted run was interrupted mid-sync).
+// One-line summary of a recorded run: how many reversible ops it holds, how many
+// non-reversible side effects, and whether it reached a clean committed state (an
+// uncommitted run was interrupted mid-sync).
 interface RunSummary {
   readonly runId: string;
   readonly ops: number;
   readonly sides: number;
   readonly committed: boolean;
-  readonly label?: string; // a checkpoint name, when this run was labelled
+  readonly label?: string; // the `runs.label` column, when a run carries one
 }
 
 // Enumerate the retained runs, newest first (run ids sort chronologically).
@@ -367,7 +338,7 @@ export async function listRuns(env: Env): Promise<RunSummary[]> {
       label: string | null;
     }[];
     // `done` rows plus recoverable orphaned intents. Counting only `done` made an interrupted
-    // run — the one case `rollback --list` exists to surface — report "0 op(s)", which reads as
+    // run — the one case a run listing exists to surface — report "0 op(s)", which reads as
     // "nothing to undo" precisely when there is something half-applied to undo.
     const opsN = db.query(
       `SELECT (SELECT COUNT(*) FROM ops WHERE run_id = ?1 AND t = 'done')
