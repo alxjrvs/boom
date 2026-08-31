@@ -270,7 +270,7 @@ const CheckSchema = v.pipe(
 // time, so a machine's secret-bearing config is declared like everything else instead of living
 // out of band. `ref` is a single reference (`op://vault/item/field`, `env:VAR`, `pass:path`, or
 // an encrypted file path); `template` is a repo-relative file whose embedded references are
-// filled in — exactly one is required. `backend` picks the resolver (op/env/pass/age/sops); when
+// filled in — exactly one is required. `backend` picks the resolver (op/env); when
 // absent it's inferred from the ref scheme (`op://`→op, `env:`→env, `pass:`→pass) or a file
 // extension (`.age`→age, `.sops.*`/`.enc`→sops), defaulting to op so every existing `op://…`
 // boomfile keeps working untouched. boom never journals or backs up the plaintext IT renders —
@@ -283,7 +283,7 @@ const SecretSchema = v.pipe(
     dst: v.string(),
     ref: v.optional(v.string()),
     template: v.optional(v.string()),
-    backend: v.optional(v.picklist(["op", "env", "pass", "age", "sops"])),
+    backend: v.optional(v.picklist(["op", "env"])),
     mode: v.optional(ModeSchema),
   }),
   v.check(
