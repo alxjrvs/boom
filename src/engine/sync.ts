@@ -1,18 +1,21 @@
 // Config-repo sync: the pre-reconcile step that keeps a repo-only config fresh.
 // `verify` (and any dry-run) fetches and reports drift without touching the working
-// tree — behind origin, ahead with unpushed commits, or a dirty tree, since those are
-// exactly the states `boom source push` exists to handle and "up to date" must
-// not paper over them. `sync` pulls (rebasing local changes on top via
+// tree — behind origin, ahead with unpushed commits, or a dirty tree, since a clean
+// behind-count alone would otherwise read as "up to date" while local work sits
+// unreported. `sync` pulls (rebasing local changes on top via
 // --autostash, or committing them first with --commit) and report what moved, then
 // reconcile proceeds against whatever's on disk regardless — a failed pull is reported
 // but never blocks reconciling from the last-known-good local state (a rebase conflict
 // is aborted before returning, so "local state" is never left mid-rebase).
 import { readConfigBreadcrumb } from "../config/load.ts";
 import {
+  addAll,
+  commitStaged,
   diffNameOnly,
   fetchOriginAsync,
   hasUpstream,
   headSha,
+  isClean,
   pullRebaseAutostashAsync,
   rebaseAbort,
   repoDrift,
@@ -20,8 +23,27 @@ import {
 } from "../lib/git.ts";
 import type { Env } from "../lib/paths.ts";
 import type { Reporter } from "../lib/reporter.ts";
-import { commitLocalChanges } from "./commit.ts";
 import type { Verb } from "./types.ts";
+
+const DEFAULT_COMMIT_MESSAGE = "boom: local changes";
+
+type CommitOutcome =
+  | { readonly kind: "clean" }
+  | { readonly kind: "committed"; readonly message: string }
+  | { readonly kind: "failed"; readonly stderr: string };
+
+// The `--commit` half: stage and commit whatever is loose in the managed clone before the
+// pull, so local edits land as a real commit replayed on top of the rebase rather than as an
+// autostash. Lived in its own module while `boom source push` shared it; with that verb gone
+// this is its only caller, so it sits next to the pull it modifies.
+function commitLocalChanges(dir: string, env: Env, message?: string): CommitOutcome {
+  if (isClean(dir, env)) return { kind: "clean" };
+  addAll(dir, env);
+  const msg = message ?? DEFAULT_COMMIT_MESSAGE;
+  const result = commitStaged(dir, msg, env);
+  if (result.code !== 0) return { kind: "failed", stderr: result.stderr || "git commit failed" };
+  return { kind: "committed", message: msg };
+}
 
 interface SyncOptions {
   // Commit local changes before pulling instead of the default autostash — so they

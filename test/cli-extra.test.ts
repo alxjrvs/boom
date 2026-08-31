@@ -51,7 +51,11 @@ test("subcommandGroups derives nested routes from the route map", () => {
   const groups = subcommandGroups();
   const source = groups.find((g) => g.parent === "source");
   const names = source?.children.map((c) => c.name) ?? [];
-  for (const sub of ["set", "status", "diff", "push", "reset"]) expect(names).toContain(sub);
+  for (const sub of ["sync", "set"]) expect(names).toContain(sub);
+  // The git-operation verbs removed in 0.33, asserted absent for the same reason the
+  // top-level list above is: completions DERIVE from the route map, so a re-added route
+  // would silently reappear in every derived surface with nothing to catch it.
+  for (const gone of ["status", "diff", "push", "reset"]) expect(names).not.toContain(gone);
   // `code` is gone, so its group must be too. Asserted rather than merely deleted:
   // this is the case that catches the route map and a derived surface drifting
   // apart, and it has to hold in the absence direction as well as the presence one.
@@ -85,7 +89,7 @@ test("skill doc is a SKILL.md with frontmatter naming every command", () => {
   // the safety facts an agent must not miss
   expect(s).toContain("--dry-run");
   expect(s).toContain("--json");
-  expect(s).toContain("source reset --force");
+  expect(s).toContain("boom uninstall");
 });
 
 // The inverse of the case above, and the one that was missing. skill.ts's own header says the

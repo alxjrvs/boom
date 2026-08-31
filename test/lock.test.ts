@@ -45,7 +45,7 @@ test("a truncated/empty lock file (crash mid-write) is reclaimed", async () => {
 
 test("withLock releases the lock on success and on throw", async () => {
   // The shared spelling every mutating entry point now routes through. A body that throws must
-  // still release, or one failed `source reset` wedges every later run behind a stale lock.
+  // still release, or one failed `source set` wedges every later run behind a stale lock.
   const env = await stateEnv();
   await withLock(env, () => Promise.resolve(1));
   acquireLock(env)(); // free after a clean body

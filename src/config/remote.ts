@@ -61,8 +61,8 @@ export function parseRemoteRef(input: string): ParsedRemoteRef {
 // (Re-)clone `refInput` into the managed cache dir and record it as the active
 // config. Re-linking always wipes and re-clones — the cache dir is never meant to
 // hold precious work, so refuse instead of silently clobbering one that has any
-// (uncommitted changes, or commits made but not yet pushed) — `boom source push` (to keep
-// it) or `boom source reset` (to discard it) first, then re-link.
+// (uncommitted changes, or commits made but not yet pushed) — push it (to keep it) or
+// `git reset --hard` it (to discard it) first, then re-link.
 export async function linkRemoteConfigRepo(env: Env, refInput: string): Promise<string> {
   const { url, ref } = parseRemoteRef(refInput);
   const dest = configRepoCacheDir(env);
@@ -79,7 +79,7 @@ export async function linkRemoteConfigRepo(env: Env, refInput: string): Promise<
 
   if ((await pathExists(dest)) && (!isClean(dest, env) || hasUnpushedCommits(dest, env))) {
     throw new BoomConfigError(
-      `${dest} has uncommitted or unpushed changes — \`boom source push\` or \`boom source reset\` before re-linking`,
+      `${dest} has uncommitted or unpushed changes — push or discard them (\`git -C ${dest} status\`) before re-linking`,
     );
   }
 

@@ -13,6 +13,9 @@ to TypeScript; this document is the design of record for that engine.
 This document describes the **current** design, not how it got here. When a release changes
 behavior a running machine depends on, the upgrade path is a migration note beside it:
 
+- [`docs/MIGRATING-0.33.md`](https://github.com/alxjrvs/boom/blob/main/docs/MIGRATING-0.33.md) —
+  the four config-repo git subcommands (`source status|diff|push|reset`) removed in favor of
+  running git against the clone directly. No config edit is required.
 - [`docs/MIGRATING-0.32.md`](https://github.com/alxjrvs/boom/blob/main/docs/MIGRATING-0.32.md) —
   `systemd`, seven package managers and three secret backends removed. Unlike 0.31 these ARE
   load-time errors: a boomfile naming one fails to parse until it is edited.
@@ -50,9 +53,7 @@ A `boom` invocation does one of two things:
    state against its remote first (`src/engine/sync.ts`): by default `pull --rebase
    --autostash`s, so any uncommitted local edits ride along and land back on top;
    `source --commit` commits local edits first instead of autostashing them, so
-   they replay as a real commit on the rebase. `boom source push` commits local
-   config-repo changes and opens a pull request for them (`src/engine/commit.ts`), sharing its
-   commit logic with `source --commit` so the default message/behavior can't drift.
+   they replay as a real commit on the rebase (`-m` names the message).
 
 2. **Discovered subcommands** — built-ins are the `@stricli` route map, in `src/cli.ts` order:
    <!-- commands:begin -->
@@ -102,8 +103,7 @@ never blocks reconciling from the last-known-good local clone.
 
 The pull is `git pull --rebase --autostash` (git stashes any dirty tracked changes
 before rebasing and restores them after, including automatically on an aborted rebase);
-`source --commit` commits local edits first instead of autostashing them
-(`src/engine/commit.ts`, shared with `boom source push`).
+`source --commit` commits local edits first instead of autostashing them.
 
 A rebase conflict aborts cleanly (`git rebase --abort`, which also restores the
 autostash) and is reported as a failure, but reconcile still proceeds from the local
@@ -113,40 +113,16 @@ A pinned `@ref` (tag/sha, detached HEAD) is reported as static rather than check
 drift. Auth is whatever git/SSH already works in the user's shell — no boom-side
 credential handling.
 
-The config-repo git verbs live under one namespace: `boom source status` is the read-only
-"how does my clone stand against origin?" (behind / unpushed / dirty, exit 0 in sync / 2
-on drift) — the same summary the `verify` path shows, over a shared `repoDrift` helper, but
-without also walking the whole machine; `boom source push` commits any local
-config-repo changes and gets them upstream (`-m`/`--message` sets the commit message).
+Operating that clone is git's job. boom clones it, reconciles from it, and *reports* its
+drift (`verify` must, to answer "am I in sync?"), but it does not wrap git: the
+`boom source status|diff|push|reset` verbs were removed in 0.33 because each was a
+second, weaker spelling of a command the user already has, against a path `boom doctor`
+already prints — `git -C <dir> status -sb`, `diff HEAD`, `reset --hard origin/<branch>`,
+`commit && push`. See `docs/MIGRATING-0.33.md`.
 
-`push` takes the safe route by default. On a GitHub clone sitting on its default branch it
-publishes HEAD as `boom/<subject-slug>-<sha>` and opens a pull request against that branch
-rather than pushing it directly — a direct push is refused outright by any repo that
-protects its default branch, and a repo that runs CI on its config wants that CI to have
-seen the change before it is live. `--direct` forces the historical plain push, and boom
-falls back to it on its own — saying why — when there is no PR to open: a non-GitHub
-origin, no `gh` on PATH, an unset `origin/HEAD`, or a clone already checked out on a
-feature branch. `--merge` additionally asks GitHub to land the PR once its required checks
-pass, which is a request rather than a merge: nothing unverified gets in.
-
-The clone's working tree never moves in PR mode. That tree is the target of every dotfile
-symlink on the machine, so checking out the PR branch would swap the user's live config out
-from under them until it merged; boom pushes the *ref* (`git push origin HEAD:refs/heads/…`)
-and leaves HEAD on the default branch, one commit ahead of origin. The next `sync` rebases,
-recognizes its own patch in the squashed merge, and drops it. The branch name embeds HEAD's
-short sha, so it is derived from the commit rather than a clock — re-running after a failed
-`gh` call reuses the ref it already pushed instead of opening a second near-identical PR,
-and the push is never forced.
-
-`boom source reset` is the
-other direction — fetches, then hard-resets to the upstream tip (or the pinned `@ref`
-for a detached clone) and clears untracked files, discarding local changes back to what
-a fresh re-clone would leave. Like `linkRemoteConfigRepo`, `boom source reset` refuses
-to discard commits no remote has (listing them) unless `--force` is passed — uncommitted
-changes alone don't need `--force`, only unpushed commits do. `linkRemoteConfigRepo`
-itself refuses to wipe a managed clone that has either uncommitted changes or commits
-not yet pushed (checked separately — `git status --porcelain` never reports
-ahead-of-upstream) — `boom source push` or `boom source reset` first, then re-link.
+`linkRemoteConfigRepo` still refuses to wipe a managed clone that has either uncommitted
+changes or commits not yet pushed (checked separately — `git status --porcelain` never
+reports ahead-of-upstream): push or discard that work first, then re-link.
 
 ### Config is typed TOML, not code
 
@@ -421,19 +397,14 @@ src/
                            discovered user cmd, else Stricli — no hardcoded cases)
   commands/                verify/uninstall + source (reconcile.ts; source runs the
                            sync verb — `--fix` overwrites conflicts — and namespaces
-                           the set/status/diff/push/reset
-                           route map — set is the bootstrap),
+                           the sync/set route map — set is the bootstrap),
                            upgrade, doctor (--config folds in the former validate), skill;
                            catalog.ts (names+briefs + nested subcommands derived from the
                            route map, for `boom skill`); flags.ts (shared parsers)
   engine/
     reconcile.ts           the one verb loop
     sync.ts                pre-reconcile config-repo fetch/pull(--rebase --autostash)-and-report
-    commit.ts              commit local config-repo changes (shared by `boom source push` + source --commit)
-    diff.ts                boom source diff (read-only: working-tree diff vs HEAD + untracked)
-    status.ts              boom source status (read-only drift vs origin, shared reportRepoDrift)
-    push.ts reset.ts       boom source push / boom source reset
-    pr.ts                  the GitHub half of source push (slug, branch name, gh)
+                           (+ the `--commit` half: commit local edits instead of autostashing)
     registry.ts            data-driven resource table (phase order) + finalize hooks
     resources/             link · copy · tmpl · secret · dir · pkg · osx · launchd · run · check · hook
     secrets/backends.ts    pluggable secret backends (op · env)
