@@ -1,5 +1,5 @@
-// Coverage for the commands added alongside the watchtower removal: completions, man,
-// the shared command catalog, and the read-only doctor / validate engines.
+// Coverage for the shared command catalog and the read-only doctor / validate engines.
+// The completions and man cases went with those commands.
 import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -7,8 +7,6 @@ import { join } from "node:path";
 import { run } from "@stricli/core";
 import { app } from "../src/cli.ts";
 import { commandList, commandNames, subcommandGroups } from "../src/commands/catalog.ts";
-import { completionScript } from "../src/commands/completions.ts";
-import { manPage } from "../src/commands/man.ts";
 import type { BoomContext } from "../src/context.ts";
 import { doctor } from "../src/engine/doctor.ts";
 import { skillDoc } from "../src/engine/skill.ts";
@@ -33,56 +31,31 @@ function ctxFor(env: Record<string, string | undefined>, cwd: string): { ctx: Bo
 test("command list (derived from the route map) is unique and includes the core verbs", () => {
   const names = commandNames();
   expect(new Set(names).size).toBe(names.length);
-  // mcp is a real route now, so it must appear in the derived list like any other.
-  for (const v of ["verify", "uninstall", "source", "mcp", "doctor"]) {
+  for (const v of ["verify", "uninstall", "source", "doctor"]) {
     expect(names).toContain(v);
   }
   // `validate` was folded into `doctor --config`; it must not resurface as a command.
   expect(names).not.toContain("watchtower");
   expect(names).not.toContain("validate");
+  // Removed verbs, asserted absent rather than merely un-mentioned: the catalog DERIVES this
+  // list from the route map, so a re-added route would silently reappear in every derived
+  // surface (the skill most of all) with nothing to catch it.
+  for (const gone of ["code", "mcp", "completions", "man", "edit", "plan"]) {
+    expect(names).not.toContain(gone);
+  }
 });
 
 // ---- completions ------------------------------------------------------------
-
-test("bash completion lists every command and wires the function", () => {
-  const s = completionScript("bash");
-  expect(s).toContain("complete -F _boom boom");
-  for (const name of commandNames()) expect(s).toContain(name);
-});
-
-test("zsh completion is a #compdef with described commands", () => {
-  const s = completionScript("zsh");
-  expect(s.startsWith("#compdef boom")).toBe(true);
-  expect(s).toContain("_describe");
-  // `verify`'s brief has no apostrophe, so it round-trips verbatim into the zsh literal.
-  expect(s).toContain(`'verify:${commandList().find((c) => c.name === "verify")?.brief}'`);
-  // …while `doctor`'s brief ("boom's own preconditions") exercises the apostrophe escape:
-  // a `'` is closed, escaped as `\'`, and reopened for the single-quoted zsh literal.
-  expect(s).toContain("'\\''");
-});
-
-test("fish completion emits a per-command line", () => {
-  const s = completionScript("fish");
-  expect(s).toContain("complete -c boom -f");
-  expect(s).toContain("-a 'verify'");
-});
 
 test("subcommandGroups derives nested routes from the route map", () => {
   const groups = subcommandGroups();
   const source = groups.find((g) => g.parent === "source");
   const names = source?.children.map((c) => c.name) ?? [];
   for (const sub of ["set", "status", "diff", "push", "reset"]) expect(names).toContain(sub);
-  expect(groups.find((g) => g.parent === "code")?.children.map((c) => c.name)).toContain("claude");
-});
-
-test("completions complete the second level (source|code|mcp subcommands)", () => {
-  const bash = completionScript("bash");
-  expect(bash).toContain("COMP_WORDS[1]"); // dispatches on the namespace word
-  expect(bash).toContain("status"); // a source subcommand reachable only via the 2nd level
-  const fish = completionScript("fish");
-  expect(fish).toContain("__fish_seen_subcommand_from source");
-  const zsh = completionScript("zsh");
-  expect(zsh).toContain("source subcommand");
+  // `code` is gone, so its group must be too. Asserted rather than merely deleted:
+  // this is the case that catches the route map and a derived surface drifting
+  // apart, and it has to hold in the absence direction as well as the presence one.
+  expect(groups.find((g) => g.parent === "code")).toBeUndefined();
 });
 
 // ---- color / command detection ----------------------------------------------
@@ -100,31 +73,7 @@ test("hasCommand resolves via PATH (Bun.which), not a shell", () => {
   expect(hasCommand("definitely-not-a-real-binary-xyz", process.env)).toBe(false);
 });
 
-test("completions include flag names derived from the route map", () => {
-  for (const shell of ["bash", "zsh", "fish"] as const) {
-    const s = completionScript(shell);
-    // `dry-run`/`json` are flags, not command names — so their presence proves flag
-    // derivation, and it can't be confused with a command word.
-    expect(s).toContain("dry-run");
-    expect(s).toContain("json");
-  }
-});
-
 // ---- man ---------------------------------------------------------------------
-
-test("man page is valid-ish roff naming every command", () => {
-  const m = manPage("9.9.9");
-  expect(m).toContain('.TH BOOM 1 "" "boom 9.9.9"');
-  expect(m).toContain(".SH COMMANDS");
-  for (const c of commandList()) expect(m).toContain(`.B ${c.name}`);
-});
-
-test("man page documents nested subcommands and their flags", () => {
-  const m = manPage("9.9.9");
-  expect(m).toContain(".SH SUBCOMMANDS");
-  expect(m).toContain(".B source sync"); // a nested route, now documented
-  expect(m).toContain("--json"); // a flag, now documented under its command
-});
 
 // ---- skill -------------------------------------------------------------------
 

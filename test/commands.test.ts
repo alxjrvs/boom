@@ -1,10 +1,8 @@
-// M5: code-dir resolution + repo crawl, and discovered user commands.
+// Discovered user commands, and the `boom source set` remote-clone core.
 import { expect, test } from "bun:test";
-import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { run } from "@stricli/core";
-import { app } from "../src/cli.ts";
 import {
   BoomConfigError,
   configRepoCacheDir,
@@ -13,15 +11,6 @@ import {
 } from "../src/config/load.ts";
 import { linkRemoteConfigRepo } from "../src/config/remote.ts";
 import type { BoomContext } from "../src/context.ts";
-import {
-  agentsFarmDir,
-  findRepos,
-  materializeAgentsFarm,
-  planAgentsFarm,
-  pruneFarmProject,
-  requireCodeDir,
-  resolveCodeDir,
-} from "../src/engine/code.ts";
 import { runUserCommand } from "../src/engine/discovery.ts";
 import { captureArgv } from "../src/lib/proc.ts";
 
@@ -70,144 +59,8 @@ function ctxFor(
   };
 }
 
-test("resolveCodeDir honors BOOM_CODE", async () => {
-  const dir = await base();
-  expect(await resolveCodeDir({ BOOM_CODE: dir })).toBe(dir);
-});
-
-test("resolveCodeDir reads the breadcrumb `boom code init` writes", async () => {
-  const stateHome = await base();
-  const codeDir = await base();
-  const env = { XDG_STATE_HOME: stateHome };
-  // Mirror what `boom code init <codeDir>` records.
-  await mkdir(join(stateHome, "boom"), { recursive: true });
-  await writeFile(join(stateHome, "boom", "code"), `${codeDir}\n`);
-  expect(await resolveCodeDir(env)).toBe(codeDir);
-});
-
-// The guard four `boom code` subcommands used to hand-copy. It is the *only* place that error
+// The guard four now-removed `boom code` subcommands used to hand-copy. It is the *only* place that error
 // string lives now, so this pins its wording, its stream and the bail-out contract at once.
-test("requireCodeDir writes one canonical error, sets exit 1, and returns undefined", async () => {
-  let err = "";
-  const stateHome = await base();
-  const ctx = {
-    env: { XDG_STATE_HOME: stateHome, HOME: join(await base(), "nope") },
-    process: { stderr: { write: (s: string) => (err += s) }, exitCode: 0 },
-  } as unknown as BoomContext;
-  expect(await requireCodeDir(ctx)).toBeUndefined();
-  expect(err).toBe("boom code: no code dir — run: boom code init [DIR]\n");
-  expect(ctx.process.exitCode).toBe(1);
-});
-
-test("requireCodeDir returns the resolved dir and leaves the exit code alone", async () => {
-  const dir = await base();
-  const ctx = {
-    env: { BOOM_CODE: dir },
-    process: {
-      stderr: {
-        write: () => {
-          throw new Error("should not write on the happy path");
-        },
-      },
-      exitCode: 0,
-    },
-  } as unknown as BoomContext;
-  expect(await requireCodeDir(ctx)).toBe(dir);
-  expect(ctx.process.exitCode).toBe(0);
-});
-
-test("findRepos finds git repos by the leaf rule, skipping worktrees", async () => {
-  const root = await base();
-  await mkdir(join(root, "alpha/.git"), { recursive: true });
-  await mkdir(join(root, "nested/beta/.git"), { recursive: true });
-  await mkdir(join(root, "gamma/.claude/worktrees/wt/.git"), { recursive: true });
-  await mkdir(join(root, "gamma/.git"), { recursive: true });
-  const repos = await findRepos(root);
-  expect(repos).toContain(join(root, "alpha"));
-  expect(repos).toContain(join(root, "nested/beta"));
-  expect(repos).toContain(join(root, "gamma"));
-  // the worktree under gamma is never descended into (gamma is a leaf)
-  expect(repos.some((r) => r.includes(".claude/worktrees"))).toBe(false);
-});
-
-test("findRepos skips Legacy folders entirely", async () => {
-  const root = await base();
-  await mkdir(join(root, "Active/repo/.git"), { recursive: true });
-  // A stray `git init` shell at the grouping level plus the real repo nested beneath:
-  // skipping Legacy drops both, rather than linking the empty shell.
-  await mkdir(join(root, "Legacy/Navi/.git"), { recursive: true });
-  await mkdir(join(root, "Legacy/Navi/real-app/.git"), { recursive: true });
-  const repos = await findRepos(root);
-  expect(repos).toEqual([join(root, "Active/repo")]);
-  expect(repos.some((r) => r.includes("Legacy"))).toBe(false);
-});
-
-test("BOOM_CODE_SKIP_DIRS replaces the default skip list", async () => {
-  // `legacy` is one person's directory convention shipped as a default, not a universal truth —
-  // someone whose archive shelf is called `Attic` (or who wants everything crawled) can say so.
-  const root = await base();
-  await mkdir(join(root, "Attic/old/.git"), { recursive: true });
-  await mkdir(join(root, "Legacy/repo/.git"), { recursive: true });
-
-  const custom = await findRepos(root, { BOOM_CODE_SKIP_DIRS: "attic" });
-  expect(custom).toEqual([join(root, "Legacy/repo")]); // Attic skipped, Legacy no longer is
-
-  const all = await findRepos(root, { BOOM_CODE_SKIP_DIRS: "" });
-  expect(all.length).toBe(2); // empty value crawls everything
-});
-
-test("planAgentsFarm flattens nested repos to basenames and flags collisions", async () => {
-  const root = await base();
-  await mkdir(join(root, "OrgA/widget/.git"), { recursive: true });
-  await mkdir(join(root, "OrgA/gadget/.git"), { recursive: true });
-  await mkdir(join(root, "OrgB/widget/.git"), { recursive: true }); // basename collides with OrgA/widget
-  const { links, collisions } = await planAgentsFarm(root);
-  // OrgA sorts before OrgB, so OrgA/widget wins the name; OrgB/widget is the collision.
-  expect(links.map((l) => l.name).sort()).toEqual(["gadget", "widget"]);
-  expect(links.find((l) => l.name === "widget")?.target).toBe(join(root, "OrgA/widget"));
-  expect(collisions.map((c) => c.target)).toEqual([join(root, "OrgB/widget")]);
-});
-
-test("materializeAgentsFarm symlinks repos into ~/.local/code, resolving to .git", async () => {
-  const root = await base();
-  await mkdir(join(root, "OrgA/widget/.git"), { recursive: true });
-  const home = await base();
-  const farm = await materializeAgentsFarm({ HOME: home }, (await planAgentsFarm(root)).links);
-  // The farm is the short, memorable ~/.local/code (not buried in the state dir).
-  expect(farm).toBe(join(home, ".local", "code"));
-  // stat (not lstat) follows the symlink, mirroring how `claude agents` detects repos.
-  expect((await stat(join(farm, "widget", ".git"))).isDirectory()).toBe(true);
-});
-
-test("pruneFarmProject drops the ghost farm entry but leaves other projects intact", async () => {
-  const home = await base();
-  const farm = agentsFarmDir({ HOME: home });
-  const config = join(home, ".claude.json");
-  // Mirror ~/.claude.json after `claude agents` registered the farm as a project.
-  await writeFile(
-    config,
-    JSON.stringify(
-      { numStartups: 7, projects: { [farm]: { foo: 1 }, "/Users/x/Code/real": { bar: 2 } } },
-      null,
-      2,
-    ),
-  );
-  expect(await pruneFarmProject({ HOME: home }, farm)).toBe(true);
-  const after = JSON.parse(await readFile(config, "utf8"));
-  expect(after.projects[farm]).toBeUndefined();
-  // Sibling projects and top-level keys survive untouched.
-  expect(after.projects["/Users/x/Code/real"]).toEqual({ bar: 2 });
-  expect(after.numStartups).toBe(7);
-  // Idempotent: a second prune finds nothing to remove and reports false.
-  expect(await pruneFarmProject({ HOME: home }, farm)).toBe(false);
-});
-
-test("pruneFarmProject is a no-op when the config is missing or HOME is unset", async () => {
-  const home = await base(); // empty dir, no .claude.json
-  expect(await pruneFarmProject({ HOME: home }, agentsFarmDir({ HOME: home }))).toBe(false);
-  expect(await pruneFarmProject({}, "/anything")).toBe(false);
-});
-
 test("runUserCommand dispatches a config-supplied command", async () => {
   const repo = await base();
   await writeFile(join(repo, "boomfile.toml"), `[[section]]\nname = "x"\n`);
@@ -303,33 +156,4 @@ test("runUserCommand returns undefined for an unknown command", async () => {
   await writeFile(join(repo, "boomfile.toml"), `[[section]]\nname = "x"\n`);
   const { ctx } = ctxFor({ BOOM_CONFIG: repo }, repo);
   expect(await runUserCommand("nope", [], ctx)).toBeUndefined();
-});
-
-// `boom code`'s subcommands computed the 0/2/1 verdict with report.finish() and threw the
-// return away, so `init`/`claude`/`cmux`/`reap` always exited 0 — a warn tier that could never
-// be observed. `code claude` with no `claude` on PATH is the cheapest reachable warn: the farm
-// is materialized, the launch is skipped, and finish() is given a warn tier for exactly that.
-// Under the old code this asserted 0. (`fetch` still overrides finish deliberately — see its
-// comment — and is not covered by this.)
-test("code claude surfaces its warn tier as exit 2 instead of discarding the verdict", async () => {
-  const home = await base();
-  const stateHome = await base();
-  const codeDir = await base();
-  // One repo for the farm to link, so the command reaches the launch branch at all.
-  const repo = join(codeDir, "proj");
-  await mkdir(repo, { recursive: true });
-  Bun.spawnSync(["git", "-C", repo, "init", "-q", "-b", "main"], { stdout: "ignore", stderr: "ignore" });
-  await mkdir(join(stateHome, "boom"), { recursive: true });
-  await writeFile(join(stateHome, "boom", "code"), `${codeDir}\n`);
-
-  // PATH deliberately empty: hasCommand("claude") is false, so the command warns and finishes
-  // rather than handing the terminal to an interactive session.
-  const { ctx, out, code } = ctxFor(
-    { HOME: home, XDG_STATE_HOME: stateHome, PATH: "", NO_COLOR: "1" },
-    codeDir,
-  );
-  await run(app, ["code", "claude"], ctx);
-
-  expect(out()).toContain("claude not found");
-  expect(code()).toBe(2);
 });

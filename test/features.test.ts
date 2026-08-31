@@ -9,19 +9,8 @@ import { app } from "../src/cli.ts";
 import { loadConfig } from "../src/config/load.ts";
 import type { BoomContext } from "../src/context.ts";
 import { doctor } from "../src/engine/doctor.ts";
-import {
-  findRunByLabel,
-  Journal,
-  listRuns,
-  newRunId,
-  pruneRuns,
-  readRun,
-  setRunLabel,
-} from "../src/engine/journal.ts";
-import { boomStatus } from "../src/engine/overview.ts";
-import { boomLock, parseBrewFormulae, readLock, writeLock } from "../src/engine/pinning.ts";
+import { readRun } from "../src/engine/journal.ts";
 import { reconcile } from "../src/engine/reconcile.ts";
-import { checkpoint, rollback, rollbackTo } from "../src/engine/rollback.ts";
 import { linkTarget, pathExists } from "../src/lib/fs.ts";
 import { notifyArgv } from "../src/lib/notify.ts";
 import { backupsDir } from "../src/lib/paths.ts";
@@ -199,22 +188,6 @@ test("secret: a pre-existing foreign file survives the default (skip) sync", asy
   expect((await readRun(sb.env))?.done.some((r) => r.dst === tok)).toBe(false);
 });
 
-test("secret: --fix replaces a foreign file and rollback puts it back", async () => {
-  const sb = await sandbox(SECRET_BOOMFILE, { emptyPath: true });
-  sb.env.MY_SECRET = "s3cr3t-value";
-  const tok = join(sb.home, ".tok");
-  await writeFile(tok, "USER-OWNED");
-  expect(await reconcile("sync", sb.ctx, { linkMode: "overwrite" })).toBe(0);
-  expect(await readFile(tok, "utf8")).toBe("s3cr3t-value");
-  expect(((await stat(tok)).mode & 0o777).toString(8)).toBe("600");
-  const row = (await readRun(sb.env))?.done.find((r) => r.dst === tok);
-  expect(row?.undo.kind).toBe("restore");
-  const from = row?.undo.kind === "restore" ? row.undo.from : "";
-  expect(await readFile(from, "utf8")).toBe("USER-OWNED");
-  expect(await rollback(sb.ctx)).toBe(0);
-  expect(await readFile(tok, "utf8")).toBe("USER-OWNED");
-});
-
 test("secret: a foreign file whose bytes match the secret is not chmod'ed under the default", async () => {
   const sb = await sandbox(SECRET_BOOMFILE, { emptyPath: true });
   sb.env.MY_SECRET = "s3cr3t-value";
@@ -292,131 +265,7 @@ test("overlays: a vars-only overlay loads and its value wins over the base's", a
 
 // --- named checkpoints --------------------------------------------------------------------
 
-test("checkpoints: a labelled run survives pruning and resolves by name", async () => {
-  const sb = await sandbox('[[section]]\nname = "x"\n');
-  const ids: string[] = [];
-  for (let i = 0; i < 5; i++) {
-    const id = newRunId();
-    ids.push(id);
-    new Journal(sb.env, id).close();
-  }
-  const keep = ids[0] as string; // label the OLDEST — it would otherwise be pruned first
-  await setRunLabel(sb.env, keep, "known-good");
-  await pruneRuns(sb.env, 2); // keep 2 unlabelled + all labelled
-  const runs = await listRuns(sb.env);
-  const surviving = runs.map((r) => r.runId);
-  expect(surviving).toContain(keep); // the checkpoint is exempt from the count bound
-  expect(runs.find((r) => r.runId === keep)?.label).toBe("known-good");
-  expect(await findRunByLabel(sb.env, "known-good")).toBe(keep);
-  expect(surviving.length).toBe(3); // 2 newest unlabelled + the 1 labelled
-});
-
-test("rollback --to <checkpoint> reverses runs made AFTER it, keeping the checkpoint state", async () => {
-  const sb = await sandbox('[[section]]\nname = "x"\nlink = [{ src = "a", dst = "~/.a" }]\n');
-  await writeFile(join(sb.repo, "a"), "A\n");
-  expect(await reconcile("sync", sb.ctx, {})).toBe(0); // run 1: creates ~/.a
-  expect(await pathExists(join(sb.home, ".a"))).toBe(true);
-  expect(await checkpoint(sb.ctx, "good")).toBe(0); // labels run 1
-
-  // run 2 adds ~/.b on top of the checkpoint
-  await writeFile(
-    join(sb.repo, "boomfile.toml"),
-    '[[section]]\nname = "x"\nlink = [{ src = "a", dst = "~/.a" }, { src = "b", dst = "~/.b" }]\n',
-  );
-  await writeFile(join(sb.repo, "b"), "B\n");
-  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
-  expect(await pathExists(join(sb.home, ".b"))).toBe(true);
-
-  // Returning to the checkpoint undoes run 2 (~/.b) but leaves the checkpoint's own ~/.a.
-  expect(await rollbackTo(sb.ctx, "good")).toBe(0);
-  expect(await pathExists(join(sb.home, ".b"))).toBe(false);
-  expect(await pathExists(join(sb.home, ".a"))).toBe(true);
-});
-
-test("rollback --to an unknown checkpoint fails cleanly", async () => {
-  const sb = await sandbox('[[section]]\nname = "x"\n');
-  expect(await rollbackTo(sb.ctx, "nope")).toBe(1);
-  expect(sb.out()).toContain("no checkpoint named 'nope'");
-});
-
-test("rollback --to warns and exits 2 when history was pruned past the checkpoint", async () => {
-  const sb = await sandbox('[[section]]\nname = "x"\n');
-  const ids: string[] = [];
-  for (let i = 0; i < 4; i++) {
-    const id = newRunId();
-    ids.push(id);
-    new Journal(sb.env, id).close();
-  }
-  await setRunLabel(sb.env, ids[0] as string, "good"); // the checkpoint, exempt from the count bound
-  await pruneRuns(sb.env, 1); // keeps only the newest unlabelled run — two post-checkpoint runs are gone
-
-  // Reaching the checkpoint is now impossible: the deleted runs' undo records went with them.
-  // Exiting 0 here would tell the operator they are back at 'good' when they are not.
-  expect(await rollbackTo(sb.ctx, "good")).toBe(2);
-  expect(sb.out()).toContain("history was pruned");
-});
-
-test("rollback reports a failed defaults restore instead of ok", async () => {
-  const sb = await sandbox('[[section]]\nname = "x"\n', { emptyPath: true });
-  sb.env.BOOM_OS = "darwin";
-  await fakeBinEmpty(sb.base, "defaults", "exit 1\n"); // every `defaults` invocation fails
-  const j = new Journal(sb.env, newRunId());
-  await j.done("osx", "NSGlobalDomain AppleShowAllExtensions", {
-    kind: "osx",
-    domain: "NSGlobalDomain",
-    key: "AppleShowAllExtensions",
-    type: "bool",
-    prior: "1",
-  });
-  j.close();
-
-  // The spawn's exit code used to go unread, so a machine left un-restored reported `restored …`
-  // and exit 0 — the worst lie a rollback can tell.
-  expect(await rollback(sb.ctx)).toBe(1);
-  expect(sb.out()).toContain("defaults exit 1");
-});
-
 // --- boom.lock ----------------------------------------------------------------------------
-
-test("lock: write + read round-trips, quoting keys that carry @", async () => {
-  const sb = await sandbox('[[section]]\nname = "x"\n');
-  await writeLock(sb.repo, { brew: { ripgrep: "14.1.0" }, mise: { "node@20": "20.11.0" } });
-  const back = await readLock(sb.repo);
-  expect(back?.brew.ripgrep).toBe("14.1.0");
-  expect(back?.mise["node@20"]).toBe("20.11.0");
-});
-
-test("lock --check warns when there is no boom.lock yet", async () => {
-  const sb = await sandbox('[[section]]\nname = "x"\n', { emptyPath: true });
-  expect(await boomLock(sb.ctx, true)).toBe(2);
-  expect(sb.out()).toContain("no boom.lock yet");
-});
-
-test("lock reads single-quoted Brewfile entries, not just double-quoted", () => {
-  // A Brewfile is Ruby, so `brew 'x'` is as valid as `brew "x"`. Matching only double quotes
-  // yielded an EMPTY formula list — which wrote an empty lockfile and made `--check` green
-  // forever, the one failure a drift check must never have.
-  expect(parseBrewFormulae(`brew 'ripgrep'\nbrew "fd"\ntap 'x/y'\ncask "vlc"\n# brew "nope"\n`)).toEqual([
-    "ripgrep",
-    "fd",
-  ]);
-});
-
-test("verify folds boom.lock drift into its own warning tier", async () => {
-  // boom.lock had no reader: its only consumer was a `boom status` line saying the file existed,
-  // so a machine that had drifted off its pins verified clean and you had to remember to run
-  // `boom lock --check` by hand.
-  const sb = await sandbox('[[section]]\nname = "x"\n', { emptyPath: true });
-
-  // No lockfile → verify is silent about pinning and stays clean.
-  expect(await reconcile("verify", sb.ctx, {})).toBe(0);
-  expect(sb.out()).not.toContain("locked");
-
-  // A lockfile naming something that isn't installed is drift verify must surface.
-  await writeLock(sb.repo, { brew: { "definitely-not-installed": "9.9.9" }, mise: {} });
-  expect(await reconcile("verify", sb.ctx, {})).toBe(2);
-  expect(sb.out()).toContain("definitely-not-installed");
-});
 
 // --- drift notifications ------------------------------------------------------------------
 
@@ -427,51 +276,6 @@ test("notifyArgv: platform-correct commands, undefined where boom has no notifie
 });
 
 // --- boom status (the machine dashboard) --------------------------------------------------
-
-test("status: composes config, last-sync, lock and secret health into one report", async () => {
-  // A boomfile that declares packages + a secret, on an empty PATH so op is absent and no
-  // sync has run yet — the dashboard should surface each as its own line without touching the
-  // real machine, and warn (exit 2) on the un-synced + op-missing signals.
-  const sb = await sandbox(
-    '[[section]]\nname = "dev"\npkg = [{ manager = "brew" }]\nsecret = [{ dst = "~/.tok", ref = "op://v/i/f" }]\n',
-    { emptyPath: true },
-  );
-  const rc = await boomStatus(sb.ctx);
-  const out = sb.out();
-  expect(out).toContain("Config");
-  expect(out).toContain("1 section(s)");
-  expect(out).toContain("no sync recorded yet");
-  expect(out).toContain("no boom.lock");
-  expect(out).toContain("secret(s) declared but op"); // op absent under emptyPath
-  expect(rc).toBe(2); // warning tier: un-synced + op missing
-});
-
-test("status: reports a clean last sync and lists checkpoints from the journal", async () => {
-  const sb = await sandbox('[[section]]\nname = "x"\n');
-  // Simulate a committed run + a named checkpoint directly through the journal the dashboard
-  // reads — no resource walk needed to exercise the composition.
-  const j = new Journal(sb.env, newRunId());
-  await j.done("link", join(sb.home, ".x"), { kind: "remove" });
-  j.markCommitted();
-  j.close();
-  await setRunLabel(sb.env, j.runId, "green");
-
-  const rc = await boomStatus(sb.ctx);
-  const out = sb.out();
-  expect(out).toContain("last sync clean");
-  expect(out).toContain("checkpoint(s): green");
-  expect(rc).toBe(0); // nothing needs attention
-});
-
-test("status: --json emits the shared report envelope", async () => {
-  const sb = await sandbox('[[section]]\nname = "x"\n');
-  const rc = await boomStatus(sb.ctx, true);
-  const env = JSON.parse(sb.out()) as { schemaVersion: number; records: { msg: string }[] };
-  expect(env.schemaVersion).toBeGreaterThanOrEqual(2);
-  expect(env.records.some((r) => r.msg.includes("section(s)"))).toBe(true);
-  // no config-repo/fleet/lock/secrets declared → un-synced is the only warning
-  expect(rc).toBe(2);
-});
 
 // --- verify --ci (config-repo CI gate; wraps `doctor --config`) -----------------------------
 

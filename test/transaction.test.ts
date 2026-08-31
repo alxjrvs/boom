@@ -1,24 +1,13 @@
 // M3: the sync transaction — journal, backups, rollback, verify --json, and orphan
 // reaping. Each test drives the engine against a fully sandboxed $HOME + repo.
 import { expect, test } from "bun:test";
-import {
-  mkdir,
-  mkdtemp,
-  readdir,
-  readFile,
-  readlink,
-  realpath,
-  rm,
-  symlink,
-  writeFile,
-} from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, relative } from "node:path";
+import { join } from "node:path";
 import { Journal, listRuns, newRunId, readRun } from "../src/engine/journal.ts";
 import { reconcile } from "../src/engine/reconcile.ts";
-import { listRollbacks, rollback } from "../src/engine/rollback.ts";
 import { readManifest } from "../src/engine/state.ts";
-import { backupTo, linkTarget, pathExists, stat } from "../src/lib/fs.ts";
+import { linkTarget, pathExists, stat } from "../src/lib/fs.ts";
 import { backupsDir } from "../src/lib/paths.ts";
 import { makeSandbox, type Sandbox } from "./support/sandbox.ts";
 
@@ -28,16 +17,6 @@ const sandbox = (boomfile: string): Promise<Sandbox> => makeSandbox(boomfile, { 
 // symlinks. Used to assert the config repo comes out of a sync byte-identical: the `**` bug
 // moved the repo's own sources into the backup tree and left self-referential links behind,
 // which a spot-check of one file would miss.
-async function snapshotTree(dir: string, base = dir): Promise<Record<string, string>> {
-  const out: Record<string, string> = {};
-  for (const e of await readdir(dir, { withFileTypes: true })) {
-    const p = join(dir, e.name);
-    if (e.isSymbolicLink()) out[relative(base, p)] = `symlink:${await readlink(p)}`;
-    else if (e.isDirectory()) Object.assign(out, await snapshotTree(p, base));
-    else out[relative(base, p)] = await readFile(p, "utf8");
-  }
-  return out;
-}
 
 // Post-condition for every reconcile that creates links: no symlink may LIVE inside the config
 // repo. A link whose *target* is in the repo is the normal, intended case — the damage guarded
@@ -66,15 +45,6 @@ async function expectNoLinkIntoRepo(home: string, repo: string): Promise<void> {
   await walk(home);
 }
 
-test("rollback removes a freshly applied link", async () => {
-  const sb = await sandbox(`[[section]]\nname = "S"\nlink = [{ src = ".z", dst = "~/.z" }]\n`);
-  await sb.write(".z", "z");
-  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
-  expect(await pathExists(join(sb.home, ".z"))).toBe(true);
-  expect(await rollback(sb.ctx)).toBe(0);
-  expect(await pathExists(join(sb.home, ".z"))).toBe(false);
-});
-
 test("--resume re-applies a missing dst and skips one already correct on disk (idempotent)", async () => {
   const sb = await sandbox(
     `[[section]]\nname = "S"\nlink = [{ src = ".a", dst = "~/.a" }, { src = ".b", dst = "~/.b" }]\n`,
@@ -100,18 +70,6 @@ test("--resume re-applies a missing dst and skips one already correct on disk (i
   expect(await linkTarget(join(sb.home, ".b"))).toBe(join(sb.repo, ".b")); // ~/.b intact
 });
 
-test("rollback --dry-run previews the undo without touching anything", async () => {
-  const sb = await sandbox(`[[section]]\nname = "S"\nlink = [{ src = ".z", dst = "~/.z" }]\n`);
-  await sb.write(".z", "z");
-  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
-  const link = join(sb.home, ".z");
-  expect(await pathExists(link)).toBe(true);
-  sb.clear();
-  expect(await rollback(sb.ctx, undefined, true)).toBe(0); // dry run
-  expect(sb.out()).toContain("would remove");
-  expect(await pathExists(link)).toBe(true); // still linked — nothing was undone
-});
-
 test("newRunId is unique across same-millisecond calls (no journal collision)", () => {
   // Back-to-back runs in one process must never share an id — the millisecond-resolution
   // timestamp alone can collide, which would make two runs write one journal file.
@@ -119,33 +77,6 @@ test("newRunId is unique across same-millisecond calls (no journal collision)", 
   expect(new Set(ids).size).toBe(ids.length);
   // …and still sort chronologically (later call → lexically-greater id).
   expect([...ids].sort()).toEqual(ids);
-});
-
-test("listRuns / rollback --list enumerate a committed sync's journal", async () => {
-  const sb = await sandbox(`[[section]]\nname = "S"\nlink = [{ src = ".z", dst = "~/.z" }]\n`);
-  await sb.write(".z", "z");
-  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
-
-  const runs = await listRuns(sb.ctx.env);
-  expect(runs).toHaveLength(1);
-  expect(runs[0]?.ops).toBeGreaterThanOrEqual(1);
-  expect(runs[0]?.committed).toBe(true);
-
-  sb.clear();
-  expect(await listRollbacks(sb.ctx)).toBe(0);
-  expect(sb.out()).toContain(runs[0]?.runId ?? "MISSING");
-  expect(sb.out()).toContain("boom rollback --run-id");
-});
-
-test("rollback restores a file displaced by an overwrite", async () => {
-  const sb = await sandbox(`[[section]]\nname = "S"\nlink = [{ src = ".z", dst = "~/.z" }]\n`);
-  await sb.write(".z", "new");
-  await writeFile(join(sb.home, ".z"), "ORIGINAL"); // a foreign file in the way
-  // --fix (overwrite mode) clobbers the foreign file → backs the original up first
-  expect(await reconcile("sync", sb.ctx, { linkMode: "overwrite" })).toBe(0);
-  expect(await linkTarget(join(sb.home, ".z"))).toBe(join(sb.repo, ".z"));
-  expect(await rollback(sb.ctx)).toBe(0);
-  expect(await readFile(join(sb.home, ".z"), "utf8")).toBe("ORIGINAL");
 });
 
 test("glob link self-heals a stale non-directory at the dst dir (a whole-dir → glob migration)", async () => {
@@ -164,44 +95,6 @@ test("glob link self-heals a stale non-directory at the dst dir (a whole-dir →
   expect((await stat(join(sb.home, ".claude/skills"))).isDirectory()).toBe(true);
   expect(await linkTarget(join(sb.home, ".claude/skills/a.md"))).toBe(join(sb.repo, "skills/a.md"));
   await expectNoLinkIntoRepo(sb.home, sb.repo);
-});
-
-test("rollback restores a stale dst symlink a glob link sync cleared", async () => {
-  const sb = await sandbox(
-    `[[section]]\nname = "S"\nlink = [{ src = "skills/*", dst = "~/.claude/skills" }]\n`,
-  );
-  await mkdir(join(sb.repo, "skills"), { recursive: true });
-  await sb.write("skills/a.md", "a");
-  await mkdir(join(sb.home, ".claude"), { recursive: true });
-  await symlink(join(sb.repo, "gone"), join(sb.home, ".claude/skills"));
-  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
-  await expectNoLinkIntoRepo(sb.home, sb.repo);
-  expect(await rollback(sb.ctx)).toBe(0);
-  expect(await linkTarget(join(sb.home, ".claude/skills"))).toBe(join(sb.repo, "gone"));
-});
-
-test("a `**` glob never links the config repo into itself", async () => {
-  const sb = await sandbox(`[[section]]\nname = "S"\nlink = [{ src = "nvim/**", dst = "~/.config/nvim" }]\n`);
-  await mkdir(join(sb.repo, "nvim/lua"), { recursive: true });
-  await mkdir(join(sb.repo, "nvim/after/ftplugin"), { recursive: true });
-  await sb.write("nvim/lua/init.lua", "init");
-  await sb.write("nvim/after/ftplugin/x.lua", "x");
-  // `nvim/**` expands to the directories AND their files. Linking a matched directory made the
-  // next placement's dst resolve back through it into the repo, so --fix displaced the repo's
-  // own sources into the backup tree — data loss on the flag users are told to run.
-  const before = await snapshotTree(join(sb.repo, "nvim"));
-  expect(await reconcile("sync", sb.ctx, { linkMode: "overwrite" })).toBe(0);
-  expect(await snapshotTree(join(sb.repo, "nvim"))).toEqual(before);
-  expect(await linkTarget(join(sb.home, ".config/nvim/lua/init.lua"))).toBe(
-    join(sb.repo, "nvim/lua/init.lua"),
-  );
-  expect(await linkTarget(join(sb.home, ".config/nvim/after/ftplugin/x.lua"))).toBe(
-    join(sb.repo, "nvim/after/ftplugin/x.lua"),
-  );
-  await expectNoLinkIntoRepo(sb.home, sb.repo);
-  // Nothing was displaced at all, so the run's backup tree was never even created.
-  const runId = (await listRuns(sb.env))[0]?.runId ?? "MISSING";
-  expect(await pathExists(join(backupsDir(sb.env), runId))).toBe(false);
 });
 
 test("globbing a directory to link it whole still works (the ancestor drop must not fire)", async () => {
@@ -230,20 +123,6 @@ test("a dst that resolves into the repo through a pre-existing symlink is refuse
   expect(await reconcile("sync", sb.ctx, { linkMode: "overwrite" })).toBe(1);
   expect(sb.out()).toContain("refusing to link the repo into itself");
   expect(await readFile(join(sb.repo, "nvim/init.lua"), "utf8")).toBe("init");
-});
-
-test("the run backup tree is created 0700 — root and run dir alike", async () => {
-  const sb = await sandbox(`[[section]]\nname = "S"\nlink = [{ src = ".z", dst = "~/.z" }]\n`);
-  await sb.write(".z", "new");
-  await writeFile(join(sb.home, ".z"), "ORIGINAL");
-  // Only a run that actually displaces something creates the tree (backupTo makes it lazily),
-  // and it can hold a displaced secret at 0600 — so the directories above must not advertise
-  // its path at 0755. The run dir is an *intermediate* of that one recursive mkdir, so
-  // asserting only the leaf would not prove the fix.
-  expect(await reconcile("sync", sb.ctx, { linkMode: "overwrite" })).toBe(0);
-  const runId = (await listRuns(sb.env))[0]?.runId ?? "MISSING";
-  expect(((await stat(backupsDir(sb.env))).mode & 0o777).toString(8)).toBe("700");
-  expect(((await stat(join(backupsDir(sb.env), runId))).mode & 0o777).toString(8)).toBe("700");
 });
 
 test("verify --json emits a parseable structured report", async () => {
@@ -306,19 +185,6 @@ test("copy sync is a no-op once the destination already matches the source", asy
   expect(await reconcile("sync", sb.ctx, { verbose: true })).toBe(0);
   expect(sb.out()).toContain("already up to date"); // verbose: the no-op skip is quiet by default
   expect(sb.out()).not.toContain("copied");
-});
-
-test("rollback warns about run side effects it cannot reverse", async () => {
-  const sb = await sandbox(
-    `[[section]]\nname = "S"\nlink = [{ src = ".z", dst = "~/.z" }]\nrun = [{ on = "sync", cmd = 'touch "$HOME/marker"' }]\n`,
-  );
-  await sb.write(".z", "z");
-  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
-  sb.clear();
-  expect(await rollback(sb.ctx)).toBe(0);
-  expect(await pathExists(join(sb.home, ".z"))).toBe(false); // link reversed
-  expect(sb.out()).toContain("Not reversible");
-  expect(sb.out()).toContain('touch "$HOME/marker"'); // the run is surfaced
 });
 
 test("sync --json emits a parseable structured report", async () => {
@@ -399,65 +265,6 @@ test("a truncated base boomfile FAILS the sync — it never reaps every managed 
   expect(sb.out()).not.toContain("reaped orphan");
   expect(await pathExists(join(sb.home, ".a"))).toBe(true);
   expect(await pathExists(join(sb.home, ".b"))).toBe(true);
-});
-
-test("rollback restores a link orphaned (and reaped) by the same run", async () => {
-  // A reap is a real mutation like any other in the run — it must go through the same
-  // journal + backup transaction so `boom rollback` can undo it, not delete outside it.
-  const sb = await sandbox(
-    `[[section]]\nname = "S"\nlink = [{ src = ".a", dst = "~/.a" }, { src = ".b", dst = "~/.b" }]\n`,
-  );
-  await sb.write(".a", "a");
-  await sb.write(".b", "b");
-  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
-
-  await sb.write("boomfile.toml", `[[section]]\nname = "S"\nlink = [{ src = ".a", dst = "~/.a" }]\n`);
-  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
-  expect(await pathExists(join(sb.home, ".b"))).toBe(false); // reaped
-
-  expect(await rollback(sb.ctx)).toBe(0);
-  expect(await linkTarget(join(sb.home, ".b"))).toBe(join(sb.repo, ".b")); // restored
-});
-
-test("a run with a failed step is left uncommitted (so rollback --list flags it)", async () => {
-  // committed must mean "succeeded", not "reached the end" — a half-applied run has to be
-  // distinguishable from a clean one, or an operator skips the run that needs rolling back.
-  const sb = await sandbox(
-    `[[section]]\nname = "S"\nlink = [{ src = ".z", dst = "~/.z" }]\nrun = [{ on = "sync", cmd = "exit 3" }]\n`,
-  );
-  await sb.write(".z", "z");
-  expect(await reconcile("sync", sb.ctx, {})).toBe(1); // the failed run step fails the sync
-  expect(await linkTarget(join(sb.home, ".z"))).toBe(join(sb.repo, ".z")); // link still applied
-  const runs = await listRuns(sb.ctx.env);
-  expect(runs[0]?.committed).toBe(false); // NOT marked clean despite reaching the end
-});
-
-test("rollback drops the reversed destinations from the manifest (no phantom drift)", async () => {
-  const sb = await sandbox(`[[section]]\nname = "S"\nlink = [{ src = ".z", dst = "~/.z" }]\n`);
-  await sb.write(".z", "z");
-  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
-  const dst = join(sb.home, ".z");
-  expect((await readManifest(sb.ctx.env)).some((e) => e.dst === dst)).toBe(true); // owned
-
-  expect(await rollback(sb.ctx)).toBe(0);
-  expect((await readManifest(sb.ctx.env)).some((e) => e.dst === dst)).toBe(false); // un-owned
-});
-
-test("--resume continues the interrupted run rather than opening a second one", async () => {
-  const sb = await sandbox(
-    `[[section]]\nname = "S"\nlink = [{ src = ".a", dst = "~/.a" }, { src = ".b", dst = "~/.b" }]\n`,
-  );
-  await sb.write(".a", "a");
-  await sb.write(".b", "b");
-  // An interrupted (uncommitted) run that recorded ~/.a as done.
-  const prior = new Journal(sb.ctx.env, newRunId());
-  await prior.done("link", join(sb.home, ".a"), { kind: "remove" });
-  prior.close();
-
-  expect(await reconcile("sync", sb.ctx, { resume: true })).toBe(0);
-  const runs = await listRuns(sb.ctx.env);
-  expect(runs).toHaveLength(1); // reused the interrupted run — did NOT open a second
-  expect(runs[0]?.committed).toBe(true); // and it's now completed cleanly
 });
 
 // --- hooks as first-class resources -------------------------------------------------------
@@ -547,33 +354,6 @@ test("a hook-declared destination does not false-orphan on verify", async () => 
   expect(sb.out()).not.toContain("reaped");
 });
 
-test("a hook's journalWrite is undone by `boom rollback`", async () => {
-  const body = `import { writeFileSync } from "node:fs";
-    export async function sync(api) {
-      const f = api.env.HOME + "/.written";
-      await api.journalWrite("hook", f);
-      writeFileSync(f, "new");
-    }
-  `;
-  // (a) fresh file — the undo token is a plain remove, so rollback deletes it.
-  const fresh = await sandbox(`[[section]]\nname = "S"\nhook = [{ name = "w" }]\n`);
-  await hookModule(fresh.repo, "w", body);
-  expect(await reconcile("sync", fresh.ctx, {})).toBe(0);
-  expect(await readFile(join(fresh.home, ".written"), "utf8")).toBe("new");
-  expect(await rollback(fresh.ctx)).toBe(0);
-  expect(await pathExists(join(fresh.home, ".written"))).toBe(false);
-
-  // (b) pre-existing file — the prior bytes come back out of the run's backup tree, which is
-  // only true because the undo row (and the displace behind it) landed BEFORE the hook's write.
-  const over = await sandbox(`[[section]]\nname = "S"\nhook = [{ name = "w" }]\n`);
-  await hookModule(over.repo, "w", body);
-  await writeFile(join(over.home, ".written"), "original");
-  expect(await reconcile("sync", over.ctx, {})).toBe(0);
-  expect(await readFile(join(over.home, ".written"), "utf8")).toBe("new");
-  expect(await rollback(over.ctx)).toBe(0);
-  expect(await readFile(join(over.home, ".written"), "utf8")).toBe("original");
-});
-
 test("a hook's journalWrite never displaces outside a mutating sync", async () => {
   // The sharpest edge in the contract: journalWrite calls displace(), and displace with no
   // backupRoot REMOVES the path. journal + backupRoot exist only for a mutating sync, so an
@@ -596,80 +376,6 @@ test("a hook's journalWrite never displaces outside a mutating sync", async () =
   expect(await readFile(f, "utf8")).toBe("original");
 });
 
-test("an interrupted write is recoverable — rollback restores an orphaned intent", async () => {
-  // The crash window: `displace` has already moved the original into the backup tree, but the
-  // `done` row naming where it went was never written. Every reader filtered `t = 'done'`, so
-  // the run reported 0 ops and rollback restored nothing while exiting clean — the original was
-  // recoverable only by hand-spelunking the backup dir.
-  const sb = await sandbox(`[[section]]\nname = "S"\ncopy = [{ src = "cfg", dst = "~/.cfg" }]\n`);
-  await writeFile(join(sb.repo, "cfg"), "from-repo\n");
-  const dst = join(sb.home, ".cfg");
-  await writeFile(dst, "the user's original\n");
-
-  // Simulate a run killed between the displace and the `done`.
-  const runId = newRunId();
-  const j = new Journal(sb.env, runId);
-  const backupRoot = join(backupsDir(sb.env), runId);
-  await j.intent("copy", dst, { kind: "restore", from: join(backupRoot, dst) });
-  await backupTo(dst, backupRoot); // original now in the backup tree
-  j.close(); // ...and the process dies here, before done()
-
-  expect(await pathExists(dst)).toBe(false);
-
-  // The half-applied op is visible rather than counted as nothing.
-  const run = await readRun(sb.env);
-  expect(run?.orphans.length).toBe(1);
-  expect((await listRuns(sb.env))[0]?.ops).toBe(1);
-
-  expect(await rollback(sb.ctx)).toBe(0);
-  expect(await readFile(dst, "utf8")).toBe("the user's original\n");
-  expect(sb.out()).toContain("interrupted mid-write");
-});
-
-test("a second write to the same dst is not masked by the first write's done row", async () => {
-  // The completing `done` has to come *after* the intent. Correlating on (op, dst) alone let the
-  // FIRST write's done row mask a second, genuinely orphaned intent for the same destination —
-  // so the interrupted mutation went unreported again, defeating the point of tracking orphans.
-  const sb = await sandbox(`[[section]]\nname = "S"\n`);
-  const dst = join(sb.home, ".twice");
-  const runId = newRunId();
-  const j = new Journal(sb.env, runId);
-  const backupRoot = join(backupsDir(sb.env), runId);
-
-  // First write completes normally.
-  await j.intent("copy", dst, { kind: "remove" });
-  await j.done("copy", dst, { kind: "remove" });
-  // Second write to the SAME dst is interrupted after its intent.
-  await j.intent("copy", dst, { kind: "restore", from: join(backupRoot, dst) });
-  j.close();
-
-  const run = await readRun(sb.env);
-  expect(run?.orphans.length).toBe(1); // was 0 — masked by the earlier done
-  expect((await listRuns(sb.env))[0]?.ops).toBe(2); // 1 done + 1 orphan
-});
-
-test("uninstall is journaled and reversible — rollback puts the removed copy back", async () => {
-  // uninstall ran with no journal and no backup tree, so every removal was permanent: rollback
-  // afterwards read the previous *sync's* run and could neither name nor undo the teardown.
-  const sb = await sandbox(`[[section]]\nname = "S"\ncopy = [{ src = "cfg", dst = "~/.cfg" }]\n`);
-  await writeFile(join(sb.repo, "cfg"), "k=v\n");
-  const dst = join(sb.home, ".cfg");
-
-  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
-  expect(await pathExists(dst)).toBe(true);
-
-  expect(await reconcile("uninstall", sb.ctx, {})).toBe(0);
-  expect(await pathExists(dst)).toBe(false);
-
-  // The teardown is its own run, carrying a restore token for what it displaced.
-  const run = await readRun(sb.env);
-  expect(run?.done.some((d) => d.dst === dst && d.undo.kind === "restore")).toBe(true);
-
-  expect(await rollback(sb.ctx)).toBe(0);
-  expect(await pathExists(dst)).toBe(true); // came back out of the backup tree
-  expect(await readFile(dst, "utf8")).toBe("k=v\n");
-});
-
 test("uninstall opens its own run rather than adopting an interrupted sync's under --resume", async () => {
   // A shared run id would let rollback replay one run that both created and destroyed the same
   // destination — not a state the machine was ever in.
@@ -680,4 +386,41 @@ test("uninstall opens its own run rather than adopting an interrupted sync's und
 
   expect(await reconcile("uninstall", sb.ctx, { resume: true })).toBe(0);
   expect((await readRun(sb.env))?.runId).not.toBe(syncRun);
+});
+
+// Both of the cases below survive the rollback removal on purpose. Neither tests undo: one
+// asserts the mode of the backup tree `displace()` writes into (the thing that makes an
+// overwrite recoverable at all, and which `source --fix` depends on), and the other asserts
+// `--resume` reuses an interrupted run. They read journal state via `listRuns`, which is why
+// that reader outlived `boom rollback`.
+
+test("the run backup tree is created 0700 — root and run dir alike", async () => {
+  const sb = await sandbox(`[[section]]\nname = "S"\nlink = [{ src = ".z", dst = "~/.z" }]\n`);
+  await sb.write(".z", "new");
+  await writeFile(join(sb.home, ".z"), "ORIGINAL");
+  // Only a run that actually displaces something creates the tree (backupTo makes it lazily),
+  // and it can hold a displaced secret at 0600 — so the directories above must not advertise
+  // its path at 0755. The run dir is an *intermediate* of that one recursive mkdir, so
+  // asserting only the leaf would not prove the fix.
+  expect(await reconcile("sync", sb.ctx, { linkMode: "overwrite" })).toBe(0);
+  const runId = (await listRuns(sb.env))[0]?.runId ?? "MISSING";
+  expect(((await stat(backupsDir(sb.env))).mode & 0o777).toString(8)).toBe("700");
+  expect(((await stat(join(backupsDir(sb.env), runId))).mode & 0o777).toString(8)).toBe("700");
+});
+
+test("--resume continues the interrupted run rather than opening a second one", async () => {
+  const sb = await sandbox(
+    `[[section]]\nname = "S"\nlink = [{ src = ".a", dst = "~/.a" }, { src = ".b", dst = "~/.b" }]\n`,
+  );
+  await sb.write(".a", "a");
+  await sb.write(".b", "b");
+  // An interrupted (uncommitted) run that recorded ~/.a as done.
+  const prior = new Journal(sb.ctx.env, newRunId());
+  await prior.done("link", join(sb.home, ".a"), { kind: "remove" });
+  prior.close();
+
+  expect(await reconcile("sync", sb.ctx, { resume: true })).toBe(0);
+  const runs = await listRuns(sb.ctx.env);
+  expect(runs).toHaveLength(1); // reused the interrupted run — did NOT open a second
+  expect(runs[0]?.committed).toBe(true); // and it's now completed cleanly
 });

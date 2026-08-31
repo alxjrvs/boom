@@ -11,7 +11,6 @@ import { expect, test } from "bun:test";
 import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { reconcile } from "../src/engine/reconcile.ts";
-import { rollback } from "../src/engine/rollback.ts";
 import { pathExists } from "../src/lib/fs.ts";
 import { makeSandbox, type Sandbox } from "./support/sandbox.ts";
 
@@ -116,15 +115,4 @@ absent = [{ path = "~/.claude/settings.local.json" }]
   expect(await pathExists(link)).toBe(false);
   // lstat, not stat: following the link would have deleted the target instead.
   expect(await readFile(target, "utf8")).toBe("the real file\n");
-});
-
-test("absent: the removed file is recoverable with rollback", async () => {
-  const sb = await sandbox(ONE);
-  const f = await seed(sb, "the contents someone approved\n");
-  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
-  expect(await pathExists(f)).toBe(false);
-  // This is the whole difference between `absent` and a `run` step calling `rm`: removal is a
-  // displacement into the run's backup tree, so it is reversible.
-  expect(await rollback(sb.ctx)).toBe(0);
-  expect(await readFile(f, "utf8")).toBe("the contents someone approved\n");
 });

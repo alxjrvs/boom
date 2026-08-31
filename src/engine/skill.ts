@@ -69,8 +69,7 @@ packages, runs steps and hooks, and can undo any change.
 ${commands}
 
 \`boom source\` reconciles your machine; its subcommands \`set|diff|push|reset\` operate the
-config repo. \`code\` is a namespace: \`boom code <init|claude|cmux>\`. Run
-\`boom <command> --help\` for flags.
+config repo. Run \`boom <command> --help\` for flags.
 
 ## Driving it safely
 

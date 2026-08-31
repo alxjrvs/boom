@@ -364,22 +364,6 @@ const SectionSchema = v.strictObject({
   hook: v.optional(v.array(HookSchema)),
 });
 
-// A schedule interval: a bare number (seconds) or a `<n>s|m|h` string ("15m", "1h", "30s").
-// launchd's StartInterval is in seconds; parseInterval (lib/launchd.ts) normalizes into it.
-const IntervalSchema = v.pipe(
-  v.string(),
-  v.regex(/^\d+[smh]?$/, 'interval must be like "15m", "1h", "30s", or a bare seconds count'),
-);
-
-// A scheduled boom invocation: run `boom <cmd>` on the `every` interval via a launchd timer
-// (macOS-only). `cmd` is a boom subcommand line ("verify", "code fetch"); one array entry
-// replaces the old bespoke `verify_schedule` / `code_fetch_schedule` keys and lets any boom
-// command be scheduled without growing a new schema key each time.
-const ScheduleSchema = v.strictObject({
-  cmd: v.string(),
-  every: IntervalSchema,
-});
-
 // The top-level `[boom]` table: machine-global, self-wiring behaviors folded into the
 // reconcile boom already runs — so a consumer stops hand-rolling `run`/plist boilerplate for
 // boom-invoking-boom. Every field is opt-in; an absent `[boom]` table changes nothing.
@@ -390,8 +374,18 @@ const BoomSettingsSchema = v.strictObject({
   // After a sync: `check` prints a one-line notice when a newer boom release is available
   // (cheap, non-fatal, offline-safe); `auto` also self-upgrades (opt-in; hands-off machines).
   upgrade_on_sync: v.optional(v.picklist(["check", "auto"])),
-  // Install/refresh launchd timers that run `boom <cmd>` on an interval (macOS-only).
-  schedule: v.optional(v.array(ScheduleSchema)),
+  // RETIRED, and deliberately still accepted — the same call as `sudo_askpass` below, for
+  // the same reason. boom used to generate and reap `com.boomtube.*` launchd timers from this
+  // array. The machinery is gone (engine/settings.ts, and the renderer in lib/launchd.ts).
+  //
+  // NOT `v.never`, and not deleted: this is a `strictObject`, so an unknown key fails the whole
+  // boomfile. Stranding a machine over a key that used to work — and whose replacement is
+  // "write a plist and link it with the `launchd` resource", which is not a one-line edit — is
+  // a worse outcome than ignoring it. Parsed loosely and ignored. Delete at 1.0.
+  //
+  // Loose rather than the old shape on purpose: nothing validates a value nothing reads, and
+  // keeping the strict entry schema would mean maintaining a spec for a dead feature.
+  schedule: v.optional(v.array(v.unknown())),
   // RETIRED, and deliberately still accepted. The vault-backed askpass helper this named was
   // removed: it made `boom askpass <ref>` a real command that printed a resolved secret to
   // stdout, which is a second way to read a vault value under a program name a machine's own
@@ -451,7 +445,6 @@ export type Systemd = v.InferOutput<typeof SystemdSchema>;
 export type Run = v.InferOutput<typeof RunSchema>;
 export type Hook = v.InferOutput<typeof HookSchema>;
 export type OsxDefault = v.InferOutput<typeof OsxDefaultSchema>;
-export type Schedule = v.InferOutput<typeof ScheduleSchema>;
 export type Section = v.InferOutput<typeof SectionSchema>;
 export type BoomSettings = v.InferOutput<typeof BoomSettingsSchema>;
 export type Boomfile = v.InferOutput<typeof BoomfileSchema>;

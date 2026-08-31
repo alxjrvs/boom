@@ -36,14 +36,12 @@ jobs:
       - name: Smoke — binary boots
         run: ./build/boom --version
 
-      # Smoke the config-free generators so a broken catalog/route fails CI, not a user.
-      - name: Smoke — completions + man + skill
-        run: |
-          ./build/boom completions bash > /dev/null
-          ./build/boom completions zsh > /dev/null
-          ./build/boom completions fish > /dev/null
-          ./build/boom man > /dev/null
-          ./build/boom skill > /dev/null
+      # Smoke the config-free generator so a broken catalog/route fails CI, not a user.
+      # This used to also run `completions` (bash/zsh/fish) and `man`; both verbs are gone.
+      # `skill` is the one that remains and the one that matters most — it derives from the
+      # same route map, and it is what an agent reads to learn what boom can do.
+      - name: Smoke — skill generator
+        run: ./build/boom skill > /dev/null
 
       # Validate the shipped example against the live schema, so a schema change can't
       # silently invalidate the config every new user is pointed at while CI stays green.

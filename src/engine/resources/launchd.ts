@@ -74,9 +74,9 @@ export async function reconcileLaunchd(entry: Launchd, ctx: ReconcileCtx): Promi
       }
       // Linked AND loaded still isn't "working". A job can fire on schedule and fail every single
       // run, reporting only into its own log — which nobody watches, by definition of the job
-      // being scheduled. `[boom] schedule` timers have asserted this since `code fetch` failed on
-      // four remotes for a month; this resource did not, so a hand-authored plist was the one
-      // scheduled thing on a machine with no liveness assertion behind it.
+      // being scheduled. Generated `[boom] schedule` timers used to carry this assertion and a
+      // hand-authored plist did not; that asymmetry is gone with `schedule`, and this is now the
+      // only place boom asserts it at all.
       //
       // That asymmetry has a scalp: a nightly `boom verify` agent sat dead for 28 days behind a
       // `~` launchd never expands (EX_CONFIG 78). It was linked. It was loaded. `verify` said so

@@ -2,76 +2,29 @@
 // already runs, so a consumer stops hand-rolling `run`/plist boilerplate for boom invoking
 // boom. Modelled as work items run through the *same* guarded loop as section resources
 // (`runWorkItems`), verb-aware:
-//   sync    → install/refresh (regenerate the skill, (re)load + reap timers, check/auto-upgrade)
-//   verify  → report drift (skill stale, timer not loaded)
-//   uninstall → tear down what boom installed (unload + remove every timer; the skill is left)
-// Each field is opt-in; an absent/empty `[boom]` table emits nothing. Skill + timer writes are
+//   sync    → install/refresh (regenerate the skill, check/auto-upgrade)
+//   verify  → report drift (skill stale) and notify on it
+// Each field is opt-in; an absent/empty `[boom]` table emits nothing. Skill writes are
 // journaled like any file mutation, so `boom rollback` reverses them.
-import { readdir } from "node:fs/promises";
+//
+// `schedule` lived here too, generating and reaping `com.boomtube.*` launchd timers. It was
+// removed once its last consumer went; the `launchd` RESOURCE, which links and drives a
+// user-authored plist, is unaffected and lives in engine/resources/launchd.ts.
 import { basename, join } from "node:path";
-import { detectOs } from "../config/profile.ts";
-import type { BoomSettings, Schedule } from "../config/schema.ts";
-import { displayPath, mkdir, pathExists, rename } from "../lib/fs.ts";
-import {
-  agentLastExit,
-  agentLoaded,
-  launchAgentsDir,
-  parseInterval,
-  plistEnvValue,
-  reloadAgent,
-  renderAgentPlist,
-  samePathSet,
-  unloadAgent,
-} from "../lib/launchd.ts";
+import type { BoomSettings } from "../config/schema.ts";
+import { displayPath, mkdir, pathExists } from "../lib/fs.ts";
 import { notify } from "../lib/notify.ts";
-import { boomStateDir } from "../lib/paths.ts";
 import { runArgv } from "../lib/proc.ts";
 import { fetchLatestVersion } from "../lib/release.ts";
 import { compareVersions, VERSION } from "../lib/version.ts";
-import { journalRemove, journalWrite } from "./journal.ts";
+import { journalWrite } from "./journal.ts";
 import { runWorkItems, type WorkItem } from "./registry.ts";
 import { skillDoc, skillInstallPath } from "./skill.ts";
 import type { ReconcileCtx } from "./types.ts";
 
-// Roll a timer's log once it passes this, keeping exactly one previous generation (`.log.1`).
-// 2 MB is chosen against observed reality rather than taste: a 15-minute timer writing ~54 KB
-// per run reached 2.71 MB and 71,304 lines in a month, so this rolls roughly monthly and retains
-// about two months across both files.
-const TIMER_LOG_MAX_BYTES = 2 * 1024 * 1024;
-
-// launchd appends to StandardOutPath/StandardErrorPath forever and never truncates, and boom is
-// not the writer — the job is, long after boom exited. So sync is the only moment boom can act,
-// and this is deliberately a sync-time sweep rather than a rotation daemon: bounded, no new
-// moving parts, and it converges on any machine that syncs at all.
-//
-// Best-effort throughout. A log that cannot be statted or moved is not a reason to fail a
-// reconcile — the worst case is the file keeps growing, which is exactly today's behavior.
-async function rollTimerLog(log: string, ctx: ReconcileCtx): Promise<void> {
-  try {
-    const f = Bun.file(log);
-    if (!(await f.exists()) || f.size <= TIMER_LOG_MAX_BYTES) return;
-    await rename(log, `${log}.1`); // replaces any previous generation
-    ctx.report.note(`rolled ${displayPath(log, ctx.env)} (was ${(f.size / 1024 / 1024).toFixed(1)} MB)`);
-  } catch {
-    // ignore: growth is the status quo, not a regression
-  }
-}
-
-// Every boom-owned timer plist is labelled `com.boomtube.<cmd-slug>` — the shared prefix lets
-// reaping recognize (and remove) a timer whose `schedule` entry was deleted without a state
-// file. A cmd of "verify" → com.boomtube.verify and "code fetch" → com.boomtube.code-fetch,
-// so the historical fixed labels reproduce exactly and an upgrade doesn't churn live timers.
-const TIMER_PREFIX = "com.boomtube.";
-function timerLabel(cmd: string): string {
-  return TIMER_PREFIX + cmd.trim().split(/\s+/).join("-");
-}
-function timerArgs(cmd: string, self: string): string[] {
-  return [self, ...cmd.trim().split(/\s+/)];
-}
-
 // Any field configured? Gates the header so an absent or all-off `[boom]` table stays silent.
 function anyConfigured(s: BoomSettings): boolean {
-  return Boolean(s.skill_on_sync || s.upgrade_on_sync || (s.schedule && s.schedule.length > 0) || s.notify);
+  return Boolean(s.skill_on_sync || s.upgrade_on_sync || s.notify);
 }
 
 // The running boom binary — the ProgramArguments a timer invokes, and the guard against
@@ -87,12 +40,6 @@ function boomSelf(): string | undefined {
 function boomWorkItems(settings: BoomSettings): WorkItem[] {
   const items: WorkItem[] = [];
   if (settings.skill_on_sync) items.push({ label: "skill", run: applySkill });
-  for (const s of settings.schedule ?? []) {
-    items.push({ label: `schedule ${s.cmd}`, run: (ctx) => applyTimer(ctx, s) });
-  }
-  if (settings.schedule) {
-    items.push({ label: "reap timers", run: (ctx) => reapUndeclaredTimers(settings, ctx) });
-  }
   if (settings.upgrade_on_sync) items.push({ label: "upgrade", run: (ctx) => applyUpgrade(settings, ctx) });
   // Notify runs LAST, so its drift tally also counts any drift the earlier self-wiring items
   // surfaced (a stale skill, an unloaded timer), not just section drift.
@@ -168,149 +115,6 @@ async function applySkill(ctx: ReconcileCtx): Promise<void> {
   await mkdir(join(file, ".."), { recursive: true });
   await Bun.write(file, doc);
   report.ok(`refreshed skill → ${disp} (v${VERSION})`);
-}
-
-// #57/#58 — own a launchd timer that runs `boom <cmd>` on an interval (macOS only). The
-// generated plist is deterministic, so an unchanged interval re-renders byte-identical and
-// sync only reloads/rewrites when it actually changed. Uninstall is handled by the reap item.
-async function applyTimer(ctx: ReconcileCtx, sched: Schedule): Promise<void> {
-  if (ctx.verb === "uninstall") return; // reapUndeclaredTimers(keep=∅) removes them all
-  const { report } = ctx;
-  const label = timerLabel(sched.cmd);
-  const what = sched.cmd;
-  const agents = launchAgentsDir(ctx.env);
-  if (!agents) return;
-  const plistPath = join(agents, `${label}.plist`);
-
-  if (detectOs(ctx.env) !== "darwin") {
-    report.skip(`${what} — scheduled timers are macOS-only`);
-    return;
-  }
-  if (ctx.dryRun) {
-    // (log rolling is a sync-time side effect; a dry run must not move files)
-    report.plan(`would schedule ${what} every ${sched.every}`);
-    return;
-  }
-  const self = boomSelf();
-  if (!self) {
-    report.skip(`${what} — not a compiled boom binary (dev run); skipping timer`);
-    return;
-  }
-
-  const logDir = join(boomStateDir(ctx.env), "logs");
-  const log = join(logDir, `${label}.log`);
-  await rollTimerLog(log, ctx);
-  // Carry the PATH boom itself is running with into the timer. launchd gives an agent a minimal
-  // PATH — not the user's — so a scheduled `boom code fetch` could not find `gh`, `git`'s
-  // credential helper, or anything else installed by a version manager, and failed on every
-  // HTTPS remote while reporting only into its own log. `boom source` runs from a real shell, so
-  // its PATH is the one the user means.
-  //
-  // A snapshot, deliberately: it is recorded in the plist so a PATH that genuinely LOSES a
-  // directory shows up as timer drift rather than rotting invisibly. What it is NOT is a
-  // byte-for-byte comparison — see `plistMatches` below and `samePathSet` in lib/launchd.ts.
-  const timerEnv = ctx.env.PATH ? { PATH: ctx.env.PATH } : undefined;
-  const renderWith = (path?: string) =>
-    renderAgentPlist({
-      label,
-      programArgs: timerArgs(sched.cmd, self),
-      startInterval: parseInterval(sched.every),
-      stdoutPath: log,
-      stderrPath: log,
-      ...(path ? { environment: { PATH: path } } : {}),
-    });
-  const plist = renderWith(timerEnv?.PATH);
-
-  // An installed plist matches when it is byte-identical, OR when the only difference is the
-  // ORDER of a PATH that still names the same directories. PATH order is a property of the
-  // shell that built it, not of the machine: `boom source` runs from an interactive shell and
-  // `boom verify` from a login one, and on a box with a version manager those two orderings
-  // differ by construction. Comparing them as strings reported drift forever on a converged
-  // machine — the plists were present, loaded, and healthy — which is the one failure mode a
-  // drift signal cannot have, because it is the signal every other check reports through.
-  const plistMatches = (current: string | undefined): boolean => {
-    if (current === undefined) return false;
-    if (current === plist) return true;
-    const recorded = plistEnvValue(current, "PATH");
-    if (recorded === undefined) return false;
-    // Re-render with the RECORDED path: if that reproduces the file exactly, then PATH is the
-    // only thing that differs and everything else is genuinely unchanged.
-    if (renderWith(recorded) !== current) return false;
-    return samePathSet(recorded, timerEnv?.PATH);
-  };
-
-  if (ctx.verb === "verify") {
-    const current = (await pathExists(plistPath)) ? await Bun.file(plistPath).text() : undefined;
-    if (!plistMatches(current)) report.warn(`${what} timer missing/outdated — sync installs it`);
-    else if (!agentLoaded(label, ctx.env)) report.warn(`${what} timer installed but not loaded`);
-    else {
-      // Installed AND loaded still isn't "working". A timer can fire on schedule and fail every
-      // run, which is exactly what happened here: `code fetch` failed on four remotes for a
-      // month and said so only in its own log. Since nobody watches a scheduled job by
-      // definition, a non-zero last exit has to reach the drift report like any other drift —
-      // and from there the `[boom] notify` desktop notification.
-      const last = agentLastExit(label, ctx.env);
-      if (last !== undefined && last !== 0) {
-        report.warn(`${what} timer last run failed (exit ${last}) — see ${displayPath(log, ctx.env)}`);
-      } else {
-        report.skip(`${what} every ${sched.every}`);
-      }
-    }
-    return;
-  }
-  // sync (non-dry)
-  if ((await pathExists(plistPath)) && plistMatches(await Bun.file(plistPath).text())) {
-    // Equivalent plist already in place; still ensure it's loaded (a reboot or manual
-    // unload could have dropped it) but don't rewrite. Using the same equivalence as verify
-    // rather than a byte comparison is what makes sync CONVERGE: with a string comparison
-    // every run rewrote the same two plists with a differently-ordered PATH, so sync never
-    // reached a fixed point and verify never went quiet.
-    if (agentLoaded(label, ctx.env)) report.skip(`${what} every ${sched.every} (unchanged)`);
-    else if (reloadAgent(plistPath, ctx.env)) report.ok(`reloaded ${what} timer`);
-    else report.fail(`${what} timer present but launchctl load failed`);
-    return;
-  }
-  // Same undo-before-create discipline as the skill write above.
-  await journalWrite("timer", plistPath, ctx);
-  await mkdir(logDir, { recursive: true });
-  await Bun.write(plistPath, plist);
-  if (reloadAgent(plistPath, ctx.env)) report.ok(`scheduled ${what} every ${sched.every}`);
-  else report.fail(`wrote ${what} plist but launchctl load failed`);
-}
-
-// Remove boom-owned timers (com.boomtube.*) whose schedule entry is gone: on sync keep the
-// declared set, on uninstall keep nothing (tear them all down). Journaled (rollback restores
-// them) and dry-run aware; a no-op on verify and where no LaunchAgents dir resolves.
-async function reapUndeclaredTimers(settings: BoomSettings, ctx: ReconcileCtx): Promise<void> {
-  if (ctx.verb === "verify") return;
-  const keep =
-    ctx.verb === "uninstall"
-      ? new Set<string>()
-      : new Set((settings.schedule ?? []).map((s) => timerLabel(s.cmd)));
-  const { report } = ctx;
-  const agents = launchAgentsDir(ctx.env);
-  if (!agents || !(await pathExists(agents))) return;
-  let names: string[];
-  try {
-    names = await readdir(agents);
-  } catch {
-    return;
-  }
-  for (const name of names) {
-    if (!name.startsWith(TIMER_PREFIX) || !name.endsWith(".plist")) continue;
-    const label = name.slice(0, -".plist".length);
-    if (keep.has(label)) continue;
-    const plistPath = join(agents, name);
-    if (ctx.dryRun) {
-      report.note(`would unload + remove ${label} timer`);
-      continue;
-    }
-    // Unload before displacing the plist (unload reads the file), then journal the removal as
-    // a displaced-original restore so rollback can put the timer back.
-    if (detectOs(ctx.env) === "darwin") unloadAgent(plistPath, ctx.env);
-    await journalRemove("reap-timer", plistPath, ctx);
-    report.ok(`removed ${label} timer`);
-  }
 }
 
 // #59 — fold an upgrade check (and optional auto-upgrade) into sync. Both are best-effort and

@@ -20,6 +20,10 @@ export interface ShellResult {
   // The child's stderr, captured only under RunOptions.silent (where it's the sole surviving
   // channel) so a failing step can surface *why* it failed even though its chatter was hidden.
   readonly stderr?: string;
+  // The child's stdout, captured only under RunOptions.captureStdout. Kept separate from stderr
+  // because a script explains itself on whichever channel it likes, and under `silent` both are
+  // hidden — so a step that reports on stdout would otherwise fail with no reason at all.
+  readonly stdout?: string;
 }
 
 interface RunOptions {
@@ -31,6 +35,20 @@ interface RunOptions {
   // section band, revealed only by --verbose). stderr is captured, not shown, so a non-zero
   // exit can still be explained. Takes precedence over quietStdout.
   readonly silent?: boolean;
+  // Capture the child's stdout into the result instead of discarding it. Only meaningful
+  // alongside `silent`, which otherwise sends stdout to /dev/null.
+  //
+  // Opt-in rather than the default for `silent`, because the two kinds of caller want opposite
+  // things. A package manager is silenced precisely because it is chatty — buffering all of
+  // `brew bundle` to explain a failure would trade a real memory cost for output whose useful
+  // part is the tail anyway. A `run` step is a short, purpose-written command whose entire job
+  // may be to print one diagnostic, and it is free to print it on stdout.
+  //
+  // Honored by the ASYNC paths only (runShellAsync / runArgvAsync), which is where every caller
+  // that silences a child already lives. Named here rather than left to be discovered: a option
+  // that silently does nothing on half its callers is the failure shape this codebase keeps
+  // finding, so if a sync caller ever needs it, wire it there rather than assuming it works.
+  readonly captureStdout?: boolean;
   // Working directory for the child. Default: inherit the parent's cwd. The engine
   // sets this to the dotfiles repo so a `run` step (or `mise install`) operates on
   // the configured machine, not on wherever `boom` happened to be invoked from.
@@ -55,14 +73,14 @@ interface RunOptions {
 const childStdout = (opts?: RunOptions): "inherit" | 2 => (opts?.quietStdout ? 2 : "inherit");
 
 // The stdio pair for a child, resolving the output disciplines: a watched stdout (piped, pumped to
-// onStdoutLine), silent (discard stdout, capture stderr so a failure can still be explained),
-// quietStdout (stdout→fd2, keep JSON clean), or inherit (stream straight to the terminal).
+// onStdoutLine), silent (capture stderr so a failure can still be explained, and stdout too when
+// captureStdout is set, otherwise discard it), quietStdout (stdout→fd2, keep JSON clean), or
+// inherit (stream straight to the terminal).
 type Stdio = { stdout: "inherit" | "ignore" | "pipe" | 2; stderr: "inherit" | "pipe" };
 const stdioFor = (opts?: RunOptions): Stdio => {
   if (opts?.onStdoutLine) return { stdout: "pipe", stderr: opts.silent ? "pipe" : "inherit" };
-  return opts?.silent
-    ? { stdout: "ignore", stderr: "pipe" }
-    : { stdout: childStdout(opts), stderr: "inherit" };
+  if (opts?.silent) return { stdout: opts.captureStdout ? "pipe" : "ignore", stderr: "pipe" };
+  return { stdout: childStdout(opts), stderr: "inherit" };
 };
 
 // Pump a piped stream to a per-line callback. Split on newlines across chunk boundaries (a chunk is
@@ -138,10 +156,21 @@ export async function runShellAsync(cmd: string, env: Env, opts?: RunOptions): P
         proc.kill();
       }, timeout)
     : undefined;
-  const stderr = opts?.silent ? await new Response(proc.stderr as ReadableStream).text() : undefined;
+  // Both pipes drained CONCURRENTLY, and before the exit is awaited. Reading one to completion
+  // first would stall on a full pipe for a command chatty on the other — the same deadlock the
+  // argv path documents. With captureStdout unset this is the single-stream read it always was.
+  const [stderr, stdout] = await Promise.all([
+    opts?.silent ? new Response(proc.stderr as ReadableStream).text() : undefined,
+    opts?.silent && opts.captureStdout ? new Response(proc.stdout as ReadableStream).text() : undefined,
+  ]);
   await proc.exited;
   if (timer) clearTimeout(timer);
-  return { code: exitOf(proc), timedOut, ...(opts?.silent ? { stderr: stderr?.trim() ?? "" } : {}) };
+  return {
+    code: exitOf(proc),
+    timedOut,
+    ...(opts?.silent ? { stderr: stderr?.trim() ?? "" } : {}),
+    ...(opts?.silent && opts.captureStdout ? { stdout: stdout?.trim() ?? "" } : {}),
+  };
 }
 
 export async function runArgvAsync(args: string[], env: Env, opts?: RunOptions): Promise<ShellResult> {
@@ -200,8 +229,36 @@ export function toolIo(json: boolean, verbose: boolean): RunOptions {
 
 // The last non-blank line of captured stderr — a compact "why did it fail" tail to fold into a
 // fail() message when the tool's own output was silenced. Empty string when there's nothing.
+//
+// Right for a PACKAGE MANAGER, whose output is long, templated, and worst-first-line: the tail is
+// the actionable part. Wrong for a purpose-written command — see failureDetail below.
 export function lastLine(s?: string): string {
   return s?.trim().split("\n").filter(Boolean).at(-1) ?? "";
+}
+
+// Every line a failing command emitted, indented under the fail message.
+//
+// WHY NOT lastLine HERE. A `run` step is somebody's own script, and a script states its most
+// specific complaint FIRST and then adds context — the opposite shape to a package manager. Taking
+// the last line therefore keeps the least useful one, systematically.
+//
+// Measured, on a nine-line vault-audit failure: the reported line was `- gninety`, naming an item
+// that was present and correctly declared, while the finding — an undeclared item in a vault an
+// agent can read — sat in the eight lines that were dropped. The check was right and the report
+// was worse than useless, because it sent the operator to look at the wrong thing.
+//
+// stdout is included because a script is free to explain itself there, and under `silent` it is
+// hidden too; a step reporting on stdout used to fail with a bare "(exit N)" and no reason at all.
+export function failureDetail(stderr?: string, stdout?: string): string {
+  const body = [stderr, stdout]
+    .map((s) => s?.trim())
+    .filter((s): s is string => Boolean(s))
+    .join("\n");
+  if (!body) return "";
+  return `\n${body
+    .split("\n")
+    .map((l) => `    ${l}`)
+    .join("\n")}`;
 }
 
 export function hasCommand(name: string, env: Env): boolean {

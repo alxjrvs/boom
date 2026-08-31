@@ -12,7 +12,7 @@ test("confirm proceeds with --yes but refuses a non-TTY without it", () => {
 });
 
 // choose() carries confirm()'s doctrine into a multi-way question: a non-TTY is never
-// asked. That is what keeps `code reap --interactive` safe to reach from a launchd timer —
+// asked. That is what keeps an interactive sweep safe to reach from a launchd timer —
 // it takes the do-nothing answer instead of blocking forever on a prompt nobody can see.
 const CHOICES: Choice<"push" | "delete" | "skip">[] = [
   { key: "p", label: "push & remove", value: "push" },

@@ -1,14 +1,13 @@
 // End-to-end reconcile tests for the resources/behaviors added for the dotFiles cleanup
-// sweep: `dir` (#54), `check` (#53), and the `[boom]` table's skill refresh (#55) + timer
-// scheduling (#57/#58). Sandboxed $HOME + repo, driving reconcile() directly (the same
-// oracle style as engine.test.ts). launchctl itself is never invoked here — the timer paths
-// are exercised via dry-run/off-platform, and the effectful primitives are darwin-only.
+// sweep: `dir` (#54), `check` (#53), and the `[boom]` table's skill refresh (#55). Sandboxed
+// $HOME + repo, driving reconcile() directly (the same oracle style as engine.test.ts).
+// The timer-scheduling cases these once covered went with `[boom] schedule`; what remains of
+// that key is one case asserting it parses and does nothing.
 import { expect, test } from "bun:test";
 import { chmod, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pruneRuns } from "../src/engine/journal.ts";
 import { reconcile } from "../src/engine/reconcile.ts";
-import { rollback } from "../src/engine/rollback.ts";
 import { pathExists } from "../src/lib/fs.ts";
 import type { Env } from "../src/lib/paths.ts";
 import { makeSandbox, type Sandbox } from "./support/sandbox.ts";
@@ -55,33 +54,6 @@ test("dir: an un-owned dir is left on uninstall; a non-empty remove_on_uninstall
 
 // The mkdir undo is `rmdir`, not `rm -rf` — reversing a directory boom created must never take
 // data boom never touched with it. These three pin the arm's whole ladder: kept, removed, gone.
-
-test("dir: rollback leaves a directory the user has since filled", async () => {
-  const sb = await sandbox(`[[section]]\nname = "d"\ndir = [{ path = "~/Screenshots" }]\n`);
-  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
-  const dir = join(sb.home, "Screenshots");
-  await writeFile(join(dir, "shot.png"), "user data\n");
-  expect(await rollback(sb.ctx)).toBe(0);
-  expect(await pathExists(dir)).toBe(true);
-  expect(await readFile(join(dir, "shot.png"), "utf8")).toBe("user data\n"); // an rm -rf would have eaten this
-  expect(sb.out()).toContain("left in place — not empty");
-});
-
-test("dir: rollback removes a directory that is still empty", async () => {
-  const sb = await sandbox(`[[section]]\nname = "d"\ndir = [{ path = "~/Screenshots" }]\n`);
-  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
-  expect(await rollback(sb.ctx)).toBe(0);
-  expect(await pathExists(join(sb.home, "Screenshots"))).toBe(false);
-});
-
-test("dir: rollback tolerates a directory the user already deleted", async () => {
-  const sb = await sandbox(`[[section]]\nname = "d"\ndir = [{ path = "~/Screenshots" }]\n`);
-  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
-  await rm(join(sb.home, "Screenshots"), { recursive: true, force: true }); // tidied up by hand
-  // Already in the post-rollback state → reversed, not failed. A bare ENOENT rethrow would exit 1.
-  expect(await rollback(sb.ctx)).toBe(0);
-  expect(sb.out()).toContain("already gone");
-});
 
 test("dir: verify fails when the directory is missing", async () => {
   const sb = await sandbox(`[[section]]\nname = "d"\ndir = [{ path = "~/nope" }]\n`);
@@ -379,21 +351,22 @@ test("[boom] skill_on_sync: sync installs the skill; verify reports it current",
   expect(sb.out()).toContain("skill current"); // verbose: "current" is a quiet skip by default
 });
 
-test("[boom] schedule: dry-run plans each timer; off-platform reports macOS-only", async () => {
-  const darwin = await sandbox(
-    `[boom]\nschedule = [{ cmd = "verify", every = "15m" }, { cmd = "code fetch", every = "1h" }]\n\n[[section]]\nname = "s"\n`,
+// `schedule` is retired: parsed, ignored, no longer generating launchd timers. Two things have
+// to hold, and neither is the absence of a test — a deleted case would assert nothing.
+//
+//   1. A boomfile still carrying it PARSES. BoomSettingsSchema is a strictObject, so the only
+//      alternative to accepting the key is failing the entire config on it.
+//   2. It DOES NOTHING. No timer is planned, and with no other field set the self-wiring header
+//      does not appear at all.
+test("[boom] schedule: a retired key parses and is inert", async () => {
+  const sb = await sandbox(
+    `[boom]\nschedule = [{ cmd = "verify", every = "15m" }]\n\n[[section]]\nname = "s"\n`,
     { BOOM_OS: "darwin" },
   );
-  expect(await reconcile("sync", darwin.ctx, { dryRun: true })).toBe(0);
-  expect(darwin.out()).toContain("would schedule verify every 15m");
-  expect(darwin.out()).toContain("would schedule code fetch every 1h");
-
-  const linux = await sandbox(
-    `[boom]\nschedule = [{ cmd = "code fetch", every = "15m" }]\n\n[[section]]\nname = "s"\n`,
-    { BOOM_OS: "linux" },
-  );
-  expect(await reconcile("sync", linux.ctx, { verbose: true })).toBe(0);
-  expect(linux.out()).toContain("macOS-only"); // verbose: off-platform no-ops are quiet by default
+  expect(await reconcile("sync", sb.ctx, { dryRun: true })).toBe(0);
+  expect(sb.out()).not.toContain("schedule");
+  expect(sb.out()).not.toContain("timer");
+  expect(sb.out()).not.toContain("self-wiring");
 });
 
 test("[boom] an absent table changes nothing (no self-wiring header)", async () => {
@@ -719,46 +692,6 @@ test("pkg gh: gh absent from PATH is a reported failure, not a crash", async () 
 
 // ------------------------------------------------------ osx_default journaling + rollback
 
-test("osx_default: sync journals the prior value (type inferred) and rollback restores it", async () => {
-  const sb = await sandbox(
-    // No `type` — inferred as int from the TOML number.
-    `[[section]]\nname = "O"\nosx_default = [{ domain = "com.test.dock", key = "tilesize", value = 48 }]\n`,
-    { BOOM_OS: "darwin" },
-  );
-  const bin = join(sb.repo, ".fakebin");
-  const store = join(sb.repo, "defaults.store");
-  const writeLog = join(sb.repo, "defaults-write.log");
-  await writeFile(store, "com.test.dock|tilesize=64\n"); // the pre-existing value
-  // A tiny stateful fake `defaults`: read/write/delete a `domain|key=value` store.
-  await fakeBin(
-    bin,
-    "defaults",
-    // `delete` of an absent key exits 1, faithfully: real `defaults` prints "Domain (…) not
-    // found. / Defaults have not been changed." and exits 1, and a fake that exits 0 there
-    // hides every already-reversed/already-torn-down path from these tests.
-    `STORE="${store}"; LOG="${writeLog}"; touch "$STORE"
-case "$1" in
-  read) line=$(grep "^$2|$3=" "$STORE" | tail -1); [ -n "$line" ] || exit 1; echo "\${line#*=}";;
-  write) echo "$@" >> "$LOG"; grep -v "^$2|$3=" "$STORE" > "$STORE.tmp" 2>/dev/null; mv "$STORE.tmp" "$STORE"; echo "$2|$3=$5" >> "$STORE";;
-  delete) grep -q "^$2|$3=" "$STORE" || exit 1; grep -v "^$2|$3=" "$STORE" > "$STORE.tmp" 2>/dev/null; mv "$STORE.tmp" "$STORE";;
-esac
-exit 0
-`,
-  );
-  await fakeBin(bin, "killall", "exit 0\n"); // don't restart the runner's real Dock/Finder
-  const env = sb.ctx.env as Record<string, string | undefined>;
-  env.PATH = `${bin}:${process.env.PATH ?? ""}`;
-
-  // sync writes the declared value; `-int` proves the type was inferred, not stated.
-  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
-  expect(await readFile(store, "utf8")).toContain("tilesize=48");
-  expect(await readFile(writeLog, "utf8")).toContain("-int 48");
-
-  // rollback re-applies the prior value from the journaled undo token.
-  expect(await rollback(sb.ctx)).toBe(0);
-  expect(await readFile(store, "utf8")).toContain("tilesize=64");
-});
-
 // ----------------------------------------------------------------- osx_default uninstall
 
 // The stateful fake `defaults` the uninstall tests drive, plus a `killall` stub so finalizeOsx
@@ -883,18 +816,6 @@ test("osx_default: uninstall is idempotent — a re-deleted key is already-unset
 
 // Same hazard on the rollback path: reversing a run that introduced a key must stay green when
 // the key is already gone (rolled back twice, or the user tidied it away first).
-test("osx_default: rollback of a key boom introduced is clean when the key is already gone", async () => {
-  const rig = await osxRig(
-    `[[section]]\nname = "O"\nosx_default = [{ domain = "com.test.finder", key = "ShowPathbar", value = 1 }]\n`,
-  );
-  expect(await reconcile("sync", rig.sb.ctx, {})).toBe(0);
-  expect(await rig.value("com.test.finder", "ShowPathbar")).toBe("1");
-
-  await writeFile(rig.store, ""); // cleared behind boom's back
-  expect(await rollback(rig.sb.ctx)).toBe(0);
-  expect(rig.sb.out()).toContain("com.test.finder ShowPathbar already gone");
-});
-
 test("osx_default: uninstall with no journal record leaves the key alone", async () => {
   const rig = await osxRig(
     `[[section]]\nname = "O"\nosx_default = [{ domain = "com.test.dock", key = "tilesize", value = 48 }]\n`,
