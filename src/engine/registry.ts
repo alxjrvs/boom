@@ -2,7 +2,7 @@
 // executable form of the phase order that used to live only in a comment above a hand-written
 // dispatch sequence. Adding a resource is one table entry, not an edit to the section loop.
 // The order below is the one SPEC.md and config/schema.ts state:
-//   link → copy → tmpl → secret → dir → pkg → osx_default → launchd → systemd → run → check → hook
+//   link → copy → tmpl → secret → dir → pkg → osx_default → launchd → run → check → hook
 //
 // Each resource declares how to turn a Section into labelled work units (so the per-item
 // error boundary can name what failed) and, optionally, a `finalize` hook that runs once at
@@ -20,7 +20,6 @@ import { finalizeOsx, reconcileOsxDefault } from "./resources/osx.ts";
 import { reconcilePkg } from "./resources/packages.ts";
 import { reconcileRun } from "./resources/run.ts";
 import { reconcileSecret } from "./resources/secret.ts";
-import { reconcileSystemd } from "./resources/systemd.ts";
 import { reconcileTmpl } from "./resources/template.ts";
 import type { ReconcileCtx } from "./types.ts";
 
@@ -98,11 +97,6 @@ const RESOURCES: readonly ResourceType[] = [
     category: "SERVICES",
     items: (s) =>
       (s.launchd ?? []).map((e) => ({ label: `launchd ${e.src}`, run: (ctx) => reconcileLaunchd(e, ctx) })),
-  },
-  {
-    category: "SERVICES",
-    items: (s) =>
-      (s.systemd ?? []).map((e) => ({ label: `systemd ${e.name}`, run: (ctx) => reconcileSystemd(e, ctx) })),
   },
   {
     category: "COMMANDS",
