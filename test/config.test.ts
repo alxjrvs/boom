@@ -154,7 +154,7 @@ test("loadConfig still accepts a copy entry without expand", async () => {
   expect(cfg.section[0]?.copy?.[0]?.dst).toBe("~/a");
 });
 
-test("loadConfig rejects `remove_on_uninstall` on brew and on mise, and accepts it on apt and on npm", async () => {
+test("loadConfig rejects `remove_on_uninstall` on brew and on mise, and accepts it on gh", async () => {
   const dir = await sandbox();
   for (const mgr of ["brew", "mise"]) {
     await writeFile(
@@ -170,14 +170,12 @@ test("loadConfig rejects `remove_on_uninstall` on brew and on mise, and accepts 
     `[[section]]
 name = "x"
 pkg = [
-  { manager = "apt", file = "apt.txt", remove_on_uninstall = true },
-  { manager = "npm", file = "npm.txt", remove_on_uninstall = false },
+  { manager = "gh", file = "gh.txt", remove_on_uninstall = true },
 ]
 `,
   );
   const cfg = await loadConfig(dir);
   expect(cfg.section[0]?.pkg?.[0]?.remove_on_uninstall).toBe(true);
-  expect(cfg.section[0]?.pkg?.[1]?.remove_on_uninstall).toBe(false);
 });
 
 test("loadConfig accepts `cleanup` on brew only, and only with a known mode", async () => {
@@ -185,7 +183,7 @@ test("loadConfig accepts `cleanup` on brew only, and only with a known mode", as
 
   // brew-only: the key wraps `brew bundle cleanup`, which the other managers have no
   // equivalent for. Rejecting it loudly beats accepting it and silently doing nothing.
-  for (const mgr of ["mise", "apt", "npm"]) {
+  for (const mgr of ["mise", "gh"]) {
     await writeFile(
       join(dir, "boomfile.toml"),
       `[[section]]\nname = "x"\npkg = [{ manager = "${mgr}", cleanup = "check" }]\n`,

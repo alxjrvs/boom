@@ -15,18 +15,9 @@ export async function reconcilePkg(entry: Pkg, ctx: ReconcileCtx): Promise<void>
       return reconcileBrew(entry.file ?? "Brewfile", entry.cleanup, ctx);
     case "mise":
       return reconcileMise(ctx);
-    // The whole `entry` goes down (not just `file`) so the arms can read `remove_on_uninstall`;
+    // The whole `entry` goes down (not just `file`) so the arm can read `remove_on_uninstall`;
     // the narrowed manager literal still rides alongside it, because that is what keys the typed
-    // LINUX_MGR/USER_MGR lookups — `entry.manager` is the full union at those call sites.
-    case "apt":
-      return reconcileLinuxPkgs("apt", entry, ctx);
-    case "dnf":
-      return reconcileLinuxPkgs("dnf", entry, ctx);
-    case "cargo":
-    case "npm":
-    case "pipx":
-    case "gem":
-    case "flatpak":
+    // USER_MGR lookup.
     case "gh":
       return reconcileUserPkgs(entry.manager, entry, ctx);
   }
@@ -229,38 +220,8 @@ async function reconcileMise(ctx: ReconcileCtx): Promise<void> {
   }
 }
 
-// The two system package managers differ only in their CLI and installed-query verb. Both
-// need root to install, so the argv is prefixed with `sudo` — a boom on a Linux dev box is
-// assumed to have passwordless sudo like every other system-touching step; a sudo that
-// prompts and fails is reported, not silently swallowed.
-const LINUX_MGR = {
-  apt: {
-    cli: "apt-get",
-    install: ["sudo", "apt-get", "install", "-y"],
-    // Only reached under `remove_on_uninstall = true`. Deliberately plain: no --force, no
-    // --ignore-dependencies, so removing something another package needs fails loudly.
-    remove: ["sudo", "apt-get", "remove", "-y"],
-    query: (p: string) => ["dpkg", "-s", p],
-  },
-  dnf: {
-    cli: "dnf",
-    install: ["sudo", "dnf", "install", "-y"],
-    remove: ["sudo", "dnf", "remove", "-y"],
-    query: (p: string) => ["rpm", "-q", p],
-  },
-} as const;
-
-// boom builds this sudo argv itself, so it has to opt into an askpass helper the way Homebrew does
-// for its own (`-A` when SUDO_ASKPASS is set — Library/Homebrew/system_command.rb). Without this a
-// Linux sync parks on an invisible password prompt even though the user has a helper configured.
-// A no-op when SUDO_ASKPASS is unset, so the default path stays a plain interactive `sudo`.
-function withAskpass(argv: readonly string[], env: Env): string[] {
-  if (!env.SUDO_ASKPASS || argv[0] !== "sudo") return [...argv];
-  return ["sudo", "-A", ...argv.slice(1)];
-}
-
 // Parse a newline-separated package list: one name per line, `#` comments and blank lines
-// dropped. The declarative form of `xargs apt-get install < packages.txt`.
+// dropped. The declarative form of a package list piped into an installer.
 async function readPackages(file: string, ctx: ReconcileCtx): Promise<string[]> {
   const text = await Bun.file(join(ctx.repo, file)).text();
   return text
@@ -269,113 +230,13 @@ async function readPackages(file: string, ctx: ReconcileCtx): Promise<string[]> 
     .filter((l) => l.length > 0);
 }
 
-async function reconcileLinuxPkgs(mgr: "apt" | "dnf", entry: Pkg, ctx: ReconcileCtx): Promise<void> {
-  const { report } = ctx;
-  const { file } = entry;
-  const { cli, install, remove, query } = LINUX_MGR[mgr];
-
-  // OS-gated like osx/launchd: a Linux-only manager on a mac is a no-op (reported on verify so
-  // a cross-platform section doesn't silently pass), not a failure.
-  if (detectOs(ctx.env) !== "linux") {
-    if (ctx.verb === "verify") report.skip(`${mgr} — Linux-only`);
-    return;
-  }
-  if (!file) {
-    report.fail(`${mgr} pkg requires a \`file\` listing packages`);
-    return;
-  }
-  if (!hasCommand(cli, ctx.env)) {
-    report.fail(`${cli} not installed`);
-    return;
-  }
-
-  let packages: string[];
-  try {
-    packages = await readPackages(file, ctx);
-  } catch (e) {
-    report.fail(`${mgr} package list ${file}: ${(e as Error).message}`);
-    return;
-  }
-  if (packages.length === 0) {
-    report.skip(`${mgr} — no packages listed in ${file}`);
-    return;
-  }
-
-  switch (ctx.verb) {
-    case "sync": {
-      if (ctx.dryRun) {
-        report.plan(`would run: ${install.join(" ")} ${packages.join(" ")}`);
-        return;
-      }
-      {
-        // Same bargain as brew: this argv literally starts with `sudo`, so without an askpass helper
-        // it may need the terminal to ask. Here boom *built* the command, so the prompt can name it
-        // outright — no output-relaying needed to work out what escalated.
-        const mayPrompt = !ctx.env.SUDO_ASKPASS;
-        const env = mayPrompt
-          ? { ...ctx.env, SUDO_PROMPT: sudoPrompt(`${cli} install (${packages.length} package(s))`) }
-          : ctx.env;
-        const r = await report.spin(
-          `${mgr} install`,
-          () =>
-            runArgvAsync([...withAskpass(install, ctx.env), ...packages], env, toolIo(ctx.json, ctx.verbose)),
-          { mayPrompt },
-        );
-        if (r.code === 0) report.skip(`${mgr}: ${packages.length} package(s) satisfied`);
-        else report.fail(`${mgr} install failed${lastLine(r.stderr) ? `: ${lastLine(r.stderr)}` : ""}`);
-      }
-      return;
-    }
-    case "verify": {
-      // Query each package's installed state; the manager's query exits non-zero for a
-      // missing package. Collect the misses so the report names what's actually absent.
-      const missing = packages.filter((p) => captureArgv(query(p), ctx.env).code !== 0);
-      if (missing.length === 0) report.skip(`${mgr}: ${packages.length} package(s) installed`);
-      else report.warn(`${mgr} missing: ${missing.join(", ")} — run: boom source`);
-      return;
-    }
-    case "uninstall": {
-      // System packages are shared machine state — another user, another tool, or the distro
-      // itself may depend on one boom happens to declare. So removal is opt-in *per entry*:
-      // `remove_on_uninstall = true` is a declaration of ownership, not a convenience flag.
-      if (entry.remove_on_uninstall !== true) {
-        report.skip(`${mgr}: kept (remove_on_uninstall not set)`);
-        return;
-      }
-      // Only remove what is actually installed: `apt-get remove` on an absent package is a
-      // non-zero failure, which would turn one already-clean package into a reported error.
-      const present = packages.filter((p) => captureArgv(query(p), ctx.env).code === 0);
-      if (present.length === 0) {
-        report.skip(`${mgr}: nothing to remove`);
-        return;
-      }
-      if (ctx.dryRun) {
-        report.plan(`would run: ${remove.join(" ")} ${present.join(" ")}`);
-        return;
-      }
-      const mayPrompt = !ctx.env.SUDO_ASKPASS;
-      const env = mayPrompt
-        ? { ...ctx.env, SUDO_PROMPT: sudoPrompt(`${cli} remove (${present.length} package(s))`) }
-        : ctx.env;
-      const r = await report.spin(
-        `${mgr} remove`,
-        () => runArgvAsync([...withAskpass(remove, ctx.env), ...present], env, toolIo(ctx.json, ctx.verbose)),
-        { mayPrompt },
-      );
-      if (r.code === 0) report.ok(`${mgr}: removed ${present.length} package(s)`);
-      else report.fail(`${mgr} remove failed${lastLine(r.stderr) ? `: ${lastLine(r.stderr)}` : ""}`);
-      return;
-    }
-  }
-}
-
 // The user-scoped managers: like apt/dnf they read a newline package list, but install into the
 // *user* toolchain (no sudo, not the OS package set) — a language/app installer per manager. Two
 // query disciplines: most expose a per-package "is it installed" probe whose exit code is the
 // answer; cargo and pipx have no per-package query, so their installed set is parsed once from a
 // list command and membership-tested. Every command shape mirrors adopt.ts's OTHER_MANAGERS so
 // detection (`boom adopt`) and management (`boom sync`) agree on the exact CLIs.
-type UserMgrName = "cargo" | "npm" | "pipx" | "gem" | "flatpak" | "gh";
+type UserMgrName = "gh";
 
 // A per-package probe (its exit code is the answer) vs. a one-shot list parsed into an installed
 // set (for tools with no per-package query). `parse` returns the set of installed package names.
@@ -399,18 +260,6 @@ interface UserMgr {
   readonly query: PkgQuery;
 }
 
-// The first whitespace token of every non-indented line — the name column of `cargo install --list`
-// ("ripgrep v13.0.0:" → "ripgrep") and `pipx list --short` ("black 24.1.0" → "black").
-function firstTokens(out: string): Set<string> {
-  const names = new Set<string>();
-  for (const line of out.split("\n")) {
-    if (!/^\S/.test(line)) continue; // indented lines are a crate's binaries / a detail row
-    const name = line.trim().split(/\s+/)[0];
-    if (name) names.add(name);
-  }
-  return names;
-}
-
 // The `owner/repo` column of `gh extension list`. There is no `--json` for this command, and piped
 // (which is how captureArgv reads it) gh prints one TSV row per extension —
 // "gh stack\tgithub/gh-stack\tv0.1.0" — so the repo is picked **by shape** (the only token holding
@@ -430,39 +279,6 @@ function ghExtensions(out: string): Set<string> {
 }
 
 const USER_MGR: Record<UserMgrName, UserMgr> = {
-  cargo: {
-    cli: "cargo",
-    install: ["cargo", "install"],
-    uninstall: ["cargo", "uninstall"],
-    query: { list: ["cargo", "install", "--list"], parse: firstTokens },
-  },
-  npm: {
-    cli: "npm",
-    install: ["npm", "install", "-g"],
-    uninstall: ["npm", "rm", "-g"],
-    query: { each: (p) => ["npm", "ls", "-g", "--depth=0", p] },
-  },
-  pipx: {
-    cli: "pipx",
-    install: ["pipx", "install"],
-    uninstall: ["pipx", "uninstall"],
-    query: { list: ["pipx", "list", "--short"], parse: firstTokens },
-  },
-  gem: {
-    cli: "gem",
-    install: ["gem", "install"],
-    // -a removes every version, -x its executables — so uninstall is non-interactive (a bare
-    // `gem uninstall` prompts when multiple versions are installed).
-    uninstall: ["gem", "uninstall", "-a", "-x"],
-    query: { each: (p) => ["gem", "list", "-i", p] },
-  },
-  flatpak: {
-    cli: "flatpak",
-    linuxOnly: true,
-    install: ["flatpak", "install", "-y"],
-    uninstall: ["flatpak", "uninstall", "-y"],
-    query: { each: (p) => ["flatpak", "info", p] },
-  },
   gh: {
     cli: "gh",
     install: ["gh", "extension", "install"],

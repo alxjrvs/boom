@@ -150,7 +150,7 @@ ahead-of-upstream) — `boom source push` or `boom source reset` first, then re-
 `boomfile.toml` is a TOML document validated against a schema (`src/config/schema.ts`,
 valibot). It is grouped into `[[section]]`s; within a section, resources run in a
 fixed phase order:
-`link → copy → tmpl → secret → dir → pkg → osx_default → launchd → systemd → run → check → absent → hook`.
+`link → copy → tmpl → secret → dir → pkg → osx_default → launchd → run → check → absent → hook`.
 Resources:
 
 - `link` / `copy` `= [{ src, dst, mode? }]` — place a repo file at `dst` (symlink vs
@@ -167,8 +167,8 @@ Resources:
   the two-line migration
 - `secret = [{ dst, ref? | template?, mode?, backend? }]` — render a secret to a file at sync
   time; `mode` defaults to `0600`. The `backend` is inferred from the ref scheme (`op://`→op,
-  `env:`→env, `pass:`→pass, `*.age`→age, `*.sops`→sops) or set explicitly — 1Password
-  (`op read`/`op inject`), a plain env var, `pass`, or an age/sops-encrypted file. Secrets stay
+  `env:`→env) or set explicitly — 1Password (`op read`/`op inject`) or a plain env var.
+  Secrets stay
   out of the owned-destinations manifest, so orphan reaping never auto-deletes one. boom never
   journals or backs up the plaintext **it** renders (a fresh render's undo is a plain remove); a
   pre-existing file at `dst` is the user's, so it is **left alone** — replacing it takes
@@ -177,23 +177,19 @@ Resources:
 - `dir = [{ path, mode?, remove_on_uninstall? }]` — ensure a standalone directory exists
   (declarative `mkdir -p`/`chmod`); `remove_on_uninstall = true` removes it on uninstall *only
   if empty*
-- `pkg = [{ manager, file?, remove_on_uninstall? }]` — satisfy a package manager. `brew` runs `brew bundle` over
-  `file` (default `Brewfile`); `mise` runs `mise install`; `apt`/`dnf`/`cargo`/`npm` (global)/
-  `pipx`/`gem`/`flatpak` install a newline-separated `file` package list, each gating on its
-  CLI being present (a missing tool is a reported failure, not a crash). `gh` installs `gh` CLI
-  extensions from the same newline list, one owner-qualified `owner/repo` per line (four forks
-  answer to `gh-stack`, so the owner is the identity) — `gh extension install`, verify diffs
-  `gh extension list`, uninstall removes by bare name; declare it *after* the manager that
-  installs `gh`, since there is no cross-section dependency mechanism. One array entry per
+- `pkg = [{ manager, file?, remove_on_uninstall? }]` — satisfy a package manager. `brew` runs
+  `brew bundle` over `file` (default `Brewfile`); `mise` runs `mise install`; `gh` installs `gh`
+  CLI extensions from a newline-separated `file` list, one owner-qualified `owner/repo` per line
+  (four forks answer to `gh-stack`, so the owner is the identity) — `gh extension install`,
+  verify diffs `gh extension list`, uninstall removes by bare name; declare it *after* the
+  manager that installs `gh`, since there is no cross-section dependency mechanism. Each gates on
+  its CLI being present (a missing tool is a reported failure, not a crash). One array entry per
   manager; a new manager is one dispatch arm, not a new section key.
-  `remove_on_uninstall` decides what `boom uninstall` reclaims, per entry. Omitted, it is
-  today's behavior: the user-scoped managers remove what they installed, `apt`/`dnf` never do.
-  `= true` opts a system manager **in** (`sudo apt-get remove -y <declared>`, only for packages
-  actually installed) — opt-in because system packages are shared machine state, so the flag is
-  a declaration of ownership. `= false` opts a user-scoped manager **out**. It is a load-time
-  error on `brew`/`mise`: their declared set lives in a Brewfile / the repo's mise config and
-  neither has a "remove exactly what this file declares" verb (`brew bundle cleanup` does the
-  opposite) — tear those down with a `run` step bound to `on = "uninstall"`
+  `remove_on_uninstall` decides what `boom uninstall` reclaims, per entry. Omitted, `gh` removes
+  what it installed; `= false` opts it out. It is a load-time error on `brew`/`mise`: their
+  declared set lives in a Brewfile / the repo's mise config and neither has a "remove exactly
+  what this file declares" verb (`brew bundle cleanup` does the opposite) — tear those down with
+  a `run` step bound to `on = "uninstall"`
 - `osx_default = [{ domain, key, value, type? }]` — a `defaults write`; `type` is inferred
   from the TOML value (`bool`/`int`/`float`/`string`) and only stated to override an edge
   case. The prior value is journaled, so it can be recovered by hand (including a key boom
@@ -203,11 +199,6 @@ Resources:
 - `launchd = [{ src, dst? }]` — link a macOS LaunchAgent plist into
   `~/Library/LaunchAgents` and own its launchctl lifecycle (`load -w` on sync, `unload` on
   uninstall); darwin-only, `dst` defaults to `~/Library/LaunchAgents/<basename(src)>`
-- `systemd = [{ name, exec, description?, timer?, enable?, env? }]` — the Linux twin of
-  `launchd`: **generate** a `.service` (and, when `timer` is a systemd OnCalendar expression, a
-  `.timer`) into `~/.config/systemd/user` and own its `systemctl --user` lifecycle
-  (daemon-reload + `enable --now` on sync, `disable --now` on uninstall); linux-only. Because
-  the unit text is generated, an unchanged stanza re-renders byte-identical → a no-op sync
 - `run = [{ on, cmd, timeout?, unless?, creates? }]` — the inline imperative escape; `on` is a
   verb or a list of `"sync"|"verify"|"uninstall"`; `timeout` (seconds) caps a step's wall-clock
   so a hung command can't block reconcile. `unless` is a shell command used as a **predicate**
@@ -337,8 +328,7 @@ at 1.0.
 
 If you need an unattended escalating sync, export `SUDO_ASKPASS` yourself — it is sudo's variable,
 not boom's, and boom still honors one it inherits: it skips the prompt label and the header relay
-(nothing is going to ask), and appends `-A` to the `sudo` argv it builds itself for apt/dnf, the
-same way Homebrew does for its own. Otherwise keep mutating syncs interactive.
+(nothing is going to ask). Otherwise keep mutating syncs interactive.
 
 ### Hooks = the resource-type extension contract
 
@@ -460,8 +450,8 @@ src/
     pr.ts                  the GitHub half of source push (slug, branch name, gh)
     overview.ts            boom status (read-only dashboard composing the existing readers)
     registry.ts            data-driven resource table (phase order) + finalize hooks
-    resources/             link · copy · tmpl · secret · dir · pkg · osx · launchd · systemd · run · check · hook
-    secrets/backends.ts    pluggable secret backends (op · env · pass · age · sops)
+    resources/             link · copy · tmpl · secret · dir · pkg · osx · launchd · run · check · hook
+    secrets/backends.ts    pluggable secret backends (op · env)
     db.ts journal.ts       bun:sqlite store: transaction journal
     state.ts               the owned-destinations manifest (layout lives in lib/paths.ts)
     skill.ts               renders the Claude SKILL.md (commands/skill.ts is the CLI wrapper)
