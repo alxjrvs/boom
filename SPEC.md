@@ -150,7 +150,7 @@ ahead-of-upstream) — `boom source push` or `boom source reset` first, then re-
 `boomfile.toml` is a TOML document validated against a schema (`src/config/schema.ts`,
 valibot). It is grouped into `[[section]]`s; within a section, resources run in a
 fixed phase order:
-`link → copy → tmpl → secret → dir → pkg → osx_default → launchd → systemd → run → check → absent → hook`.
+`link → copy → tmpl → secret → dir → pkg → osx_default → launchd → run → check → absent → hook`.
 Resources:
 
 - `link` / `copy` `= [{ src, dst, mode? }]` — place a repo file at `dst` (symlink vs
@@ -203,11 +203,6 @@ Resources:
 - `launchd = [{ src, dst? }]` — link a macOS LaunchAgent plist into
   `~/Library/LaunchAgents` and own its launchctl lifecycle (`load -w` on sync, `unload` on
   uninstall); darwin-only, `dst` defaults to `~/Library/LaunchAgents/<basename(src)>`
-- `systemd = [{ name, exec, description?, timer?, enable?, env? }]` — the Linux twin of
-  `launchd`: **generate** a `.service` (and, when `timer` is a systemd OnCalendar expression, a
-  `.timer`) into `~/.config/systemd/user` and own its `systemctl --user` lifecycle
-  (daemon-reload + `enable --now` on sync, `disable --now` on uninstall); linux-only. Because
-  the unit text is generated, an unchanged stanza re-renders byte-identical → a no-op sync
 - `run = [{ on, cmd, timeout?, unless?, creates? }]` — the inline imperative escape; `on` is a
   verb or a list of `"sync"|"verify"|"uninstall"`; `timeout` (seconds) caps a step's wall-clock
   so a hung command can't block reconcile. `unless` is a shell command used as a **predicate**
@@ -460,7 +455,7 @@ src/
     pr.ts                  the GitHub half of source push (slug, branch name, gh)
     overview.ts            boom status (read-only dashboard composing the existing readers)
     registry.ts            data-driven resource table (phase order) + finalize hooks
-    resources/             link · copy · tmpl · secret · dir · pkg · osx · launchd · systemd · run · check · hook
+    resources/             link · copy · tmpl · secret · dir · pkg · osx · launchd · run · check · hook
     secrets/backends.ts    pluggable secret backends (op · env · pass · age · sops)
     db.ts journal.ts       bun:sqlite store: transaction journal
     state.ts               the owned-destinations manifest (layout lives in lib/paths.ts)
