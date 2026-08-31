@@ -11,13 +11,17 @@ It began as a bash prototype (extracted from `alxjrvs/dotFiles`) and was rewritt
 to TypeScript; this document is the design of record for that engine.
 
 This document describes the **current** design, not how it got here. When a release changes
-behavior a running machine depends on, the upgrade path is a migration note beside it — for the
-0.23 release that is
-[`docs/MIGRATING-0.23.md`](https://github.com/alxjrvs/boom/blob/main/docs/MIGRATING-0.23.md),
-which covers the retirement of `copy.expand`, the two new load-time errors, and the behavior
-changes to `secret`, `rollback`, `uninstall` and glob placement. *(An absolute link, not a
-repo-relative one: this file is also rendered as a standalone docs page, where a relative path
-into `docs/` would not resolve.)*
+behavior a running machine depends on, the upgrade path is a migration note beside it:
+
+- [`docs/MIGRATING-0.31.md`](https://github.com/alxjrvs/boom/blob/main/docs/MIGRATING-0.31.md) —
+  ten verbs removed and `[boom] schedule` retired. No config edit is required, but a machine that
+  had `schedule` keeps its LaunchAgents loaded, because the reaper went with the generator.
+- [`docs/MIGRATING-0.23.md`](https://github.com/alxjrvs/boom/blob/main/docs/MIGRATING-0.23.md) —
+  the retirement of `copy.expand`, the two new load-time errors, and the behavior changes to
+  `secret`, `rollback`, `uninstall` and glob placement. Written while `rollback` still existed.
+
+*(Absolute links, not repo-relative ones: this file is also rendered as a standalone docs page,
+where a relative path into `docs/` would not resolve.)*
 
 ## The model (decided — don't relitigate)
 
