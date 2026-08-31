@@ -3,14 +3,12 @@
 // user command, and commands/catalog.ts derives names + briefs from it for completions,
 // the man page, and the skill. There is no hardcoded dispatch and no parallel table.
 import { buildApplication, buildRouteMap } from "@stricli/core";
-import { adoptCommand } from "./commands/adopt.ts";
 import { checkpointCommand } from "./commands/checkpoint.ts";
 import { codeRouteMap } from "./commands/code.ts";
 import { completionsCommand } from "./commands/completions.ts";
 import { doctorCommand } from "./commands/doctor.ts";
 import { editCommand } from "./commands/edit.ts";
 import { fleetCommand } from "./commands/fleet.ts";
-import { initCommand } from "./commands/init.ts";
 import { lockCommand } from "./commands/lock.ts";
 import { manCommand } from "./commands/man.ts";
 import { mcpRouteMap } from "./commands/mcp.ts";
@@ -39,8 +37,6 @@ export const routes = buildRouteMap({
     upgrade: upgradeCommand,
     doctor: doctorCommand,
     lock: lockCommand,
-    adopt: adoptCommand,
-    init: initCommand,
     fleet: fleetCommand,
     module: moduleRouteMap,
     code: codeRouteMap,
