@@ -8,7 +8,6 @@ import { codeRouteMap } from "./commands/code.ts";
 import { completionsCommand } from "./commands/completions.ts";
 import { doctorCommand } from "./commands/doctor.ts";
 import { editCommand } from "./commands/edit.ts";
-import { fleetCommand } from "./commands/fleet.ts";
 import { lockCommand } from "./commands/lock.ts";
 import { manCommand } from "./commands/man.ts";
 import { mcpRouteMap } from "./commands/mcp.ts";
@@ -36,7 +35,6 @@ export const routes = buildRouteMap({
     upgrade: upgradeCommand,
     doctor: doctorCommand,
     lock: lockCommand,
-    fleet: fleetCommand,
     code: codeRouteMap,
     mcp: mcpRouteMap,
     completions: completionsCommand,

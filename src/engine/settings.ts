@@ -28,7 +28,6 @@ import { boomStateDir } from "../lib/paths.ts";
 import { runArgv } from "../lib/proc.ts";
 import { fetchLatestVersion } from "../lib/release.ts";
 import { compareVersions, VERSION } from "../lib/version.ts";
-import { machineSummary, writeMachineSummary } from "./fleet.ts";
 import { journalRemove, journalWrite } from "./journal.ts";
 import { runWorkItems, type WorkItem } from "./registry.ts";
 import { skillDoc, skillInstallPath } from "./skill.ts";
@@ -72,9 +71,7 @@ function timerArgs(cmd: string, self: string): string[] {
 
 // Any field configured? Gates the header so an absent or all-off `[boom]` table stays silent.
 function anyConfigured(s: BoomSettings): boolean {
-  return Boolean(
-    s.skill_on_sync || s.upgrade_on_sync || (s.schedule && s.schedule.length > 0) || s.fleet || s.notify,
-  );
+  return Boolean(s.skill_on_sync || s.upgrade_on_sync || (s.schedule && s.schedule.length > 0) || s.notify);
 }
 
 // The running boom binary — the ProgramArguments a timer invokes, and the guard against
@@ -97,7 +94,6 @@ function boomWorkItems(settings: BoomSettings): WorkItem[] {
     items.push({ label: "reap timers", run: (ctx) => reapUndeclaredTimers(settings, ctx) });
   }
   if (settings.upgrade_on_sync) items.push({ label: "upgrade", run: (ctx) => applyUpgrade(settings, ctx) });
-  if (settings.fleet) items.push({ label: "fleet", run: applyFleet });
   // Notify runs LAST, so its drift tally also counts any drift the earlier self-wiring items
   // surfaced (a stale skill, an unloaded timer), not just section drift.
   if (settings.notify) items.push({ label: "notify", run: applyNotify });
@@ -124,24 +120,6 @@ function applyNotify(ctx: ReconcileCtx): void {
   );
   if (fired) report.ok(`notified: ${drift} drift item(s)`);
   else report.skip("drift found but no desktop notifier available");
-}
-
-// Record this machine's summary into the config repo after a sync, so `boom fleet` can show a
-// cross-machine view (see engine/fleet.ts). Only on sync — a verify/uninstall isn't a checkpoint
-// worth recording — and only when the summary actually changed, so a repeat same-day sync leaves
-// the repo clean. The verdict is read from the run's tally at this point (post-sections).
-async function applyFleet(ctx: ReconcileCtx): Promise<void> {
-  if (ctx.verb !== "sync") return;
-  const { report } = ctx;
-  if (ctx.dryRun) {
-    report.plan("would record this machine's fleet summary");
-    return;
-  }
-  const verdict = report.failures > 0 ? "fail" : report.warnings > 0 ? "warn" : "ok";
-  const summary = machineSummary(ctx.env, verdict);
-  if (await writeMachineSummary(ctx.repo, summary))
-    report.ok(`recorded fleet summary → .boom/machines/${summary.host}.json (push to share)`);
-  else report.skip("fleet summary unchanged");
 }
 
 export async function applyBoomSettings(

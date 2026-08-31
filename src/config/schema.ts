@@ -404,11 +404,6 @@ const BoomSettingsSchema = v.strictObject({
   // file at all. The value is parsed and ignored; reconcile warns when it is set. Delete the key
   // at 1.0, once the warning has outlived its usefulness.
   sudo_askpass: v.optional(v.string()),
-  // After a sync, commit a one-file summary of this machine's state (boom version, drift
-  // verdict, timestamp) to `.boom/machines/<host>.json` in the config repo — so `boom fleet`
-  // can answer "which of my machines are drifted / on what version" from the repo you already
-  // push. Opt-in: it makes sync write + commit to the repo, which a hands-off machine may not want.
-  fleet: v.optional(v.boolean()),
   // When a scheduled `verify` finds drift, raise a desktop notification (macOS osascript /
   // Linux notify-send) instead of letting the 0/2/1 exit code die in a timer log. Opt-in;
   // a no-op on a machine with no notifier.

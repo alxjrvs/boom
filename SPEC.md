@@ -30,7 +30,7 @@ A `boom` invocation does one of two things:
    - `boom verify` — check drift, exit 0 ok / 2 warn / 1 fail (`--json` for a report; `--ci`
      narrows to a non-interactive schema-check gate, 0/1, no machine walk)
    - `boom status` — a read-only one-screen dashboard composing the health signals other
-     commands already own (config, config-repo drift, last sync + checkpoints, fleet, lock,
+     commands already own (config, config-repo drift, last sync + checkpoints, lock,
      secrets); introduces no new state
    - `boom uninstall`
    These share **one verb-parameterized loop** (`src/engine/reconcile.ts`) over a
@@ -54,13 +54,12 @@ A `boom` invocation does one of two things:
 2. **Discovered subcommands** — built-ins are the `@stricli` route map, in `src/cli.ts` order:
    <!-- commands:begin -->
    `verify`, `status`, `plan`, `uninstall`, `source`, `where`, `edit`, `rollback`,
-   `checkpoint`, `upgrade`, `doctor`, `lock`, `fleet`, `code`,
+   `checkpoint`, `upgrade`, `doctor`, `lock`, `code`,
    `mcp`, `completions`, `man`, `skill`.
    <!-- commands:end -->
    That list is asserted **equal** to `commandNames()` by `test/docs-hygiene.test.ts`, so adding
    a route without naming it here (or naming one that no longer routes) fails CI. `source`,
-   `fleet`, `code` and `mcp` are themselves
-   nested route maps (`fleet drift|diff`). User commands
+   `code` and `mcp` are themselves nested route maps. User commands
    resolve at runtime from `<config>/commands/<name>.ts`.
    The route map is the **single registry, with no hardcoded dispatch anywhere**: `mcp`
    is an ordinary route (its `-- <server args>` ride through verbatim via the scanner's
@@ -287,11 +286,6 @@ verb-aware (sync installs/refreshes, verify reports drift, uninstall tears the t
   `boom <cmd>` on the interval, e.g. `{ cmd = "verify", every = "15m" }` to catch drift or
   `{ cmd = "code fetch", every = "15m" }` to keep `origin/HEAD` warm for agent worktree cuts —
   without a hand-authored plist. Removing an entry unloads its timer on the next sync.
-- `fleet = true` — after a sync, record this machine's summary (boom version, drift verdict,
-  date) into `.boom/machines/<host>.json` in the config repo, so `boom fleet` can show a
-  cross-machine view from the repo you already push (`fleet drift` narrows to the machines
-  needing attention; `fleet diff <a> <b>` compares two). Low-churn: date-granular, written only
-  when it changed.
 - `notify = true` — when a (typically scheduled) `boom verify` finds drift, raise a desktop
   notification (macOS `osascript` / Linux `notify-send`) so the signal doesn't die in a timer
   log. Best-effort; a platform with no notifier is a silent no-op.
@@ -469,7 +463,6 @@ src/
     push.ts reset.ts       boom source push / boom source reset
     pr.ts                  the GitHub half of source push (slug, branch name, gh)
     overview.ts            boom status (read-only dashboard composing the existing readers)
-    fleet.ts               boom fleet (list · drift · diff) over .boom/machines/<host>.json
     registry.ts            data-driven resource table (phase order) + finalize hooks
     resources/             link · copy · tmpl · secret · dir · pkg · osx · launchd · systemd · run · check · hook
     secrets/backends.ts    pluggable secret backends (op · env · pass · age · sops)

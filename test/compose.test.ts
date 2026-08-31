@@ -104,7 +104,8 @@ test("compose: base and overlay sections are stamped with origin + source", asyn
 
 test("compose: duplicate dst — the LAST declaration wins and the loser is dropped", async () => {
   const repo = await repoWith({
-    "boomfile.linux.toml": '[[section]]\nname = "strong"\nlink = [{ src = "repo/zshrc", dst = "~/.zshrc" }]\n',
+    "boomfile.linux.toml":
+      '[[section]]\nname = "strong"\nlink = [{ src = "repo/zshrc", dst = "~/.zshrc" }]\n',
     "boomfile.toml": '[[section]]\nname = "weak"\nlink = [{ src = "weak/zshrc", dst = "~/.zshrc" }]\n',
   });
   const c = await compose(repo);
@@ -115,7 +116,8 @@ test("compose: duplicate dst — the LAST declaration wins and the loser is drop
 
 test("compose: duplicate dst across kinds — the stronger layer's `copy` beats a `link`", async () => {
   const repo = await repoWith({
-    "boomfile.linux.toml": '[[section]]\nname = "strong"\ncopy = [{ src = "repo/npmrc", dst = "~/.npmrc" }]\n',
+    "boomfile.linux.toml":
+      '[[section]]\nname = "strong"\ncopy = [{ src = "repo/npmrc", dst = "~/.npmrc" }]\n',
     "boomfile.toml": '[[section]]\nname = "weak"\nlink = [{ src = "weak/npmrc", dst = "~/.npmrc" }]\n',
   });
   const c = await compose(repo);
@@ -127,7 +129,8 @@ test("compose: duplicate dst across kinds — the stronger layer's `copy` beats 
 
 test("compose: an override emits a note naming both sides", async () => {
   const repo = await repoWith({
-    "boomfile.linux.toml": '[[section]]\nname = "strong"\ncopy = [{ src = "repo/zshrc", dst = "~/.zshrc" }]\n',
+    "boomfile.linux.toml":
+      '[[section]]\nname = "strong"\ncopy = [{ src = "repo/zshrc", dst = "~/.zshrc" }]\n',
     "boomfile.toml": '[[section]]\nname = "weak"\nlink = [{ src = "weak/zshrc", dst = "~/.zshrc" }]\n',
   });
   const { notify, notes } = notifier();
@@ -151,7 +154,8 @@ test("compose: a glob `src` is never keyed", async () => {
 
 test("compose: a section emptied by dedupe is kept, so `--only` and `when` still resolve", async () => {
   const repo = await repoWith({
-    "boomfile.linux.toml": '[[section]]\nname = "strong"\nlink = [{ src = "repo/zshrc", dst = "~/.zshrc" }]\n',
+    "boomfile.linux.toml":
+      '[[section]]\nname = "strong"\nlink = [{ src = "repo/zshrc", dst = "~/.zshrc" }]\n',
     "boomfile.toml": '[[section]]\nname = "weak"\nlink = [{ src = "weak/zshrc", dst = "~/.zshrc" }]\n',
   });
   const c = await compose(repo);
@@ -206,7 +210,8 @@ test("compose: a kind that owns no destination never evicts one that does", asyn
 // winning after the first had already touched the file.
 test("compose: two secrets at one dst still resolve last-wins", async () => {
   const repo = await repoWith({
-    "boomfile.linux.toml": '[[section]]\nname = "strong"\nsecret = [{ dst = "~/.netrc", ref = "env:BASE" }]\n',
+    "boomfile.linux.toml":
+      '[[section]]\nname = "strong"\nsecret = [{ dst = "~/.netrc", ref = "env:BASE" }]\n',
     "boomfile.toml": '[[section]]\nname = "weak"\nsecret = [{ dst = "~/.netrc", ref = "env:MOD" }]\n',
   });
   const { notify, notes } = notifier();

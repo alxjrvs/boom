@@ -17,7 +17,6 @@ import { agentKeychainItem, agentTokenPresent } from "../lib/keychain.ts";
 import { hasCommand } from "../lib/proc.ts";
 import { bandsReporter } from "../lib/reporter.ts";
 import { VERSION } from "../lib/version.ts";
-import { fleetHost, readMachines } from "./fleet.ts";
 import { listRuns } from "./journal.ts";
 import { readLock } from "./pinning.ts";
 import { reportRepoDrift } from "./status.ts";
@@ -75,21 +74,6 @@ export async function boomStatus(ctx: BoomContext, json = false): Promise<number
   const checkpoints = runs.filter((r) => r.label);
   if (checkpoints.length > 0) {
     report.note(`checkpoint(s): ${checkpoints.map((r) => r.label).join(", ")}`);
-  }
-
-  // ── Fleet ───────────────────────────────────────────────────────────────────────────────
-  // Shown when recording is enabled or any machine summary already exists — otherwise it's just
-  // noise on a machine that never opted in.
-  const machines = await readMachines(repo);
-  if (config?.boom?.fleet || machines.length > 0) {
-    report.header("Fleet");
-    if (machines.length === 0) {
-      report.note("fleet recording on — sync + `boom source push` to record this machine");
-    } else {
-      report.ok(`${machines.length} machine(s) recorded`);
-      const self = machines.find((m) => m.host === fleetHost(ctx.env));
-      if (self) report.note(`this machine: v${self.boom}, ${self.os}, synced ${self.date} (${self.verdict})`);
-    }
   }
 
   // ── Lock ────────────────────────────────────────────────────────────────────────────────
