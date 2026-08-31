@@ -3,6 +3,7 @@
 // user command, and commands/catalog.ts derives names + briefs from it for the skill.
 // There is no hardcoded dispatch and no parallel table.
 import { buildApplication, buildRouteMap } from "@stricli/core";
+import { checkpointCommand } from "./commands/checkpoint.ts";
 import { doctorCommand } from "./commands/doctor.ts";
 import { lockCommand } from "./commands/lock.ts";
 import { uninstallCommand, verifyCommand } from "./commands/reconcile.ts";
@@ -22,6 +23,9 @@ export const routes = buildRouteMap({
     source: sourceRouteMap,
     where: whereCommand,
     rollback: rollbackCommand,
+    // Restored with rollback: it is the only writer of the labels `rollback --to <name>`
+    // resolves. Without it that flag can never match and listRollbacks tags nothing.
+    checkpoint: checkpointCommand,
     upgrade: upgradeCommand,
     doctor: doctorCommand,
     // Kept when its six siblings went, because it is not standalone: `boom verify` audits

@@ -40,7 +40,7 @@ test("command list (derived from the route map) is unique and includes the core 
   // Removed verbs, asserted absent rather than merely un-mentioned: the catalog DERIVES this
   // list from the route map, so a re-added route would silently reappear in every derived
   // surface (the skill most of all) with nothing to catch it.
-  for (const gone of ["code", "mcp", "completions", "man", "edit", "plan", "checkpoint"]) {
+  for (const gone of ["code", "mcp", "completions", "man", "edit", "plan"]) {
     expect(names).not.toContain(gone);
   }
 });

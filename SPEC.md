@@ -54,19 +54,18 @@ A `boom` invocation does one of two things:
 2. **Discovered subcommands** — built-ins are the `@stricli` route map, in `src/cli.ts` order:
    <!-- commands:begin -->
    `verify`, `status`, `uninstall`, `source`, `where`, `rollback`,
-   `upgrade`, `doctor`, `lock`, `skill`.
+   `checkpoint`, `upgrade`, `doctor`, `lock`, `skill`.
    <!-- commands:end -->
    That list is asserted **equal** to `commandNames()` by `test/docs-hygiene.test.ts`, so adding
    a route without naming it here (or naming one that no longer routes) fails CI. `source` is
    itself a nested route map. User commands
    resolve at runtime from `<config>/commands/<name>.ts`.
-   The route map is the **single registry, with no hardcoded dispatch anywhere**: `mcp`
-   is an ordinary route (its `-- <server args>` ride through verbatim via the scanner's
-   argument-escape sequence, so it needs no pre-Stricli passthrough), and `index.ts`
+   The route map is the **single registry, with no hardcoded dispatch anywhere**: `index.ts`
    decides built-in-vs-discovered by asking the route map itself
-   (`getRoutingTargetForInput`). `src/commands/catalog.ts` *derives* command names +
-   briefs from that same route map for shell completions, the man page, and `boom skill`
-   — one source of truth, no parallel table to keep in sync.
+   (`getRoutingTargetForInput`), and `src/commands/catalog.ts` *derives* command names +
+   briefs from that same route map for `boom skill` — one source of truth, no parallel table
+   to keep in sync. That is why removing a verb is a one-line edit here: the shell completions
+   and man page it also fed were derived, and were deleted with their commands.
 
 ### Config source is a git remote (repo-only)
 
