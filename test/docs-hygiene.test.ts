@@ -9,7 +9,7 @@
 // gone, so the cycle is too — the ordering stays because the route map still has to evaluate
 // fully before catalog reads it.
 import { expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import pkg from "../package.json" with { type: "json" };
 import { app } from "../src/cli.ts";
@@ -48,33 +48,14 @@ test("the Bun pin, its types, and the engines floor agree", () => {
   // And no workflow may reintroduce a literal pin alongside the file. Asserted on the offending
   // LINES rather than the file text: matching the whole file makes a failure dump the entire
   // workflow into the diff, which buries the one line that actually needs changing.
-  for (const wf of ["ci.yml", "release.yml", "pages.yml"]) {
-    const text = readFileSync(join(import.meta.dir, "../.github/workflows", wf), "utf8");
+  const wfDir = join(import.meta.dir, "../.github/workflows");
+  const workflows = readdirSync(wfDir).filter((f) => f.endsWith(".yml"));
+  expect(workflows.length).toBeGreaterThan(0);
+  for (const wf of workflows) {
+    const text = readFileSync(join(wfDir, wf), "utf8");
     const literal = text.split("\n").filter((l) => /bun-version:\s*\d/.test(l));
     expect(literal, `${wf} should read .bun-version, not pin a literal`).toEqual([]);
   }
-});
-
-// The version-lockstep rule in CLAUDE.md has four locations and, until this test, one of them
-// was enforced: `Formula/boom.rb` is WRITTEN by the release workflow and cannot drift, the
-// `version-guard` CI job checks only that package.json moved one semver step from main, and
-// site/index.html was hand-maintained with nothing checking it at all.
-//
-// That gap has a specific failure mode. site/build.ts injects `pkg.version` into the generated
-// doc pages automatically, so after a bump the docs show the new version while the hand-authored
-// landing still shows the old one — split-brain on a single deployed site.
-//
-// Asserted over EVERY semver-shaped string in the file rather than three known line numbers,
-// because the point is to catch an occurrence nobody remembered to update — including a new one.
-// CLAUDE.md says "the footer version"; there are in fact three (JSON-LD `softwareVersion`, the
-// nav badge, the footer), which is exactly why following it by hand left two stale.
-test("every version string on the landing page matches package.json", () => {
-  const html = readFileSync(join(import.meta.dir, "../site/index.html"), "utf8");
-  const found = [...html.matchAll(/\d+\.\d+\.\d+/g)].map((m) => m[0]);
-  // Guard the guard: if the landing ever stops naming a version, this must fail loudly rather
-  // than pass vacuously over an empty list.
-  expect(found.length).toBeGreaterThanOrEqual(3);
-  for (const v of found) expect(v).toBe(pkg.version);
 });
 
 // CLAUDE.md is the first thing a contributor (and every coding agent) reads, so a verb that

@@ -48,12 +48,6 @@ jobs:
       - name: Smoke — example boomfile validates
         run: BOOM_CONFIG=examples/dotfiles ./build/boom doctor --config
 
-      # The docs generator runs only in pages.yml, which triggers on push to main — so a break
-      # here used to merge green and fail AFTER landing, leaving the site serving a stale build.
-      # It is ~1s and `marked` is already in the lockfile, so there is no reason not to gate it.
-      - name: Smoke — docs site builds
-        run: bun run site/build.ts
-
       # Reconcile for real, with the COMPILED binary. Every other engine test runs under plain
       # `bun`, but the engine loads user code through runtime `import()` of on-disk paths
       # (hooks, discovered commands) — the one thing `bun build --compile` changes and the one

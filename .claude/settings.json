@@ -1,5 +1,0 @@
-{
-  "env": {
-    "OTEL_RESOURCE_ATTRIBUTES": "project.name=alxjrvs/boom"
-  }
-}
