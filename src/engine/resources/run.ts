@@ -10,7 +10,7 @@
 import { isAbsolute, join } from "node:path";
 import type { Run } from "../../config/schema.ts";
 import { displayPath, expandTilde, pathExists } from "../../lib/fs.ts";
-import { lastLine, runShellAsync, toolIo } from "../../lib/proc.ts";
+import { failureDetail, runShellAsync, toolIo } from "../../lib/proc.ts";
 import type { ReconcileCtx } from "../types.ts";
 
 // A compact spinner label for a shell step: the first line, clipped, so the active-work line
@@ -83,14 +83,17 @@ export async function reconcileRun(entry: Run, ctx: ReconcileCtx): Promise<void>
   // Run from the dotfiles repo, not the invocation cwd, so sync is cwd-independent:
   // a step like `lefthook install` targets the repo's `.git`, not whatever directory
   // `boom` was called from. Steps that name absolute / `~`-anchored paths are unaffected.
-  const { code, timedOut, stderr } = await ctx.report.spin(stepLabel(entry.cmd), () =>
+  const { code, timedOut, stderr, stdout } = await ctx.report.spin(stepLabel(entry.cmd), () =>
     runShellAsync(entry.cmd, ctx.env, {
       ...toolIo(ctx.json, ctx.verbose),
+      // A run step is somebody's own command and may explain itself on either channel, so keep
+      // both: under `silent` stdout is otherwise discarded and a step that reports there fails
+      // with a bare "(exit N)" and no reason.
+      captureStdout: true,
       cwd: ctx.repo,
       timeoutMs: entry.timeout ? entry.timeout * 1000 : undefined,
     }),
   );
   if (timedOut) ctx.report.fail(`${entry.cmd} (timed out after ${entry.timeout}s)`);
-  else if (code !== 0)
-    ctx.report.fail(`${entry.cmd} (exit ${code})${lastLine(stderr) ? `: ${lastLine(stderr)}` : ""}`);
+  else if (code !== 0) ctx.report.fail(`${entry.cmd} (exit ${code})${failureDetail(stderr, stdout)}`);
 }
