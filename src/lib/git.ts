@@ -1,32 +1,14 @@
 // Thin git plumbing for a repo-only config source: clone/fetch/pull the managed
-// config-repo clone, and answer the small questions engine/sync.ts and `boom doctor`/
-// `boom source push` need (ahead/behind, upstream, reachability). Shells out via
-// captureArgv — no libgit2, no GitHub API client; ambient git/SSH auth is whatever
-// already works in the user's shell.
+// config-repo clone, and answer the small questions engine/sync.ts, config/remote.ts and
+// `boom doctor` need (ahead/behind, upstream, reachability). Shells out via captureArgv —
+// no libgit2, no GitHub API client; ambient git/SSH auth is whatever already works in the
+// user's shell. Every export here has a caller: the wrappers that only served the removed
+// `boom source push|reset|diff` verbs went with them in 0.33.
 import type { Env } from "./paths.ts";
-import { type CaptureResult, captureArgv, captureArgvAsync, runArgv, type ShellResult } from "./proc.ts";
+import { type CaptureResult, captureArgv, captureArgvAsync } from "./proc.ts";
 
 export function cloneRepo(url: string, dest: string, env: Env): CaptureResult {
   return captureArgv(["git", "clone", url, dest], env);
-}
-
-// Initialize `dir` as a git repo on a `main` default branch — the cold-start half of
-// `boom init` (the clone half is cloneRepo). `-b main` pins the initial branch so the
-// later `git push -u origin main` names a branch that exists regardless of the host's
-// `init.defaultBranch`. Idempotent (re-init is a no-op) but callers guard first.
-export function initRepo(dir: string, env: Env): CaptureResult {
-  return captureArgv(["git", "init", "-b", "main", dir], env);
-}
-
-// Whether `dir` is already inside a git work tree — the guard `boom init` checks before
-// initializing, so it never re-inits (or clobbers) an established repo. False when `dir`
-// doesn't exist yet (captureArgv maps the spawn throw to code -1).
-export function isGitRepo(dir: string, env: Env): boolean {
-  return captureArgv(["git", "rev-parse", "--is-inside-work-tree"], env, { cwd: dir }).code === 0;
-}
-
-export function addRemote(dir: string, name: string, url: string, env: Env): CaptureResult {
-  return captureArgv(["git", "remote", "add", name, url], env, { cwd: dir });
 }
 
 // The two network-slow config-repo ops, awaited under the active-work spinner (see
@@ -61,21 +43,6 @@ export function checkoutRef(dir: string, ref: string, env: Env): CaptureResult {
   return captureArgv(["git", "checkout", ref], env, { cwd: dir });
 }
 
-// Awaited under push's active-work indicator so the network round-trip narrates.
-export function pushAsync(dir: string, env: Env): Promise<CaptureResult> {
-  return captureArgvAsync(["git", "push"], env, { cwd: dir });
-}
-
-export function resetHard(dir: string, ref: string, env: Env): CaptureResult {
-  return captureArgv(["git", "reset", "--hard", ref], env, { cwd: dir });
-}
-
-// -fd only (no -x): clears untracked files/dirs same as a fresh clone would leave,
-// without also nuking gitignored build/cache artifacts a hook might have left behind.
-export function cleanUntracked(dir: string, env: Env): CaptureResult {
-  return captureArgv(["git", "clean", "-fd"], env, { cwd: dir });
-}
-
 // Working-tree/index clean — mirrors `git status --porcelain`. This alone does NOT
 // mean "safe to discard": a repo can be clean here while still carrying committed
 // commits that were never pushed (porcelain status never reports ahead-of-upstream).
@@ -101,13 +68,6 @@ export function hasUnpushedCommits(dir: string, env: Env): boolean {
   return r.code === 0 && (Number.parseInt(r.stdout, 10) || 0) > 0;
 }
 
-// One-line `<sha> <subject>` per commit hasUnpushedCommits flagged — for a guard's
-// error message, so discarding them is an informed choice rather than a leap of faith.
-export function unpushedCommits(dir: string, env: Env): string[] {
-  const r = captureArgv(["git", "log", "--oneline", "HEAD", "--not", "--remotes"], env, { cwd: dir });
-  return r.code === 0 && r.stdout.length > 0 ? r.stdout.split("\n") : [];
-}
-
 export function headSha(dir: string, env: Env): string | undefined {
   const r = captureArgv(["git", "rev-parse", "HEAD"], env, { cwd: dir });
   return r.code === 0 ? r.stdout : undefined;
@@ -125,23 +85,6 @@ export function diffNameOnly(dir: string, range: string, env: Env): string[] {
   return r.code === 0 && r.stdout.length > 0 ? r.stdout.split("\n") : [];
 }
 
-// Stream the working-tree diff against HEAD straight to the caller's terminal (like a
-// `run` step / hook — inherited stdout, so git colors and pages it exactly as a bare
-// `git diff` would, with nothing buffered in memory). Covers both staged and unstaged
-// edits to tracked files; untracked files never appear in `git diff`, so callers list
-// those separately via untrackedFiles.
-export function diffHead(dir: string, env: Env): ShellResult {
-  return runArgv(["git", "diff", "HEAD"], env, { cwd: dir });
-}
-
-// Paths git isn't tracking yet — the new files `git diff` omits but `boom source push`
-// (git add -A) would capture. Mirrors the `--others` half of the porcelain status so a
-// `boom source diff` doesn't silently hide a freshly added base file.
-export function untrackedFiles(dir: string, env: Env): string[] {
-  const r = captureArgv(["git", "ls-files", "--others", "--exclude-standard"], env, { cwd: dir });
-  return r.code === 0 && r.stdout.length > 0 ? r.stdout.split("\n") : [];
-}
-
 // `ls-remote` touches only the remote, never the local clone — safe for `boom doctor` to call
 // without mutating anything. Awaited under doctor's active-work spinner: the reachability probe
 // is a network round-trip and shouldn't run silently.
@@ -150,10 +93,9 @@ export async function remoteReachableAsync(url: string, env: Env): Promise<boole
 }
 
 // How the local clone stands against its upstream: commits behind, whether it carries
-// unpushed work, and whether the tree is dirty. The shared drift summary behind both the
-// `verify`/dry-run report (engine/sync.ts) and `boom source status` (engine/status.ts),
-// so the two can't disagree. undefined when `git rev-list` itself failed (a broken clone
-// or unreadable range) — the caller must not read that as "no drift". Assumes an upstream
+// unpushed work, and whether the tree is dirty. The drift summary behind the `verify`/dry-run
+// report (engine/sync.ts). undefined when `git rev-list` itself failed (a broken clone or
+// unreadable range) — the caller must not read that as "no drift". Assumes an upstream
 // exists (@{u} resolves); callers check hasUpstream first.
 interface RepoDrift {
   readonly behind: number;
@@ -165,48 +107,4 @@ export function repoDrift(dir: string, env: Env): RepoDrift | undefined {
   const behind = revListCount(dir, "HEAD..@{u}", env);
   if (behind === undefined) return undefined;
   return { behind, unpushed: hasUnpushedCommits(dir, env), dirty: !isClean(dir, env) };
-}
-
-// ---- branch/PR plumbing (`boom source push`) -------------------------------
-
-// The branch HEAD is on, or undefined when detached (a clone pinned to @tag/@sha).
-// Detached is a legitimate state here, not an error: the caller reads undefined as
-// "not on a branch" and declines to open a PR rather than failing.
-export function currentBranch(dir: string, env: Env): string | undefined {
-  const r = captureArgv(["git", "symbolic-ref", "--quiet", "--short", "HEAD"], env, { cwd: dir });
-  return r.code === 0 && r.stdout.length > 0 ? r.stdout : undefined;
-}
-
-// The remote's default branch, read from the origin/HEAD symref `git clone` records —
-// no network call, and no assumption that it is named `main`. Undefined when the symref
-// is absent (a repo made by `git init` + `git remote add` rather than cloned), which the
-// caller treats as "can't tell" and falls back to a direct push.
-export function defaultBranch(dir: string, env: Env): string | undefined {
-  const r = captureArgv(["git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"], env, {
-    cwd: dir,
-  });
-  if (r.code !== 0 || r.stdout.length === 0) return undefined;
-  return r.stdout.startsWith("origin/") ? r.stdout.slice("origin/".length) : r.stdout;
-}
-
-export function remoteUrl(dir: string, env: Env): string | undefined {
-  const r = captureArgv(["git", "remote", "get-url", "origin"], env, { cwd: dir });
-  return r.code === 0 && r.stdout.length > 0 ? r.stdout : undefined;
-}
-
-export function headSubject(dir: string, env: Env): string | undefined {
-  const r = captureArgv(["git", "log", "-1", "--pretty=%s"], env, { cwd: dir });
-  return r.code === 0 && r.stdout.length > 0 ? r.stdout : undefined;
-}
-
-// Publish HEAD as a *remote* branch without checking one out. This is the whole trick
-// behind PR mode: the clone's working tree is what every dotfile symlink points at, so
-// checking out a branch would swap the user's live config out from under them until the
-// PR merged. Pushing the ref instead leaves the tree exactly where it was.
-//
-// Never forced. The branch name embeds HEAD's short sha, so a name that already exists
-// is by construction the same commit and re-pushing is a no-op; a true collision could
-// only be someone else's ref, which we must not overwrite.
-export function pushHeadToBranchAsync(dir: string, branch: string, env: Env): Promise<CaptureResult> {
-  return captureArgvAsync(["git", "push", "origin", `HEAD:refs/heads/${branch}`], env, { cwd: dir });
 }

@@ -3,15 +3,14 @@
 **BoomTube** is **declarative dev-machine setup** — it converges your machine
 to a state you declare once: dotfiles, packages, and tools from a single
 `boomfile.toml`, with drift detection. Its executable, **`boom`**,
-runs the reconcile loop — `sync` / `verify` — journals every change so it can be
-rolled back, then gets out of your way and opens portals to your code. One
-self-contained binary, compiled from **TypeScript on [Bun](https://bun.com)**,
-with zero runtime dependencies on your machine.
+runs the reconcile loop — `sync` / `verify` — journaling every change it makes so
+`uninstall` can tear it back down. One self-contained binary, compiled from
+**TypeScript on [Bun](https://bun.com)**, with zero runtime dependencies on your
+machine.
 
 Named for Jack Kirby's **Boom Tube** (the Fourth World portal): boom opens a
-portal to your machine's ideal state, and to your code.
+portal to your machine's ideal state.
 
-📖 **Docs site → [alxjrvs.github.io/boom](https://alxjrvs.github.io/boom/)**  ·
 📐 Design of record → [`SPEC.md`](SPEC.md)
 
 > Status: **early** — a TypeScript rewrite of the original bash engine, extracted
@@ -78,19 +77,13 @@ never blocks reconciling from the last-known-good local clone. A conflicting
 never clobbers a file it doesn't own); pass `--fix` to overwrite it and repair
 the drift.
 
-### Config-repo git, without leaving boom
+### Config-repo git is just git
 
-`boom source` operates the managed config-repo clone (the source your machine is
-reconciled from) without cd-ing into the cache dir it lives in:
-
-```sh
-boom source diff          # show uncommitted local changes in the config repo
-boom source push          # commit local changes and open a PR for them
-boom source push --merge  # …and let GitHub land it once its checks pass
-boom source push --direct # …or skip the PR and push the branch straight up
-boom source reset         # discard local changes, reset to origin
-boom source reset --force # …including commits no remote has (refused otherwise)
-```
+boom clones your config repo into a managed cache dir and reconciles from it. Operating
+that clone is git's job, not boom's — `boom doctor` prints the path, and `git -C <dir> …`
+does the rest. The `boom source status|diff|push|reset` wrappers were removed in 0.33
+(see [docs/MIGRATING-0.33.md](docs/MIGRATING-0.33.md)); boom still *reports* config-repo
+drift, because `verify` has to.
 
 ### Housekeeping
 

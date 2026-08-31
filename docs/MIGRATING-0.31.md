@@ -57,7 +57,8 @@ boom is six verbs: `verify`, `uninstall`, `source`, `upgrade`, `doctor`, `skill`
 | `completions`, `man` | `boom --help` |
 
 `boom source status` is **not** affected — it is a subcommand of `source`, and it is the
-config-repo check, distinct from the removed top-level `status`.
+config-repo check, distinct from the removed top-level `status`. (It was itself removed later, in
+0.33 — see `docs/MIGRATING-0.33.md`. This note is left as the 0.31 record.)
 
 Shell completions installed from a previous `boom completions` still exist on disk and will
 suggest verbs that no longer route. Regenerate or delete them.

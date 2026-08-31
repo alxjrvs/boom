@@ -45,15 +45,15 @@ name: boom
 description: >-
   Drive boom, declarative dev-machine setup (dotfiles, packages, tools) that converges a machine
   from a declarative boomfile.toml in a git-remote config repo. Use when bootstrapping
-  or updating a machine's dotfiles, checking for configuration drift, or operating the
-  managed config repo (diff/commit/push/reset).
+  or updating a machine's dotfiles, checking for configuration drift, or pointing boom at a
+  different config repo.
 ---
 
 # boom (v${version})
 
 boom reconciles your machine from a declarative \`boomfile.toml\` that lives in a
 git-remote **config repo** (the *source*). It symlinks/copies dotfiles, installs
-packages, runs steps and hooks, and can undo any change.
+packages, runs steps and hooks, and tears down what it made on \`uninstall\`.
 
 ## Mental model
 
@@ -68,8 +68,8 @@ packages, runs steps and hooks, and can undo any change.
 
 ${commands}
 
-\`boom source\` reconciles your machine; its subcommands \`set|diff|push|reset\` operate the
-config repo. Run \`boom <command> --help\` for flags.
+\`boom source\` reconciles your machine; \`boom source set owner/repo\` points it at a config
+repo. Run \`boom <command> --help\` for flags.
 
 ## Driving it safely
 
@@ -78,8 +78,8 @@ config repo. Run \`boom <command> --help\` for flags.
 - **Machine-readable output.** \`--json\` on \`source\`/\`verify\` emits a structured
   report (with a \`schemaVersion\`); parse that instead of scraping stdout.
 - **Scope a run** with \`--only <section>\` (repeatable) and \`--profile <name>\`.
-- **Destructive commands to use with care:** \`boom source reset --force\` discards local
-  commits no remote has and is **irreversible** — nothing records it. \`boom uninstall\`
+- **Destructive commands to use with care:** \`boom source set\` re-clones the managed config
+  repo and refuses to run while that clone has uncommitted or unpushed work. \`boom uninstall\`
   removes what boom installed; it *is* journaled, so a file it overwrites is displaced into
   \`backups/<run-id>/\` rather than destroyed. There is no undo verb, so putting one back is
   a manual copy out of that tree.
