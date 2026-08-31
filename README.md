@@ -65,7 +65,6 @@ separate verb: it's `boom source --fix` (sync, but overwriting conflicts).
 
 ```sh
 boom source             # make it so: symlink / copy / install / run from boomfile.toml
-boom plan               # preview every change as a read-only plan (--fix previews drift repair)
 boom source --fix       # repair drift: overwrite conflicting targets (skipped by default)
 boom source --update    # also update outdated brewfile formulae, not just declared state
 boom source --commit    # commit local config-repo edits before pulling
@@ -76,7 +75,6 @@ boom verify --json      # …as a structured drift report
 boom verify --ci        # non-interactive config gate for CI (schema-check only; exit 0/1)
 boom status             # one-screen dashboard: config, repo drift, last sync, lock, secrets
 boom rollback           # undo the most recent sync (restores backed-up files)
-boom checkpoint <name>  # name the current state; boom rollback --to <name> returns to it
 ```
 
 `boom status` composes the cheap health signals every other command already owns into a
@@ -110,23 +108,15 @@ boom source reset --force # …including commits no remote has (refused otherwis
 ### Housekeeping
 
 ```sh
-boom adopt              # reverse-engineer a boomfile.toml proposal from this machine
-boom edit               # open the boomfile in $EDITOR, validate on save, then push
 boom doctor --config    # parse + schema-check the boomfile; change nothing (exit 0/1)
 boom doctor             # check boom's own preconditions (tools, keychain, state)
 boom doctor --fix       # …and mend the safe ones (state dir, boom skill)
 boom doctor --secrets   # audit that every secret ref (op:// and pluggable backends) resolves
 boom lock               # pin resolved package versions to boom.lock (--check reports drift)
-boom module             # list `use` modules; module add <ref> splices one into your boomfile
-boom where config|code|engine   # resolve where boom keeps things
+boom where config|engine        # resolve where boom keeps things
 boom upgrade            # upgrade the boom binary itself
-boom completions bash|zsh|fish  # shell completions
-boom man                # the man page
 boom skill              # emit a Claude Code SKILL.md (--install writes it to ~/.claude)
 ```
-
-Registering an MCP server the 1Password-native way is `boom mcp add <name> -- <server
-cmd>` (it wraps the server in `op run --env-file` so secrets resolve from `op://` refs).
 
 ## The `boomfile.toml`
 

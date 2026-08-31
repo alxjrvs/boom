@@ -4,16 +4,16 @@
 // verb set at sync/verify(/uninstall). These assertions fail loudly if a retired name or a
 // dangling man reference creeps back into the shipped metadata.
 //
-// `cli.ts` is imported first (before `man.ts`) on purpose: catalog→cli→man is a module
-// cycle, and loading man.ts first lands cli.ts's route map in a temporal-dead-zone read of
-// manCommand. Importing cli.ts first evaluates it fully, exactly as cli-extra.test.ts does.
+// `cli.ts` is imported first on purpose. It used to matter more: catalog→cli→man was a module
+// cycle, and loading man.ts first left cli.ts's route map in a temporal-dead-zone read. `man` is
+// gone, so the cycle is too — the ordering stays because the route map still has to evaluate
+// fully before catalog reads it.
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import pkg from "../package.json" with { type: "json" };
 import { app } from "../src/cli.ts";
 import { commandNames } from "../src/commands/catalog.ts";
-import { manPage } from "../src/commands/man.ts";
 
 // The verb-set marketing strings boom retired: the pre-boom `apply/…` set, and both
 // spellings the drift verb had while it was still a verb (`…/repair`, then `…/fix`) before
@@ -21,7 +21,7 @@ import { manPage } from "../src/commands/man.ts";
 // package.json — `fix`/`repair` are too common to grep bare.
 const RETIRED = ["apply/verify/fix", "apply / verify / fix", "sync/verify/repair", "sync/verify/fix"];
 
-test("the app route map builds (guards the catalog↔cli↔man import cycle)", () => {
+test("the app route map builds (guards the catalog↔cli import order)", () => {
   expect(app).toBeDefined();
 });
 
@@ -97,20 +97,6 @@ test("the prose docs name only verbs that exist in the Verb union", () => {
       }
     }
   }
-});
-
-test("the man page has no dangling SEE ALSO refs and no stale framing", () => {
-  const m = manPage(pkg.version);
-  // boom-verify(1) / boom-source(1) man pages were never shipped — don't advertise them.
-  expect(m).not.toContain("boom-verify");
-  expect(m).not.toContain("boom-source");
-  // The rebrand history: "dotfiles + workspace engine" → "workspace manager" →
-  // "declarative machine reconciler" → "declarative dev-machine setup". All retired
-  // framings must stay out of the man page ("machine reconciler" covers the last one).
-  expect(m).not.toContain("dotfiles + workspace engine");
-  expect(m).not.toContain("workspace manager");
-  expect(m).not.toContain("machine reconciler");
-  expect(m).toContain("github.com/alxjrvs/boom");
 });
 
 // SPEC.md enumerates the route map by hand. Set *equality*, not containment, so both directions

@@ -53,13 +53,12 @@ A `boom` invocation does one of two things:
 
 2. **Discovered subcommands** — built-ins are the `@stricli` route map, in `src/cli.ts` order:
    <!-- commands:begin -->
-   `verify`, `status`, `plan`, `uninstall`, `source`, `where`, `edit`, `rollback`,
-   `checkpoint`, `upgrade`, `doctor`, `lock`,
-   `mcp`, `completions`, `man`, `skill`.
+   `verify`, `status`, `uninstall`, `source`, `where`, `rollback`,
+   `upgrade`, `doctor`, `lock`, `skill`.
    <!-- commands:end -->
    That list is asserted **equal** to `commandNames()` by `test/docs-hygiene.test.ts`, so adding
-   a route without naming it here (or naming one that no longer routes) fails CI. `source`
-   and `mcp` are themselves nested route maps. User commands
+   a route without naming it here (or naming one that no longer routes) fails CI. `source` is
+   itself a nested route map. User commands
    resolve at runtime from `<config>/commands/<name>.ts`.
    The route map is the **single registry, with no hardcoded dispatch anywhere**: `mcp`
    is an ordinary route (its `-- <server args>` ride through verbatim via the scanner's
