@@ -57,7 +57,7 @@ A `boom` invocation does one of two things:
 
 2. **Discovered subcommands** — built-ins are the `@stricli` route map, in `src/cli.ts` order:
    <!-- commands:begin -->
-   `verify`, `uninstall`, `source`, `upgrade`, `doctor`, `skill`.
+   `verify`, `uninstall`, `source`, `doctor`, `skill`.
    <!-- commands:end -->
    That list is asserted **equal** to `commandNames()` by `test/docs-hygiene.test.ts`, so adding
    a route without naming it here (or naming one that no longer routes) fails CI. `source` is
@@ -237,9 +237,10 @@ run through the *same* guarded loop as section resources (`runWorkItems`,
 verb-aware (sync installs/refreshes, verify reports drift, uninstall tears the timers down):
 
 - `skill_on_sync = true` — regenerate `~/.claude/skills/boom/SKILL.md` from the running
-  binary each sync, so the self-describing skill can't lag a `boom upgrade`.
-- `upgrade_on_sync = "check" | "auto"` — after a sync, warn when a newer release ships
-  (offline-safe, never fails the sync), or actually self-upgrade.
+  binary each sync, so the self-describing skill can't lag a release.
+- `upgrade_on_sync = "check"` — after a sync, warn when a newer release ships (offline-safe,
+  never fails the sync). Taking the upgrade is your package manager's job. `"auto"` is retired
+  with the `boom upgrade` verb it called and now behaves as `"check"`; see MIGRATING-0.36.
 - `schedule` — **RETIRED.** boom used to generate and reap `com.boomtube.*` launchd timers
   from this array. The key is still *accepted* (parsed, ignored) rather than rejected, because
   `[boom]` is a strict table and failing a whole boomfile over a key that used to work is the
@@ -377,7 +378,7 @@ src/
   commands/                verify/uninstall + source (reconcile.ts; source runs the
                            sync verb — `--fix` overwrites conflicts — and namespaces
                            the sync/set route map — set is the bootstrap),
-                           upgrade, doctor (--config folds in the former validate), skill;
+                           doctor (--config folds in the former validate), skill;
                            catalog.ts (names+briefs + nested subcommands derived from the
                            route map, for `boom skill`); flags.ts (shared parsers)
   engine/
@@ -407,5 +408,5 @@ matrix on Linux, then **signs the macOS binaries on a real macOS runner** before
 assembling the release and computing checksums over the final binaries. Signing is
 ad-hoc by default (valid on Apple Silicon); add the `MACOS_*`/`APPLE_*` repo secrets to
 switch on Developer ID signing + notarization (see the header of `release.yml`).
-`install.sh`/`boom upgrade` only re-sign ad-hoc when a download fails verification, so a
+`install.sh` only re-signs ad-hoc when a download fails verification, so a
 notarized binary is never clobbered.

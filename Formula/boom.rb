@@ -1,7 +1,10 @@
 # Homebrew formula — installs the prebuilt boom binary (a single self-contained
 # executable compiled from TypeScript via Bun). The repo doubles as its own tap:
 #   brew tap alxjrvs/boom https://github.com/alxjrvs/boom
-#   brew install boom
+#   brew install alxjrvs/boom/boom
+# The name must be FULLY QUALIFIED: bare `boom` resolves to an unrelated
+# homebrew-cask entry, and brew reports it "already installed" while this
+# formula is absent.
 # sha256 values are filled in by the release workflow when a tag is cut.
 class Boom < Formula
   desc "Declarative dev-machine setup — sync/verify dotfiles, packages, and tools from boomfile.toml"

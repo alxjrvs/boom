@@ -6,7 +6,7 @@
 # run steps.
 [boom]
 skill_on_sync = true             # regenerate ~/.claude/skills/boom/SKILL.md each sync
-upgrade_on_sync = "check"        # warn when a newer boom release ships ("auto" self-upgrades)
+upgrade_on_sync = "check"        # warn when a newer boom release ships; upgrade it the way you installed it
 # `schedule` used to live here, generating a launchd timer per entry. It is RETIRED: still
 # accepted so an old boomfile keeps parsing, but nothing reads it, and no timer is created or
 # reaped. To run boom on a schedule, write the plist yourself and link it with the `launchd`

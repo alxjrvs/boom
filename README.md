@@ -22,9 +22,20 @@ portal to your machine's ideal state.
 # curl installer — downloads the binary for your platform, puts `boom` on PATH
 curl -fsSL https://raw.githubusercontent.com/alxjrvs/boom/main/install.sh | sh
 
-# …or Homebrew (this repo doubles as the tap)
+# …or Homebrew (this repo doubles as the tap). The formula name must be
+# FULLY QUALIFIED: bare `boom` resolves to an unrelated homebrew-cask entry,
+# and brew will happily report it "already installed" while this one is absent.
 brew tap alxjrvs/boom https://github.com/alxjrvs/boom
-brew install boom
+brew install alxjrvs/boom/boom
+```
+
+In a Brewfile the same two hazards need spelling out, or `brew bundle` stops
+half way on a fresh machine — brew refuses to load a formula from a
+third-party tap until it is trusted:
+
+```ruby
+tap "alxjrvs/boom", "https://github.com/alxjrvs/boom", trusted: { formula: "boom" }
+brew "alxjrvs/boom/boom"
 ```
 
 One self-contained executable (macOS arm64/x64, Linux x64); the binary embeds the
@@ -92,7 +103,6 @@ boom doctor --config    # parse + schema-check the boomfile; change nothing (exi
 boom doctor             # check boom's own preconditions (tools, keychain, state)
 boom doctor --fix       # …and mend the safe ones (state dir, boom skill)
 boom doctor --secrets   # audit that every secret ref (op:// and pluggable backends) resolves
-boom upgrade            # upgrade the boom binary itself
 boom skill              # emit a Claude Code SKILL.md (--install writes it to ~/.claude)
 ```
 
@@ -173,13 +183,13 @@ wins** and the other is dropped before the run (reported as a note), instead of 
 surfacing as a verify failure nothing could ever converge.
 
 A top-level `[boom]` table folds boom's own self-wiring into the reconcile — refresh the
-Claude skill, nudge/auto-upgrade when a newer boom ships, and desktop-notify on drift — so
+Claude skill, nudge when a newer boom ships, and desktop-notify on drift — so
 you stop hand-rolling those as `run` boilerplate:
 
 ```toml
 [boom]
 skill_on_sync   = true            # regenerate ~/.claude/skills/boom/SKILL.md each sync
-upgrade_on_sync = "check"         # "check" warns on a newer release; "auto" self-upgrades
+upgrade_on_sync = "check"         # warn on a newer release; upgrade it the way you installed it
 notify          = true            # desktop-notify when `boom verify` finds drift
 ```
 
@@ -207,7 +217,7 @@ equivalent to shell access. Pin to a tag or SHA (`boom source set owner/repo@v1.
 you want a fixed, reviewed state instead of tracking a moving branch. boom does no
 credential handling of its own: git/SSH auth is whatever already works in your shell.
 Downloaded release binaries are checksum-verified against the release's `SHA256SUMS`
-(both `install.sh` and `boom upgrade`). Verification is not best-effort: if the manifest
+(`install.sh`). Verification is not best-effort: if the manifest
 can't be fetched, has no entry for the asset, doesn't match, or no `sha256sum`/`shasum` is
 available, the install **fails** rather than proceeding unverified. `BOOM_SKIP_VERIFY=1`
 is the single explicit opt-out.

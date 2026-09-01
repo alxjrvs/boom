@@ -10,11 +10,10 @@
 // `schedule` lived here too, generating and reaping `com.boomtube.*` launchd timers. It was
 // removed once its last consumer went; the `launchd` RESOURCE, which links and drives a
 // user-authored plist, is unaffected and lives in engine/resources/launchd.ts.
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import type { BoomSettings } from "../config/schema.ts";
 import { displayPath, mkdir, pathExists } from "../lib/fs.ts";
 import { notify } from "../lib/notify.ts";
-import { runArgv } from "../lib/proc.ts";
 import { fetchLatestVersion } from "../lib/release.ts";
 import { compareVersions, VERSION } from "../lib/version.ts";
 import { journalWrite } from "./journal.ts";
@@ -25,13 +24,6 @@ import type { ReconcileCtx } from "./types.ts";
 // Any field configured? Gates the header so an absent or all-off `[boom]` table stays silent.
 function anyConfigured(s: BoomSettings): boolean {
   return Boolean(s.skill_on_sync || s.upgrade_on_sync || s.notify);
-}
-
-// The running boom binary — the ProgramArguments a timer invokes, and the guard against
-// wiring a timer to `bun` during `bun run src/index.ts` dev (execPath is bun there).
-function boomSelf(): string | undefined {
-  const self = process.execPath;
-  return basename(self) === "boom" ? self : undefined;
 }
 
 // The self-wiring as work items, so it runs through the same guarded loop as resources — each
@@ -78,8 +70,8 @@ export async function applyBoomSettings(
   await runWorkItems(boomWorkItems(settings), ctx);
 }
 
-// #55 — (re)install the self-describing skill from the running binary, so it can't lag a
-// `boom upgrade`. Sync regenerates (journaled); verify reports staleness; uninstall leaves it
+// #55 — (re)install the self-describing skill from the running binary, so it can't lag an
+// upgrade of that binary. Sync regenerates (journaled); verify reports staleness; uninstall leaves it
 // (it lives under the user's ~/.claude, not something boom should reclaim).
 async function applySkill(ctx: ReconcileCtx): Promise<void> {
   if (ctx.verb === "uninstall") return;
@@ -135,17 +127,16 @@ async function applyUpgrade(settings: BoomSettings, ctx: ReconcileCtx): Promise<
     report.skip(`boom is current (v${VERSION})`);
     return;
   }
+  // `auto` used to call `boom upgrade`, which rewrote the binary in place. That verb is gone
+  // (0.36): boom is installed by a package manager, and a binary that overwrites itself under
+  // a managed prefix desynchronises that manager's manifest from what is on disk — the next
+  // `brew upgrade` silently reverts it. Accepted, degraded to `check`, and said out loud so a
+  // boomfile still carrying it is not quietly doing something other than what it asks for.
   if (settings.upgrade_on_sync === "auto") {
-    const self = boomSelf();
-    if (!self) {
-      report.note(`newer boom v${latest} available — run \`boom upgrade\` (dev run can't self-upgrade)`);
-      return;
-    }
-    report.plan(`upgrading boom v${VERSION} → v${latest}`);
-    const { code } = runArgv([self, "upgrade"], ctx.env, { quietStdout: ctx.json });
-    if (code === 0) report.ok(`upgraded to v${latest}`);
-    else report.warn(`auto-upgrade to v${latest} failed — run \`boom upgrade\` manually`);
-    return;
+    report.note('`upgrade_on_sync = "auto"` is retired — treating it as "check" (see MIGRATING-0.36)');
   }
-  report.warn(`newer boom v${latest} available (you have v${VERSION}) — run \`boom upgrade\``);
+  report.warn(
+    `newer boom v${latest} available (you have v${VERSION}) — upgrade it the way you installed it ` +
+      "(`brew upgrade alxjrvs/boom/boom`, or re-run install.sh)",
+  );
 }
