@@ -263,10 +263,14 @@ const SectionSchema = v.strictObject({
 // boom-invoking-boom. Every field is opt-in; an absent `[boom]` table changes nothing.
 const BoomSettingsSchema = v.strictObject({
   // Regenerate ~/.claude/skills/boom/SKILL.md from the running binary on every sync, so the
-  // self-describing skill can never lag a `boom upgrade`.
+  // self-describing skill can never lag an upgrade of that binary.
   skill_on_sync: v.optional(v.boolean()),
-  // After a sync: `check` prints a one-line notice when a newer boom release is available
-  // (cheap, non-fatal, offline-safe); `auto` also self-upgrades (opt-in; hands-off machines).
+  // After a sync: print a one-line notice when a newer boom release is available (cheap,
+  // non-fatal, offline-safe). Taking the upgrade is your package manager's job.
+  //
+  // `"auto"` is retired with the `boom upgrade` verb it called — see docs/MIGRATING-0.36.md.
+  // Still ACCEPTED rather than rejected, so a boomfile carrying it keeps loading; it now
+  // behaves exactly like `"check"`, and `settings.ts` says so once per sync.
   upgrade_on_sync: v.optional(v.picklist(["check", "auto"])),
   // RETIRED, and deliberately still accepted — the same call as `sudo_askpass` below, for
   // the same reason. boom used to generate and reap `com.boomtube.*` launchd timers from this

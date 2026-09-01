@@ -7,7 +7,6 @@ import { doctorCommand } from "./commands/doctor.ts";
 import { uninstallCommand, verifyCommand } from "./commands/reconcile.ts";
 import { skillCommand } from "./commands/skill.ts";
 import { sourceRouteMap } from "./commands/source.ts";
-import { upgradeCommand } from "./commands/upgrade.ts";
 import { VERSION } from "./lib/version.ts";
 
 export const routes = buildRouteMap({
@@ -15,7 +14,6 @@ export const routes = buildRouteMap({
     verify: verifyCommand,
     uninstall: uninstallCommand,
     source: sourceRouteMap,
-    upgrade: upgradeCommand,
     doctor: doctorCommand,
     skill: skillCommand,
   },
