@@ -67,6 +67,16 @@ The warning reports a **count, never the paths**: a `dst` for secret material is
 should not be echoed into a transcript. And it fires on `verify` too, not just on mutating runs —
 a `verify` reporting "all clear" while ignoring a declared secret is the more dangerous half.
 
+### It moves `boom verify` to exit 2 until you delete the key
+
+The warning lands in verify's **attention** tier, so `boom verify` returns `2` — not `0`, and not
+a failure — while a retired `secret` declaration is still in the boomfile. If you gate CI on
+`boom verify`, that gate goes amber until the key is removed.
+
+Intended rather than an oversight: a `verify` reporting "all clear" while silently ignoring a
+declared secret is the worse outcome. `boom source` is unaffected and still exits `0`, as is
+`boom verify --ci`, which wraps `doctor --config` and never walks the machine.
+
 **Anything boom previously rendered is left exactly where it is.** Secrets were deliberately kept
 out of the owned-destinations manifest, so orphan reaping never had a claim on them and this
 release does not give it one. Delete those files yourself once you have migrated.

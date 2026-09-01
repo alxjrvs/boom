@@ -213,8 +213,13 @@ test("secret: a retired declaration still loads, and warns on both sync and veri
   expect(sb.out()).toContain("retired and ignored");
   expect(await pathExists(join(sb.home, ".token"))).toBe(false); // nothing was rendered
 
+  // And on verify, where it lands in the ATTENTION tier — exit 2, not 0 and not a failure.
+  // Pinned because it is a real consequence for anyone gating CI on `boom verify`: a stale key
+  // turns a green gate amber until it is deleted. That is the intended trade (a verify reporting
+  // all-clear while ignoring a declared secret would be worse), so it is asserted here rather
+  // than left to be discovered.
   const sb2 = await sandbox('[[section]]\nname = "s"\nsecret = [{ dst = "~/.token", ref = "op://v/i/f" }]\n');
-  await reconcile("verify", sb2.ctx, {});
+  expect(await reconcile("verify", sb2.ctx, {})).toBe(2);
   expect(sb2.out()).toContain("retired and ignored");
 });
 
