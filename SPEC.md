@@ -11,23 +11,11 @@ It began as a bash prototype (extracted from `alxjrvs/dotFiles`) and was rewritt
 to TypeScript; this document is the design of record for that engine.
 
 This document describes the **current** design, not how it got here. When a release changes
-behavior a running machine depends on, the upgrade path is a migration note beside it:
+behavior a running machine depends on, the upgrade path is recorded in
+[`CHANGELOG.md`](https://github.com/alxjrvs/boom/blob/main/CHANGELOG.md), one entry per release.
 
-- [`docs/MIGRATING-0.33.md`](https://github.com/alxjrvs/boom/blob/main/docs/MIGRATING-0.33.md) —
-  the four config-repo git subcommands (`source status|diff|push|reset`) removed in favor of
-  running git against the clone directly. No config edit is required.
-- [`docs/MIGRATING-0.32.md`](https://github.com/alxjrvs/boom/blob/main/docs/MIGRATING-0.32.md) —
-  `systemd`, seven package managers and three secret backends removed. Unlike 0.31 these ARE
-  load-time errors: a boomfile naming one fails to parse until it is edited.
-- [`docs/MIGRATING-0.31.md`](https://github.com/alxjrvs/boom/blob/main/docs/MIGRATING-0.31.md) —
-  ten verbs removed and `[boom] schedule` retired. No config edit is required, but a machine that
-  had `schedule` keeps its LaunchAgents loaded, because the reaper went with the generator.
-- [`docs/MIGRATING-0.23.md`](https://github.com/alxjrvs/boom/blob/main/docs/MIGRATING-0.23.md) —
-  the retirement of `copy.expand`, the two new load-time errors, and the behavior changes to
-  `secret`, `rollback`, `uninstall` and glob placement. Written while `rollback` still existed.
-
-*(Absolute links, not repo-relative ones: this file is read on GitHub and from the installed
-binary's own help, where a relative path into `docs/` would not resolve.)*
+*(An absolute link, not a repo-relative one: this file is read on GitHub and from the installed
+binary's own help, where a relative path would not resolve.)*
 
 ## The model (decided — don't relitigate)
 
@@ -118,7 +106,7 @@ drift (`verify` must, to answer "am I in sync?"), but it does not wrap git: the
 `boom source status|diff|push|reset` verbs were removed in 0.33 because each was a
 second, weaker spelling of a command the user already has, against a path `boom doctor`
 already prints — `git -C <dir> status -sb`, `diff HEAD`, `reset --hard origin/<branch>`,
-`commit && push`. See `docs/MIGRATING-0.33.md`.
+`commit && push`. See `CHANGELOG.md#0330`.
 
 `linkRemoteConfigRepo` still refuses to wipe a managed clone that has either uncommitted
 changes or commits not yet pushed (checked separately — `git status --porcelain` never
@@ -147,7 +135,7 @@ Resources:
 - `secret` — **RETIRED at 0.37**, and still parsed so an old boomfile keeps loading. It rendered
   a vault value to a file at sync time. Nothing reads it now; reconcile warns once per run with a
   count of the ignored declarations (never their paths). Resolve a secret at point of use instead
-  — `op run --env-file=F -- CMD` — or render it from a `run` step you own. See MIGRATING-0.37.
+  — `op run --env-file=F -- CMD` — or render it from a `run` step you own. See `CHANGELOG.md#0370`.
   Secrets stay
   out of the owned-destinations manifest, so orphan reaping never auto-deletes one. boom never
   journals or backs up the plaintext **it** renders (a fresh render's undo is a plain remove); a
@@ -242,7 +230,7 @@ verb-aware (sync installs/refreshes, verify reports drift, uninstall tears the t
   binary each sync, so the self-describing skill can't lag a release.
 - `upgrade_on_sync = "check"` — after a sync, warn when a newer release ships (offline-safe,
   never fails the sync). Taking the upgrade is your package manager's job. `"auto"` is retired
-  with the `boom upgrade` verb it called and now behaves as `"check"`; see MIGRATING-0.36.
+  with the `boom upgrade` verb it called and now behaves as `"check"`; see `CHANGELOG.md#0360`.
 - `schedule` — **RETIRED.** boom used to generate and reap `com.boomtube.*` launchd timers
   from this array. The key is still *accepted* (parsed, ignored) rather than rejected, because
   `[boom]` is a strict table and failing a whole boomfile over a key that used to work is the
@@ -261,7 +249,7 @@ installed?", never "is what is installed current?"; a merely-outdated package is
 reconcile that closes your browser is not a reconcile. Upgrading is each tool's own verb —
 `brew upgrade --formula`, `mise upgrade` — with the blast radius that tool defines.
 `boom source --update` opted into Bundle's upgrade and was removed in 0.38
-(`docs/MIGRATING-0.38.md`).
+(`CHANGELOG.md#0380`).
 
 ### Escalation, and why there is no askpass key
 

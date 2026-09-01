@@ -133,7 +133,7 @@ async function applyUpgrade(settings: BoomSettings, ctx: ReconcileCtx): Promise<
   // `brew upgrade` silently reverts it. Accepted, degraded to `check`, and said out loud so a
   // boomfile still carrying it is not quietly doing something other than what it asks for.
   if (settings.upgrade_on_sync === "auto") {
-    report.note('`upgrade_on_sync = "auto"` is retired — treating it as "check" (see MIGRATING-0.36)');
+    report.note('`upgrade_on_sync = "auto"` is retired — treating it as "check" (see CHANGELOG.md#0360)');
   }
   report.warn(
     `newer boom v${latest} available (you have v${VERSION}) — upgrade it the way you installed it ` +

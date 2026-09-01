@@ -233,7 +233,7 @@ const SectionSchema = v.strictObject({
   // CMD`"), and after five releases and two consumers nothing had ever declared one.
   //
   // Parsed loosely and ignored, never `v.never`: a hard schema failure on a key that used to be
-  // valid turns an upgrade into an outage for anyone who did not read MIGRATING-0.37 first, and
+  // valid turns an upgrade into an outage for anyone who did not read CHANGELOG.md#0370 first, and
   // the replacement is a real edit rather than a rename. `reconcile` says once per run that the
   // key is being skipped, so an ignored declaration is never silent. Delete at 1.0.
   secret: v.optional(v.array(v.unknown())),
@@ -252,7 +252,7 @@ const BoomSettingsSchema = v.strictObject({
   // After a sync: print a one-line notice when a newer boom release is available (cheap,
   // non-fatal, offline-safe). Taking the upgrade is your package manager's job.
   //
-  // `"auto"` is retired with the `boom upgrade` verb it called — see docs/MIGRATING-0.36.md.
+  // `"auto"` is retired with the `boom upgrade` verb it called — see CHANGELOG.md#0360.
   // Still ACCEPTED rather than rejected, so a boomfile carrying it keeps loading; it now
   // behaves exactly like `"check"`, and `settings.ts` says so once per sync.
   upgrade_on_sync: v.optional(v.picklist(["check", "auto"])),

@@ -78,7 +78,7 @@ reaches casks whatever `greedy` says, and upgrading a cask replaces the `.app`, 
 running program: a reconcile that closes your browser is not a reconcile. Upgrading is each
 tool's own verb — `brew upgrade --formula`, `mise upgrade` — with the blast radius that tool
 defines. `boom source --update` did this and was removed in 0.38
-([migration](docs/MIGRATING-0.38.md)).
+([changelog](CHANGELOG.md#0380)).
 
 A shippable GitHub Action wrapping `verify --ci` lives in
 [`examples/github-action/`](examples/github-action/) so a config repo can gate its own PRs.
@@ -100,7 +100,7 @@ the drift.
 boom clones your config repo into a managed cache dir and reconciles from it. Operating
 that clone is git's job, not boom's — `boom doctor` prints the path, and `git -C <dir> …`
 does the rest. The `boom source status|diff|push|reset` wrappers were removed in 0.33
-(see [docs/MIGRATING-0.33.md](docs/MIGRATING-0.33.md)); boom still *reports* config-repo
+(see [CHANGELOG.md](CHANGELOG.md#0330)); boom still *reports* config-repo
 drift, because `verify` has to.
 
 ### Publishing local edits back

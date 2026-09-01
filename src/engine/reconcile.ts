@@ -263,7 +263,7 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
       report.warn(
         `${retiredSecrets} \`secret\` declaration(s) are retired and ignored — boom no longer ` +
           "renders a vault value to a file. Resolve it at point of use instead (`op run " +
-          "--env-file=F -- CMD`), or render it with a `run` step you own. See MIGRATING-0.37.",
+          "--env-file=F -- CMD`), or render it with a `run` step you own. See CHANGELOG.md#0370.",
       );
     }
 

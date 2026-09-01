@@ -7,7 +7,7 @@
 // The git-operation verbs (`status`/`diff`/`push`/`reset`) were removed in 0.33: they wrapped
 // git in a second, weaker spelling of commands the user already has. The clone's path is on
 // the breadcrumb — `boom doctor` prints it — so `git -C <dir> …` is the equivalent, and it is
-// the whole of git rather than the slice boom re-exposed. See docs/MIGRATING-0.33.md.
+// the whole of git rather than the slice boom re-exposed. See CHANGELOG.md#0330.
 import { buildCommand, buildRouteMap } from "@stricli/core";
 import { linkRemoteConfigRepo } from "../config/remote.ts";
 import type { BoomContext } from "../context.ts";

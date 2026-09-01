@@ -110,7 +110,7 @@ async function reconcileBrew(
   // `boom source --update` opted into exactly this and is gone in 0.38. Upgrading is
   // `brew upgrade --formula` and `mise upgrade` — each its own tool's verb, with a blast radius
   // that tool defines, and neither one boom has to hold a second opinion about.
-  // See docs/MIGRATING-0.38.md.
+  // See CHANGELOG.md#0380.
   //
   // Cask *installation* still escalates — a `launchctl`/`pkgutil` stanza reaches for `sudo` the
   // first time a cask lands, which is why the prompt machinery below is not going anywhere. See
