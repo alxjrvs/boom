@@ -9,27 +9,27 @@
 class Boom < Formula
   desc "Declarative dev-machine setup — sync/verify dotfiles, packages, and tools from boomfile.toml"
   homepage "https://github.com/alxjrvs/boom"
-  version "0.36.0"
+  version "0.37.0"
 
   on_macos do
     on_arm do
       url "https://github.com/alxjrvs/boom/releases/download/v#{version}/boom-bun-darwin-arm64"
-      sha256 "77ec87260d320ef09f2aa767e1a88053e4db0a8a0a7be5bfd198cac1fb6c6654"
+      sha256 "4ba82f92786855595c1d6954fcd4593e94d77f132037e1209876abadb14d672d"
     end
     on_intel do
       url "https://github.com/alxjrvs/boom/releases/download/v#{version}/boom-bun-darwin-x64"
-      sha256 "9cfb32f1e9491e3601b35b701f7f87c3259399099a98b140f6f09af70ae3f04a"
+      sha256 "c0432064238430078b4ac3a5b3253d9f72a7da81dd4d91f53f185c8f6faeab7e"
     end
   end
 
   on_linux do
     on_arm do
       url "https://github.com/alxjrvs/boom/releases/download/v#{version}/boom-bun-linux-arm64"
-      sha256 "0c93492f1f0b4a0e8abce1cbdbfaa7958b026e6937d9a93907e9f2fc1b9a9b95"
+      sha256 "4ca6e7c46b62167afd229b930eb2334b3f80da14ca7044335758fceecdc3ceb9"
     end
     on_intel do
       url "https://github.com/alxjrvs/boom/releases/download/v#{version}/boom-bun-linux-x64"
-      sha256 "17c58ea3f648203502163f7b49b375ae8e5c30462e28b264021b280f3ac0de90"
+      sha256 "4904a6b4362d533ea14f29f43b6e29a2a83d58fe6cf3d67b8617e61621241ff2"
     end
   end
 
