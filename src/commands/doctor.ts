@@ -1,7 +1,6 @@
 // `boom doctor` — thin wrapper over engine/doctor.ts. Reports boom's own preconditions
 // (config, tools, keychain, state) and sets the exit code (0 ok / 2 warn / 1 fail).
-// `--config` narrows it to just the boomfile parse (the former `boom validate`): a
-// read-only CI gate, pass/fail 0/1.
+// `--config` narrows it to just the boomfile parse: a read-only CI gate, pass/fail 0/1.
 import { buildCommand } from "@stricli/core";
 import type { BoomContext } from "../context.ts";
 import { doctor } from "../engine/doctor.ts";

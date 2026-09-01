@@ -1,4 +1,4 @@
-// Interactive y/N gate for a destructive action (uninstall, reset). --yes is the explicit
+// Interactive y/N gate for a destructive action (uninstall). --yes is the explicit
 // opt-in and always proceeds. An interactive terminal is prompted. A non-TTY — a pipe, CI,
 // cron, `boom uninstall < /dev/null` — has no one to prompt, so it REFUSES rather than
 // silently running an irreversible teardown: exactly the case where a stray invocation is

@@ -2,14 +2,10 @@
 // vs byte-copy). `src` may be a single repo path or a glob pattern — a glob expands to one
 // placement per match, `dst` treated as a directory, structure preserved below the pattern's
 // static prefix. Neither places rendered content — that is `tmpl` (template.ts).
-import { realpath } from "node:fs/promises";
-import { hostname } from "node:os";
+import { chmod, copyFile, mkdir, realpath, stat } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
-import { detectOs } from "../../config/profile.ts";
 import type { File } from "../../config/schema.ts";
 import {
-  chmod,
-  copyFile,
   displayPath,
   ensureSymlink,
   expandTilde,
@@ -17,9 +13,7 @@ import {
   GLOB_MAGIC,
   isGlobPattern,
   linkTarget,
-  mkdir,
   pathExists,
-  stat,
 } from "../../lib/fs.ts";
 import { journalRemove, journalWrite } from "../journal.ts";
 import type { LinkMode, ReconcileCtx } from "../types.ts";
@@ -199,7 +193,7 @@ async function linkOne(entry: File, place: Placement, ctx: ReconcileCtx): Promis
         try {
           await chmod(dst, Number.parseInt(entry.mode, 8));
         } catch {
-          // best-effort, mirrors the bash `|| true`
+          // best-effort: a mode the target's filesystem refuses is not a broken link
         }
       }
       return;
@@ -239,17 +233,6 @@ async function linkOne(entry: File, place: Placement, ctx: ReconcileCtx): Promis
   }
 }
 
-// The `tmpl` vocabulary: substitute `${env:VAR}` / `${host}` / `${os}` in a template's text.
-// Unknown `${env:…}` resolves to empty; unmatched `${…}` is left verbatim (so a literal shell
-// `${...}` in a config survives). It lives here, not in template.ts, only because this file
-// owns the placement primitives it was first written against; `template.ts` is its one caller.
-export function renderTemplate(text: string, ctx: ReconcileCtx): string {
-  return text
-    .replace(/\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g, (_, name: string) => ctx.env[name] ?? "")
-    .replace(/\$\{host\}/g, () => hostname())
-    .replace(/\$\{os\}/g, () => detectOs(ctx.env));
-}
-
 export async function reconcileCopy(entry: File, ctx: ReconcileCtx): Promise<void> {
   for (const p of await placements(entry, "copy", ctx)) await copyOne(entry, p, ctx);
 }
@@ -260,8 +243,8 @@ async function copyOne(entry: File, place: Placement, ctx: ReconcileCtx): Promis
   const disp = displayPath(dst, ctx.env);
   const { report } = ctx;
 
-  // Is dst already the intended content? A byte-compare — cheap, and with `expand` retired a
-  // copy's intended content is exactly its source's.
+  // Is dst already the intended content? A byte-compare — cheap, and a copy's intended content
+  // is exactly its source's.
   const current = async (): Promise<boolean> => {
     if (!(await pathExists(dst))) return false;
     return filesEqual(src, dst);
@@ -287,7 +270,7 @@ async function copyOne(entry: File, place: Placement, ctx: ReconcileCtx): Promis
         // permissions drifted looser is never repaired: this gate returns before the chmod
         // below, so `--fix` is a no-op and `verify` (which calls the same `current()`) is
         // blind. A copied `~/.ssh/config` left 0777 stays 0777 forever. Re-chmod only —
-        // no rewrite, no journal churn, no fresh backup — the branch `secret` already takes.
+        // no rewrite, no journal churn, no fresh backup.
         const want = await wantMode();
         if (((await stat(dst)).mode & 0o777) !== want) {
           if (ctx.dryRun) {

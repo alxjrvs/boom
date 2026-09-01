@@ -2,8 +2,7 @@
 // config-repo clone, and answer the small questions engine/sync.ts, config/remote.ts and
 // `boom doctor` need (ahead/behind, upstream, reachability). Shells out via captureArgv —
 // no libgit2, no GitHub API client; ambient git/SSH auth is whatever already works in the
-// user's shell. Every export here has a caller: the wrappers that only served the removed
-// `boom source push|reset|diff` verbs went with them in 0.33.
+// user's shell.
 import type { Env } from "./paths.ts";
 import { type CaptureResult, captureArgv, captureArgvAsync } from "./proc.ts";
 

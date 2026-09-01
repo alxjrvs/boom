@@ -4,14 +4,13 @@
 // plist link is journaled + manifest-owned (reused from the filesystem resource), so uninstall
 // and orphan-reaping treat it like any other link; the launchctl load/unload rides on top.
 // OS-gated to darwin — a no-op with a note elsewhere, like osx_default.
-import { basename, join } from "node:path";
-import { detectOs } from "../../config/profile.ts";
+import { join } from "node:path";
 import type { Launchd } from "../../config/schema.ts";
 import { displayPath, expandTilde, linkTarget, pathExists } from "../../lib/fs.ts";
 import {
   agentLastExit,
   agentLoaded,
-  launchAgentsDir,
+  defaultPlistDst,
   plistLabel,
   reloadAgent,
   unloadAgent,
@@ -33,15 +32,14 @@ async function labelOf(src: string): Promise<string | undefined> {
 export async function reconcileLaunchd(entry: Launchd, ctx: ReconcileCtx): Promise<void> {
   const { report } = ctx;
   const src = join(ctx.repo, entry.src);
-  const agents = launchAgentsDir(ctx.env);
-  const dst = entry.dst ? expandTilde(entry.dst, ctx.env) : agents ? join(agents, basename(src)) : undefined;
+  const dst = entry.dst ? expandTilde(entry.dst, ctx.env) : defaultPlistDst(src, ctx.env);
   if (!dst) {
     report.skip(`launchd ${entry.src} — HOME unset, can't resolve LaunchAgents dir`);
     return;
   }
   const disp = displayPath(dst, ctx.env);
 
-  if (detectOs(ctx.env) !== "darwin") {
+  if (ctx.profile.os !== "darwin") {
     // Non-darwin: nothing to load. Report so `verify` doesn't silently pass a macOS-only
     // agent on a Linux box, but don't fail — the section may legitimately target both.
     if (ctx.verb === "verify") report.skip(`${disp} — launchd is macOS-only`);
@@ -74,11 +72,7 @@ export async function reconcileLaunchd(entry: Launchd, ctx: ReconcileCtx): Promi
       }
       // Linked AND loaded still isn't "working". A job can fire on schedule and fail every single
       // run, reporting only into its own log — which nobody watches, by definition of the job
-      // being scheduled. Generated `[boom] schedule` timers used to carry this assertion and a
-      // hand-authored plist did not; that asymmetry is gone with `schedule`, and this is now the
-      // only place boom asserts it at all.
-      //
-      // That asymmetry has a scalp: a nightly `boom verify` agent sat dead for 28 days behind a
+      // being scheduled. The scalp: a nightly `boom verify` agent sat dead for 28 days behind a
       // `~` launchd never expands (EX_CONFIG 78). It was linked. It was loaded. `verify` said so
       // and was right about both, while every guardrail the job carried went unrun.
       //

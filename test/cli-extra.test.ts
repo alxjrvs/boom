@@ -5,8 +5,8 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "@stricli/core";
-import { app } from "../src/cli.ts";
-import { commandList, commandNames, subcommandGroups } from "../src/commands/catalog.ts";
+import { app, routes } from "../src/cli.ts";
+import { commandList, commandNames } from "../src/commands/catalog.ts";
 import type { BoomContext } from "../src/context.ts";
 import { doctor } from "../src/engine/doctor.ts";
 import { skillDoc } from "../src/engine/skill.ts";
@@ -47,19 +47,18 @@ test("command list (derived from the route map) is unique and includes the core 
 
 // ---- completions ------------------------------------------------------------
 
-test("subcommandGroups derives nested routes from the route map", () => {
-  const groups = subcommandGroups();
-  const source = groups.find((g) => g.parent === "source");
-  const names = source?.children.map((c) => c.name) ?? [];
-  for (const sub of ["sync", "set"]) expect(names).toContain(sub);
-  // The git-operation verbs removed in 0.33, asserted absent for the same reason the
-  // top-level list above is: completions DERIVE from the route map, so a re-added route
-  // would silently reappear in every derived surface with nothing to catch it.
-  for (const gone of ["status", "diff", "push", "reset"]) expect(names).not.toContain(gone);
-  // `code` is gone, so its group must be too. Asserted rather than merely deleted:
-  // this is the case that catches the route map and a derived surface drifting
-  // apart, and it has to hold in the absence direction as well as the presence one.
-  expect(groups.find((g) => g.parent === "code")).toBeUndefined();
+test("`source` is the one nested route map, and it routes exactly sync + set", () => {
+  const nested = routes
+    .getAllEntries()
+    .filter((e) => !e.hidden && "getAllEntries" in e.target)
+    .map((e) => ({
+      parent: e.name.original,
+      children: (e.target as typeof routes)
+        .getAllEntries()
+        .map((c) => c.name.original)
+        .sort(),
+    }));
+  expect(nested).toEqual([{ parent: "source", children: ["set", "sync"] }]);
 });
 
 // ---- color / command detection ----------------------------------------------

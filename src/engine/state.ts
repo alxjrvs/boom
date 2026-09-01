@@ -30,22 +30,27 @@ export async function readManifest(env: Env): Promise<ManifestEntry[]> {
   return rows.map(toEntry);
 }
 
+// Collapse duplicate destinations last-wins: the entry that appears later in `entries` wins.
+// Shared by reconcile's partial-run merge and the manifest write below.
+export function byDst(entries: readonly ManifestEntry[]): ManifestEntry[] {
+  const m = new Map<string, ManifestEntry>();
+  for (const e of entries) m.set(e.dst, e);
+  return [...m.values()];
+}
+
 export async function writeManifest(env: Env, entries: readonly ManifestEntry[]): Promise<void> {
-  // Collapse duplicate destinations last-wins BEFORE the insert. `manifest.dst` is a PRIMARY KEY
-  // (db.ts), so a repeated dst threw a raw SQLiteError out of the reconcile: the replace
-  // transaction rolled back to the STALE prior set and the run never committed, and the next run
-  // then reaped against ownership that no longer described the machine. Compose-time last-wins
-  // (config/compose.ts) is the real fix; this is the floor for the duplicate compose cannot see —
-  // two glob entries expanding onto one concrete dst at run time. Same Map-keyed-on-dst idiom as
-  // reconcile's mergeManifest, kept local because state.ts must not import from reconcile.ts.
-  const byDst = new Map<string, ManifestEntry>();
-  for (const e of entries) byDst.set(e.dst, e);
+  // Collapse duplicate destinations BEFORE the insert. `manifest.dst` is a PRIMARY KEY (db.ts),
+  // so a repeated dst would throw a raw SQLiteError out of the reconcile: the replace transaction
+  // rolls back to the STALE prior set, the run never commits, and the next run reaps against
+  // ownership that no longer describes the machine. Compose-time last-wins (config/compose.ts)
+  // is the real fix; this is the floor for the duplicate compose cannot see — two glob entries
+  // expanding onto one concrete dst at run time.
   withDb(env, (db) => {
     const replace = db.transaction((es: readonly ManifestEntry[]) => {
       db.run("DELETE FROM manifest");
       const ins = db.query("INSERT INTO manifest (dst, kind, src) VALUES (?, ?, ?)");
       for (const e of es) ins.run(e.dst, e.kind, e.src);
     });
-    replace([...byDst.values()]);
+    replace(byDst(entries));
   });
 }

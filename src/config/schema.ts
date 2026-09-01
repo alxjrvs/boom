@@ -1,6 +1,6 @@
 // The boomfile.toml schema (nested-by-section). This typed contract is the source of
 // truth shared by the loader and the reconcile engine. Within a section, resources run by phase:
-//   link → copy → tmpl → secret → dir → pkg → osx_default → launchd → run → check → hook
+//   link → copy → tmpl → dir → pkg → osx_default → launchd → run → absent → hook
 // — the order engine/registry.ts's table executes and SPEC.md states.
 import * as v from "valibot";
 
@@ -41,13 +41,11 @@ const FileSchema = v.strictObject({
   ),
 });
 
-// A package manager to satisfy: one array entry per manager, replacing the old scalar
-// `brewfile = "…"` + boolean `mise = true` (the two resources that broke the array-of-tables
-// shape every other resource has). `file` is the manager's manifest: a Brewfile path for
-// `brew` (default "Brewfile"); a newline-separated package list for `apt`/`dnf` (Linux) and the
-// user-scoped managers `cargo`/`npm` (global)/`pipx`/`gem`/`flatpak` (`flatpak` Linux-only), `#`
-// comments allowed; `mise` reads the repo's own mise config and ignores it. Each manager is one
-// dispatch arm in packages.ts — the registry north star, not a top-level key per manager.
+// A package manager to satisfy: one array entry per manager, so every resource has the same
+// array-of-tables shape. `file` is the manager's manifest: a Brewfile path for `brew` (default
+// "Brewfile"); a newline-separated `owner/repo` list for `gh`, `#` comments allowed; `mise`
+// reads the repo's own mise config and ignores it. Each manager is one dispatch arm in
+// packages.ts — the registry north star, not a top-level key per manager.
 //
 // `gh` installs `gh` CLI extensions from the same newline-separated list, one `owner/repo` per
 // line. **Owner-qualified, never the bare name**: four community forks answer to `gh-stack`, so
@@ -57,14 +55,11 @@ const FileSchema = v.strictObject({
 // dependency mechanism; get the order wrong on a fresh machine and the arm reports
 // `gh not installed`.
 //
-// `remove_on_uninstall` settles the uninstall asymmetry with one explicit key instead of nine
-// implicit policies. Absent = today's behavior exactly, so no existing boomfile changes: the six
-// user-scoped managers (cargo/npm/pipx/gem/flatpak/gh) remove what they installed, apt/dnf never
-// do. `= true` opts apt/dnf **in** (a root-level `apt-get remove -y` of the declared list — hence
-// opt-in, per entry); `= false` opts a user-scoped manager **out**, for a global tool boom installs
-// but must not reclaim. Spelled to match `dir`'s `remove_on_uninstall` rather than a bare
-// `uninstall`. Rejected on brew/mise below — the `v.check` rides on the *object* because the
-// constraint is cross-field (the key's legality depends on `manager`).
+// `remove_on_uninstall` decides what `boom uninstall` reclaims, per entry. Absent (or `= true`)
+// is the default: `gh` removes what it installed; `= false` opts it **out**, for a global tool
+// boom installs but must not reclaim. Spelled to match `dir`'s `remove_on_uninstall` rather
+// than a bare `uninstall`. Rejected on brew/mise below — the `v.check` rides on the *object*
+// because the constraint is cross-field (the key's legality depends on `manager`).
 // `cleanup` (brew only) closes the one-directional gap in `brew bundle`: it installs what the
 // Brewfile names and NEVER removes what the Brewfile omits, so a hand-installed package stays
 // forever while a fresh machine silently never gets it. Drift in the direction nothing reports.
@@ -103,9 +98,8 @@ const PkgSchema = v.pipe(
 );
 
 // A path that must NOT exist: sync removes it, verify fails while it is there, uninstall
-// leaves it alone. The inverse of every other resource, and the gap `check` cannot fill —
-// `check` asserts things *about* a file that exists, and its `missing_file = "pass"` says
-// "absent is acceptable", never "absent is required".
+// leaves it alone. The inverse of every other resource: they converge a path *to* a content,
+// this one requires that there be none.
 //
 // The shape comes up wherever a tool writes its own config behind your back: Claude Code
 // creates `settings.local.json` on an "always allow" click, and `.gitignore` can stop such a
@@ -136,9 +130,8 @@ const RunSchema = v.strictObject({
   // boomfiles hand-roll `foo list | grep -q bar || foo add bar` into `cmd`; hoisting the
   // predicate into the schema makes "already done" declarative and keeps the report honest
   // (a skipped step says so instead of pretending to converge). `unless` is a shell
-  // *predicate* — exit 0 means "already satisfied, skip" — not a second step to run; it is
-  // the same conditionally-executed-shell shape `check.repair` already carries, and it
-  // inherits that resource's dry-run discipline (never spawned by a preview). `creates` is a
+  // *predicate* — exit 0 means "already satisfied, skip" — not a second step to run, and a
+  // preview never spawns it. `creates` is a
   // path (`~`-expanded; relative resolves against the repo, matching the step's own cwd):
   // skip when it exists. Both set ⇒ skip when *either* is satisfied (OR).
   //
@@ -180,8 +173,7 @@ const DirSchema = v.strictObject({
 
 // A rendered template: read one repo-relative `src`, substitute `${NAME}` placeholders from
 // the top-level `[vars]` table (plus the `${env:VAR}`/`${host}`/`${os}` vocabulary), and write
-// the result to `dst`. The replacement for the retired `copy.expand`, which rendered that same
-// vocabulary and nothing else: one template + per-profile vars instead of N near-identical
+// the result to `dst`: one template + per-profile vars instead of N near-identical
 // machine-specific overlay files. An unknown `${NAME}` is a hard failure (a silently-unresolved
 // placeholder in a config is worse than a loud error), whereas a literal shell `${FOO:-bar}`
 // (anything but a bare identifier) is left verbatim.

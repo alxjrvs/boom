@@ -2,12 +2,9 @@
 // the sync verb (the route map's `defaultCommand`), the "make it so" reconcile. The one
 // subcommand operates the source itself — the git remote your machine is reconciled from,
 // and its managed clone: `set` points boom at a repo (clone + record, then sync). A nested
-// route map so the whole config-source story is one namespace.
-//
-// The git-operation verbs (`status`/`diff`/`push`/`reset`) were removed in 0.33: they wrapped
-// git in a second, weaker spelling of commands the user already has. The clone's path is on
-// the breadcrumb — `boom doctor` prints it — so `git -C <dir> …` is the equivalent, and it is
-// the whole of git rather than the slice boom re-exposed. See CHANGELOG.md#0330.
+// route map so the whole config-source story is one namespace. Nothing here wraps git: the
+// clone's path is on the breadcrumb (`boom doctor` prints it), and `git -C <dir> …` is the
+// whole of git rather than a slice boom would re-expose (CHANGELOG.md#0330).
 import { buildCommand, buildRouteMap } from "@stricli/core";
 import { linkRemoteConfigRepo } from "../config/remote.ts";
 import type { BoomContext } from "../context.ts";

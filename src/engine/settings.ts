@@ -2,23 +2,18 @@
 // already runs, so a consumer stops hand-rolling `run`/plist boilerplate for boom invoking
 // boom. Modelled as work items run through the *same* guarded loop as section resources
 // (`runWorkItems`), verb-aware:
-//   sync    → install/refresh (regenerate the skill, check/auto-upgrade)
+//   sync    → install/refresh (regenerate the skill, check for a newer release)
 //   verify  → report drift (skill stale) and notify on it
 // Each field is opt-in; an absent/empty `[boom]` table emits nothing. Skill writes are
 // journaled like any file mutation, so a skill they overwrite is displaced, not destroyed.
-//
-// `schedule` lived here too, generating and reaping `com.boomtube.*` launchd timers. It was
-// removed once its last consumer went; the `launchd` RESOURCE, which links and drives a
-// user-authored plist, is unaffected and lives in engine/resources/launchd.ts.
-import { join } from "node:path";
 import type { BoomSettings } from "../config/schema.ts";
-import { displayPath, mkdir, pathExists } from "../lib/fs.ts";
+import { displayPath } from "../lib/fs.ts";
 import { notify } from "../lib/notify.ts";
 import { fetchLatestVersion } from "../lib/release.ts";
 import { compareVersions, VERSION } from "../lib/version.ts";
 import { journalWrite } from "./journal.ts";
 import { runWorkItems, type WorkItem } from "./registry.ts";
-import { skillDoc, skillInstallPath } from "./skill.ts";
+import { installSkill, skillState } from "./skill.ts";
 import type { ReconcileCtx } from "./types.ts";
 
 // Any field configured? Gates the header so an absent or all-off `[boom]` table stays silent.
@@ -34,7 +29,7 @@ function boomWorkItems(settings: BoomSettings): WorkItem[] {
   if (settings.skill_on_sync) items.push({ label: "skill", run: applySkill });
   if (settings.upgrade_on_sync) items.push({ label: "upgrade", run: (ctx) => applyUpgrade(settings, ctx) });
   // Notify runs LAST, so its drift tally also counts any drift the earlier self-wiring items
-  // surfaced (a stale skill, an unloaded timer), not just section drift.
+  // surfaced (a stale skill), not just section drift.
   if (settings.notify) items.push({ label: "notify", run: applyNotify });
   return items;
 }
@@ -51,11 +46,10 @@ function applyNotify(ctx: ReconcileCtx): void {
     report.skip("no drift — no notification");
     return;
   }
-  const host = ctx.env.BOOM_HOST ?? Bun.env.HOSTNAME ?? "this machine";
   const fired = notify(
     ctx.env,
     "boom: drift detected",
-    `${host}: ${report.failures} failure(s), ${report.warnings} warning(s) — run \`boom source\``,
+    `${ctx.profile.host}: ${report.failures} failure(s), ${report.warnings} warning(s) — run \`boom source\``,
   );
   if (fired) report.ok(`notified: ${drift} drift item(s)`);
   else report.skip("drift found but no desktop notifier available");
@@ -70,24 +64,22 @@ export async function applyBoomSettings(
   await runWorkItems(boomWorkItems(settings), ctx);
 }
 
-// #55 — (re)install the self-describing skill from the running binary, so it can't lag an
-// upgrade of that binary. Sync regenerates (journaled); verify reports staleness; uninstall leaves it
-// (it lives under the user's ~/.claude, not something boom should reclaim).
+// (Re)install the self-describing skill from the running binary, so it can't lag an upgrade of
+// that binary. Sync regenerates (journaled); verify reports staleness; uninstall leaves it (it
+// lives under the user's ~/.claude, not something boom should reclaim).
 async function applySkill(ctx: ReconcileCtx): Promise<void> {
   if (ctx.verb === "uninstall") return;
   const { report } = ctx;
-  const file = skillInstallPath(ctx.env);
-  if (!file) {
+  const state = await skillState(ctx.env);
+  if (!state) {
     report.skip("skill_on_sync — can't resolve the Claude config dir (HOME unset)");
     return;
   }
-  const disp = displayPath(file, ctx.env);
-  const doc = skillDoc(VERSION);
+  const disp = displayPath(state.file, ctx.env);
 
   if (ctx.verb === "verify") {
-    const current = (await pathExists(file)) ? await Bun.file(file).text() : undefined;
-    if (current === doc) report.skip(`skill current (v${VERSION})`);
-    else report.warn(`skill ${current === undefined ? "not installed" : "stale"} — sync refreshes it`);
+    if (state.status === "current") report.skip(`skill current (v${VERSION})`);
+    else report.warn(`skill ${state.status === "missing" ? "not installed" : "stale"} — sync refreshes it`);
     return;
   }
   // sync
@@ -95,22 +87,21 @@ async function applySkill(ctx: ReconcileCtx): Promise<void> {
     report.plan(`would refresh skill → ${disp}`);
     return;
   }
-  if ((await pathExists(file)) && (await Bun.file(file).text()) === doc) {
+  if (state.status === "current") {
     report.skip(`skill current (v${VERSION})`);
     return;
   }
   // Journal the write in full before touching disk: displace a prior skill into the backup tree
-  // (recoverable), or record a plain remove for a fresh install. The `done` row used to
-  // land after `Bun.write`, so a failure in between — the `mkdir` throwing ENOTDIR is enough —
-  // left the displaced original in the backup tree with nothing naming it.
-  await journalWrite("skill", file, ctx);
-  await mkdir(join(file, ".."), { recursive: true });
-  await Bun.write(file, doc);
+  // (recoverable), or record a plain remove for a fresh install. The `done` row lands BEFORE the
+  // write on purpose — a failure in between (the parent path existing as a regular file is
+  // enough) would otherwise leave the displaced original in the backup tree with nothing naming it.
+  await journalWrite("skill", state.file, ctx);
+  await installSkill(state);
   report.ok(`refreshed skill → ${disp} (v${VERSION})`);
 }
 
-// #59 — fold an upgrade check (and optional auto-upgrade) into sync. Both are best-effort and
-// offline-safe: a network hiccup surfaces nothing and never fails the sync. Sync-only.
+// Fold a release check into sync. Best-effort and offline-safe: a network hiccup surfaces
+// nothing and never fails the sync. Sync-only.
 async function applyUpgrade(settings: BoomSettings, ctx: ReconcileCtx): Promise<void> {
   const { report } = ctx;
   if (ctx.verb !== "sync") return;

@@ -1,6 +1,6 @@
 // Filesystem helpers for the reconcile engine. node:fs/promises (not Bun.write) for
 // all metadata/link ops — Bun.write cannot create symlinks or set modes.
-import { chmod, copyFile, cp, lstat, mkdir, readlink, rename, rm, stat, symlink } from "node:fs/promises";
+import { cp, lstat, mkdir, readlink, rename, rm, symlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { Env } from "./paths.ts";
 
@@ -80,9 +80,9 @@ export async function ensureSymlink(src: string, dst: string): Promise<void> {
 
 // Move `dst` into the per-run backup tree (preserving its path) and return the backup
 // location, so a file an overwrite displaced is recoverable rather than destroyed.
-// `mode: 0o700` is load-bearing, not hygiene: the tree can hold a displaced *secret*, and
-// `rename` preserves that file's 0600 while the directories above it would otherwise land at
-// 0755 and expose its name and path. The gotcha that makes this one argument sufficient:
+// `mode: 0o700` is load-bearing, not hygiene: the tree can hold a displaced 0600 file (a
+// credential cache, an ssh config), and `rename` preserves that file's mode while the
+// directories above it would otherwise land at 0755 and expose its name and path. The gotcha that makes this one argument sufficient:
 // `mode` applies to every directory a `recursive` mkdir creates, and this call is what
 // lazily creates `backupsDir(env)` and the run's `<run-id>` root as intermediates — so the
 // run root needs no second chmod, and there is deliberately no eager mkdir upstream to own it.
@@ -107,5 +107,3 @@ export async function filesEqual(a: string, b: string): Promise<boolean> {
     return false;
   }
 }
-
-export { chmod, copyFile, lstat, mkdir, rename, rm, stat };

@@ -3,9 +3,9 @@
 // it (a link/copy creates parents implicitly, but can't declare an empty dir). Uninstall
 // leaves it by default (dirs may hold user data); `remove_on_uninstall = true` removes it
 // *if empty*.
-import { readdir, rmdir } from "node:fs/promises";
+import { chmod, mkdir, readdir, rmdir, stat } from "node:fs/promises";
 import type { Dir } from "../../config/schema.ts";
-import { chmod, displayPath, expandTilde, mkdir, pathExists, stat } from "../../lib/fs.ts";
+import { displayPath, expandTilde, pathExists } from "../../lib/fs.ts";
 import type { ReconcileCtx } from "../types.ts";
 
 // Current mode bits (octal string) of a path, or undefined if unreadable.
@@ -58,15 +58,15 @@ export async function reconcileDir(entry: Dir, ctx: ReconcileCtx): Promise<void>
       // Journal the undo before the mkdir so a crash mid-create is still recorded (mirrors
       // the filesystem resource). `rmdir`, not `remove`: this site *created* the directory, and
       // by undo time the user may have filled it — the same reason the uninstall arm below
-      // refuses a non-empty dir. The other mkdir journal site (filesystem.ts, ~:82) records the
-      // *displacement* of a conflicting non-directory, which is reversed by restoring it, so
-      // the two look alike and mean opposite things.
+      // refuses a non-empty dir. The other mkdir journal site (`ensureParentDir`, filesystem.ts)
+      // records the *displacement* of a conflicting non-directory, which is reversed by restoring
+      // it, so the two look alike and mean opposite things.
       // The plan token is passed to `intent` as well as `done`: nothing is displaced between
       // the two here (the mkdir follows both), so this site was never at risk — but an intent
       // row with a null undo is skipped by the orphan readers, so recording it keeps every
       // intent row in the journal self-sufficient rather than only most of them.
-      await ctx.journal?.intent("mkdir", path, { kind: "rmdir" });
-      await ctx.journal?.done("mkdir", path, { kind: "rmdir" });
+      ctx.journal?.intent("mkdir", path, { kind: "rmdir" });
+      ctx.journal?.done("mkdir", path, { kind: "rmdir" });
       await mkdir(path, { recursive: true });
       await applyMode();
       report.ok(entry.mode ? `${disp} created (mode ${entry.mode})` : `${disp} created`);

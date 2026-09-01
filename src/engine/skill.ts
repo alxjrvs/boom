@@ -1,39 +1,59 @@
-// The self-describing Claude Code SKILL.md: where it installs, and how it renders. The
-// *command reference* is generated from the catalog so it can never document a command that
-// doesn't exist; the guidance around it is hand-written.
+// The self-describing Claude Code SKILL.md: where it installs, how it renders, and whether the
+// installed copy is current. The *command reference* is generated from the catalog so it can
+// never document a command that doesn't exist; the guidance around it is hand-written. The
+// three consumers — `boom skill --install`, `boom doctor`, `[boom] skill_on_sync` — all read
+// `skillState` and write through `installSkill`, so there is one spelling of the install.
 //
-// It lives in `engine/` rather than `commands/` because the engine is the busier consumer —
-// `[boom] skill_on_sync` (engine/settings.ts) and `boom doctor` both render it, and reaching
-// it from `commands/skill.ts` forced both to load the whole CLI through a dynamic import of
-// `cli.ts` — a call-time priming ritual whose only job was dodging a TDZ crash.
+// It lives in `engine/` rather than `commands/` because the engine is the busier consumer.
 //
 // DECISION + GOTCHA: `engine/skill` → `commands/catalog` → `cli` → `commands/skill` →
-// `engine/skill` is still a require cycle — this move makes it *enterable from the engine*,
-// it does not remove it. What changed: with the old `engine/settings.ts` →
-// `commands/skill.ts` edge, `commands/skill.ts` was the module already in flight when
-// `cli.ts`'s route map read `skillCommand`, so a static import crashed with
-// `Cannot access 'skillCommand' before initialization` — hence that priming ritual.
-// Entering through this file instead, `commands/skill.ts` is reached *from*
-// `cli.ts` and finishes initializing before the route map reads it. (Making
-// `commands/skill.ts` itself the entry still crashes; nothing here fixes that, and nothing
-// needs to — `cli.ts` is the production entry.)
-// Both exports below MUST stay `export function` declarations, not `const` arrows: function
-// declarations are hoisted and initialized before any module body runs, so a partially-
-// evaluated `engine/skill.ts` still hands a mid-cycle consumer a live `skillDoc`. No consumer
-// reads them at module-evaluation time *today*, so nothing fails the moment you convert them —
-// which is exactly why it is written down here rather than left to a test to catch. The same
-// applies to `catalog.ts` reading `routes` lazily; hoisting that to a top-level const closes
-// the cycle at evaluation time and the crash returns.
-// `test/layering.test.ts` pins the engine-entry direction in a subprocess.
+// `engine/skill` is a require cycle, entered from the engine. Entering through this file,
+// `commands/skill.ts` is reached *from* `cli.ts` and finishes initializing before the route
+// map reads it; entering through `commands/skill.ts` itself crashes with `Cannot access
+// 'skillCommand' before initialization`, and nothing needs to fix that — `cli.ts` is the
+// production entry. The exports below MUST stay `export function` declarations, not `const`
+// arrows: function declarations are hoisted and initialized before any module body runs, so a
+// partially-evaluated `engine/skill.ts` still hands a mid-cycle consumer a live `skillDoc`. No
+// consumer reads them at module-evaluation time *today*, so nothing fails the moment you
+// convert them — which is exactly why it is written down here. The same applies to
+// `catalog.ts` reading `routes` lazily; hoisting that to a top-level const closes the cycle at
+// evaluation time and the crash returns. `test/layering.test.ts` pins the engine-entry
+// direction in a subprocess.
 import { join } from "node:path";
 import { commandList } from "../commands/catalog.ts";
+import { pathExists } from "../lib/fs.ts";
 import type { Env } from "../lib/paths.ts";
+import { VERSION } from "../lib/version.ts";
 
 // Where Claude Code keeps user skills: $CLAUDE_CONFIG_DIR (if the user relocated ~/.claude),
 // else ~/.claude. Returns undefined only when neither HOME nor CLAUDE_CONFIG_DIR is set.
 export function skillInstallPath(env: Env): string | undefined {
   const configDir = env.CLAUDE_CONFIG_DIR ?? (env.HOME ? join(env.HOME, ".claude") : undefined);
   return configDir ? join(configDir, "skills", "boom", "SKILL.md") : undefined;
+}
+
+// The installed skill measured against what this binary would render: the path, the rendered
+// doc, and whether the on-disk copy is `current`, `stale`, or `missing`. Undefined when the
+// install path cannot be resolved (no HOME / CLAUDE_CONFIG_DIR).
+export interface SkillState {
+  readonly file: string;
+  readonly doc: string;
+  readonly status: "current" | "stale" | "missing";
+}
+
+export async function skillState(env: Env): Promise<SkillState | undefined> {
+  const file = skillInstallPath(env);
+  if (!file) return undefined;
+  const doc = skillDoc(VERSION);
+  if (!(await pathExists(file))) return { file, doc, status: "missing" };
+  return { file, doc, status: (await Bun.file(file).text()) === doc ? "current" : "stale" };
+}
+
+// Write the rendered doc into place. `Bun.write` creates the parent directory itself; a parent
+// that exists as a regular file makes it throw, which is the failure the journaling caller
+// (engine/settings.ts) deliberately records its undo ahead of.
+export async function installSkill(state: SkillState): Promise<void> {
+  await Bun.write(state.file, state.doc);
 }
 
 export function skillDoc(version: string): string {

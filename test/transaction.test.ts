@@ -1,13 +1,13 @@
 // M3: the sync transaction — journal, backups, rollback, verify --json, and orphan
 // reaping. Each test drives the engine against a fully sandboxed $HOME + repo.
 import { expect, test } from "bun:test";
-import { mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Journal, listRuns, newRunId, readRun } from "../src/engine/journal.ts";
 import { reconcile } from "../src/engine/reconcile.ts";
 import { readManifest } from "../src/engine/state.ts";
-import { linkTarget, pathExists, stat } from "../src/lib/fs.ts";
+import { linkTarget, pathExists } from "../src/lib/fs.ts";
 import { backupsDir } from "../src/lib/paths.ts";
 import { makeSandbox, type Sandbox } from "./support/sandbox.ts";
 

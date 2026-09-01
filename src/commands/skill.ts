@@ -2,11 +2,9 @@
 // to stdout by default; `--install` writes it to <claude-config>/skills/boom/SKILL.md.
 // The doc itself lives in engine/skill.ts (the engine renders it too, for
 // `[boom] skill_on_sync` and `boom doctor`); this module is only the Stricli wrapper.
-import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
 import { buildCommand } from "@stricli/core";
 import type { BoomContext } from "../context.ts";
-import { skillDoc, skillInstallPath } from "../engine/skill.ts";
+import { installSkill, skillDoc, skillState } from "../engine/skill.ts";
 import { VERSION } from "../lib/version.ts";
 
 export const skillCommand = buildCommand<{ install?: boolean }, [], BoomContext>({
@@ -21,21 +19,19 @@ export const skillCommand = buildCommand<{ install?: boolean }, [], BoomContext>
     },
   },
   async func(flags) {
-    const doc = skillDoc(VERSION);
     if (!flags.install) {
-      this.process.stdout.write(doc);
+      this.process.stdout.write(skillDoc(VERSION));
       return;
     }
-    const file = skillInstallPath(this.env);
-    if (!file) {
+    const state = await skillState(this.env);
+    if (!state) {
       this.process.stderr.write(
         "boom: can't resolve the Claude config dir — set HOME or CLAUDE_CONFIG_DIR\n",
       );
       this.process.exitCode = 1;
       return;
     }
-    await mkdir(join(file, ".."), { recursive: true });
-    await writeFile(file, doc);
-    this.process.stdout.write(`boom: installed skill → ${file}\n`);
+    await installSkill(state);
+    this.process.stdout.write(`boom: installed skill → ${state.file}\n`);
   },
 });

@@ -1,6 +1,5 @@
-// boom's on-disk state as a single bun:sqlite database (state.db under the state dir),
-// replacing the hand-parsed TSV manifest + per-run NDJSON journals. One store, real
-// transactions, and — the reason it matters for a crash-recovery log — no torn-line
+// boom's on-disk state as a single bun:sqlite database (state.db under the state dir). One
+// store, real transactions, and — the reason it matters for a crash-recovery log — no torn-line
 // problem: each journal row is committed atomically as it happens (WAL), so an interrupted
 // run leaves whole rows, never a half-written record for the reader to trip over.
 import { Database } from "bun:sqlite";

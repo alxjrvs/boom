@@ -1,10 +1,7 @@
 // The `tmpl` resource: render one repo-relative template to a destination, substituting the
-// boomfile's top-level `[vars]` table into `${NAME}` placeholders. It is the replacement for
-// the retired `copy.expand`, and a strict superset of it: a template renders the same
-// `${env:VAR}`/`${host}`/`${os}` vocabulary (via the shared `renderTemplate` helper, still in
-// filesystem.ts) and adds the `[vars]`-backed placeholders on top — so the migration is a
-// section-key rename with no content change. One template + per-profile vars replaces N
-// near-identical machine-specific overlay files.
+// `${env:VAR}`/`${host}`/`${os}` vocabulary and the boomfile's top-level `[vars]` table into
+// `${NAME}` placeholders. One template + per-profile vars replaces N near-identical
+// machine-specific overlay files.
 //
 // It shares `copy`'s journal discipline (declared as a managed `copy`, displace-before-write,
 // change-gated skip) with two deliberate departures:
@@ -12,12 +9,23 @@
 //     with an unresolved placeholder is worse than one that loudly refuses to render;
 //   • a literal shell `${FOO:-bar}` (anything that isn't a bare identifier) is left verbatim,
 //     so real shell config survives.
-import { dirname, join } from "node:path";
+import { chmod, stat } from "node:fs/promises";
+import { join } from "node:path";
 import type { Tmpl } from "../../config/schema.ts";
-import { chmod, displayPath, expandTilde, mkdir, pathExists, stat } from "../../lib/fs.ts";
+import { displayPath, expandTilde, pathExists } from "../../lib/fs.ts";
 import { journalRemove, journalWrite } from "../journal.ts";
 import type { ReconcileCtx } from "../types.ts";
-import { renderTemplate } from "./filesystem.ts";
+
+// The machine vocabulary: `${env:VAR}` / `${host}` / `${os}`. Unknown `${env:…}` resolves to
+// empty; unmatched `${…}` is left verbatim (so a literal shell `${...}` in a config survives).
+// `host`/`os` come from the run's profile, never `os.hostname()`/`process.platform`, so a
+// template honours the same BOOM_HOST/BOOM_OS overrides that gate its section.
+function renderTemplate(text: string, ctx: ReconcileCtx): string {
+  return text
+    .replace(/\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g, (_, name: string) => ctx.env[name] ?? "")
+    .replace(/\$\{host\}/g, () => ctx.profile.host)
+    .replace(/\$\{os\}/g, () => ctx.profile.os);
+}
 
 // A bare `${identifier}` placeholder — the `[vars]` reference form. Deliberately narrow: an
 // expression with any other character (`${env:X}`, `${FOO:-bar}`) is not matched here, so
@@ -73,12 +81,12 @@ export async function reconcileTmpl(entry: Tmpl, ctx: ReconcileCtx): Promise<voi
       const content = await render(true);
       if (content === undefined) return;
       // Change-gate: an already-rendered dst is skipped (no rewrite, no journal churn, no fresh
-      // backup of an unchanged file), mirroring copy/secret.
+      // backup of an unchanged file), mirroring copy.
       if ((await pathExists(dst)) && (await Bun.file(dst).text()) === content) {
         // Content is current — but still enforce the declared mode. A rendered file whose
         // permissions drifted looser (a prior umask, a manual chmod) would otherwise never be
         // repaired: the change-gate returns before the chmod below, so `--fix` is a no-op and
-        // `verify` is blind. Re-chmod without rewriting, the same branch `secret` takes.
+        // `verify` is blind. Re-chmod without rewriting.
         if (wantMode !== undefined && ((await stat(dst)).mode & 0o777) !== wantMode) {
           if (ctx.dryRun) {
             report.plan(`${disp} mode would be set to 0${wantMode.toString(8)}`);
@@ -99,8 +107,9 @@ export async function reconcileTmpl(entry: Tmpl, ctx: ReconcileCtx): Promise<voi
       // tree with a `done` row that restores it; a fresh write's undo is a remove. Identical to
       // the `copy` resource's arm, so it routes through the identical helper.
       await journalWrite("copy", dst, ctx, true);
-      await mkdir(dirname(dst), { recursive: true });
-      await Bun.write(dst, content);
+      await Bun.write(dst, content); // creates the parent dir itself (createPath defaults on)
+      // chmod after, never `Bun.write(..., { mode })`: open(2)'s mode is umask-masked, chmod is not,
+      // and the resource promises an exact mode.
       if (wantMode !== undefined) await chmod(dst, wantMode);
       report.ok(`${disp} rendered`);
       return;

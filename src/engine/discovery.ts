@@ -25,7 +25,7 @@ export async function runUserCommand(
     const mod = (await import(file)) as { default?: UserCommand };
     fn = mod.default;
   } catch (e) {
-    // Exit 1 (a hard failure), not 2 — 2 is the verify/status warning tier in this CLI,
+    // Exit 1 (a hard failure), not 2 — 2 is the verify warning tier in this CLI,
     // and a broken user command is an error, not a warning.
     ctx.process.stderr.write(`boom ${name}: failed to load — ${(e as Error).message}\n`);
     return 1;

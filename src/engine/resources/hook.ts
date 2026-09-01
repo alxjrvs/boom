@@ -1,7 +1,6 @@
-// The `hook` resource — the TS-native resource-type extension contract that replaces
-// the bash `_NAME_<verb>` hooks. A hook is hooks/<name>.ts exporting verb functions
-// that receive a small typed API. Loaded by runtime import() (works in the compiled
-// binary). This is the public extension point (§3 of the design).
+// The `hook` resource — the resource-type extension contract. A hook is hooks/<name>.ts
+// exporting verb functions that receive a small typed API. Loaded by runtime import() (works
+// in the compiled binary). This is the public extension point (see SPEC.md, "Hooks").
 import { join } from "node:path";
 import type { OsKind } from "../../config/profile.ts";
 import type { Hook } from "../../config/schema.ts";
@@ -17,10 +16,9 @@ export interface HookApi {
   readonly verb: Verb;
   readonly dryRun: boolean;
   readonly env: Record<string, string | undefined>;
-  // The run's context, so a hook never has to reconstruct it. `repo` is the DECLARING section's
-  // origin (registry.ts swaps it per section), which is what lets a module ship its own hook;
-  // `os`/`host`/`profiles` come from the run's ProfileContext rather than `process.platform`,
-  // which cannot see `--profile` or the BOOM_OS/BOOM_HOST overrides.
+  // The run's context, so a hook never has to reconstruct it. `os`/`host`/`profiles` come from
+  // the run's ProfileContext rather than `process.platform`, which cannot see `--profile` or the
+  // BOOM_OS/BOOM_HOST overrides.
   readonly repo: string;
   readonly vars: Record<string, string>;
   readonly os: OsKind;
@@ -86,9 +84,7 @@ export async function reconcileHook(entry: Hook, ctx: ReconcileCtx): Promise<voi
   // The core resources hold the opposite invariant by pushing to `declared` as their first
   // statement (filesystem.ts), which a hook cannot do: the declarations live in its module.
   if (!(await pathExists(file))) {
-    // Name the directory searched: for a module-shipped hook that is the module's own dir (the
-    // per-section repo swap in registry.ts), not the config repo, and "missing X" is only
-    // actionable if it says which X.
+    // Name the directory searched: "missing X" is only actionable if it says where X was looked for.
     report.warn(`hook ${entry.name}: missing ${entry.name}.ts in ${dir}`);
     ctx.ownershipIncomplete = true;
     return;
@@ -108,7 +104,7 @@ export async function reconcileHook(entry: Hook, ctx: ReconcileCtx): Promise<voi
   // of it — but the marker stays unconditional: a hook is arbitrary code, so journaling part of it
   // never makes all of it reversible, and suppressing the marker once a hook journals anything
   // would silently promise reversibility for the un-journaled remainder.
-  if (!ctx.dryRun && ctx.verb === "sync") await ctx.journal?.side("hook", entry.name);
+  if (!ctx.dryRun && ctx.verb === "sync") ctx.journal?.side("hook", entry.name);
 
   const api: HookApi = {
     with: entry.with ?? {},

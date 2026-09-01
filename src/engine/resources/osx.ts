@@ -1,10 +1,9 @@
-// The osx_default resource: `defaults write/read` a macOS default. OS-gated to
-// darwin (a no-op elsewhere), like the bash engine. Marks ctx.dirty("osx") so its own
-// finalizeOsx can restart the owning UI processes at the end of the run.
-import { detectOs } from "../../config/profile.ts";
+// The osx_default resource: `defaults write/read` a macOS default. OS-gated to darwin (a
+// no-op elsewhere). Marks ctx.dirty("osx") so its own finalizeOsx can restart the owning UI
+// processes at the end of the run.
 import type { OsxDefault } from "../../config/schema.ts";
 import { expandHome } from "../../lib/fs.ts";
-import { captureArgv, cleanEnv } from "../../lib/proc.ts";
+import { captureArgv } from "../../lib/proc.ts";
 import { firstOsxUndo, stashOsxPrior, type UndoToken } from "../journal.ts";
 import type { ReconcileCtx } from "../types.ts";
 
@@ -49,19 +48,17 @@ export function osxMatches(type: OsxType, current: string, value: OsxValue): boo
   return current.trim() === want;
 }
 
-// Gotcha for the uninstall arm below: uninstall is not a journaled run (`mutating = verb ===
-// "sync" && !dryRun`, reconcile.ts), so `ctx.journal` is undefined here. That arm therefore
-// *reads* the recorded undo through `ctx.env` instead of writing one, and its own mutation is
-// not itself recorded — the same deal every other resource's uninstall makes. It reuses the
-// sync arm's `cleanEnv` + `Bun.spawnSync` shape, which a sandboxed test needs for the
-// PATH-resolved `defaults` it gets.
+// Gotcha for the uninstall arm below: it *reads* the recorded prior (the durable `meta` stash,
+// via firstOsxUndo) rather than writing a fresh undo row — the machine's pre-boom value is the
+// only thing worth restoring, and the stash outlives journal pruning where an `ops` row would
+// not. Every `defaults` call goes through captureArgv with the run's env, which is what lets a
+// sandboxed test intercept it on PATH.
 export async function reconcileOsxDefault(entry: OsxDefault, ctx: ReconcileCtx): Promise<void> {
-  if (detectOs(ctx.env) !== "darwin") return;
+  if (ctx.profile.os !== "darwin") return;
   const { report } = ctx;
   const { domain, key } = entry;
   const type = entry.type ?? inferType(entry.value);
   const disp = `${domain} ${key}`;
-  const env = cleanEnv(ctx.env);
   // String values are written verbatim by `defaults write` (no shell to expand
   // them), so resolve ~/$HOME here; non-string values pass through unchanged.
   const value: OsxValue = type === "string" ? expandHome(String(entry.value), ctx.env) : entry.value;
@@ -103,20 +100,16 @@ export async function reconcileOsxDefault(entry: OsxDefault, ctx: ReconcileCtx):
       // Same token on both rows: the `defaults write` below is the mutation, so nothing is
       // displaced in the intent→done window and this site was never at risk. Recording it
       // anyway keeps "every intent row names its own undo" true of the whole journal.
-      await ctx.journal?.intent("osx", disp, undo);
-      await ctx.journal?.done("osx", disp, undo);
+      ctx.journal?.intent("osx", disp, undo);
+      ctx.journal?.done("osx", disp, undo);
       // The journal row ages out (pruneRuns keeps 10 runs); the machine's *pre-boom* value has
       // to outlive it or `boom uninstall` would later "restore" boom's own earlier value as if
       // the user had set it. The stash is insert-if-absent, which is what makes it the FIRST
       // prior rather than the latest. Gated on ctx.journal so only a real mutating run records
       // one — a prior is a fact about a write that happened.
       if (ctx.journal) await stashOsxPrior(ctx.env, undo);
-      const p = Bun.spawnSync(["defaults", "write", domain, key, `-${type}`, String(value)], {
-        env,
-        stdout: "ignore",
-        stderr: "ignore",
-      });
-      if (p.exitCode === 0) {
+      const p = captureArgv(["defaults", "write", domain, key, `-${type}`, String(value)], ctx.env);
+      if (p.code === 0) {
         report.ok(`${disp} = ${want}`);
         ctx.dirty.add("osx");
       } else {
@@ -149,8 +142,8 @@ export async function reconcileOsxDefault(entry: OsxDefault, ctx: ReconcileCtx):
         undo.prior === null
           ? ["defaults", "delete", domain, key]
           : ["defaults", "write", domain, key, `-${undo.type}`, undo.prior];
-      const p = Bun.spawnSync(argv, { env, stdout: "ignore", stderr: "ignore" });
-      if (p.exitCode !== 0) {
+      const p = captureArgv(argv, ctx.env);
+      if (p.code !== 0) {
         // `defaults delete` exits 1 on a key that is already gone, and the meta stash is never
         // invalidated by an uninstall — so without this the delete is re-attempted forever and
         // every uninstall after the first one fails. Absent means the teardown's goal already
@@ -178,16 +171,12 @@ export async function reconcileOsxDefault(entry: OsxDefault, ctx: ReconcileCtx):
 // ctx.dirty: only fires when a `defaults write` actually changed something this run (which
 // only happens on a mutating, non-dry darwin run), so it's a no-op for verify/uninstall/dry.
 export function finalizeOsx(ctx: ReconcileCtx): void {
-  if (!ctx.dirty.has("osx") || detectOs(ctx.env) !== "darwin") return;
+  if (!ctx.dirty.has("osx") || ctx.profile.os !== "darwin") return;
   ctx.report.header("macOS finalize");
   // Best-effort: killall exits nonzero when a named process isn't running, which is normal
   // and not worth surfacing — the restart is a courtesy so changes show without a re-login.
-  // cleanEnv (so it honors the run's PATH) matches the `defaults` calls above, and lets a
+  // The run's env (so it honors the run's PATH) matches the `defaults` calls above, and lets a
   // sandboxed test intercept the restart instead of nuking the runner's real Dock/Finder.
-  Bun.spawnSync(["killall", "Dock", "Finder", "SystemUIServer"], {
-    env: cleanEnv(ctx.env),
-    stdout: "ignore",
-    stderr: "ignore",
-  });
+  captureArgv(["killall", "Dock", "Finder", "SystemUIServer"], ctx.env);
   ctx.report.ok("restarted Dock/Finder/SystemUIServer (defaults changed)");
 }
