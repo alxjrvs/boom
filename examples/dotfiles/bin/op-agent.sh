@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 # op-agent — all 1Password-agent machinery in one verb-dispatched CLI.
-# Replaces the per-service header shims (gh-mcp-auth-header,
-# render-mcp-auth-header — identical but for the ref) and install/47-op-agent.sh.
 # Differentiation is by ARGUMENT, never a new file.
 #
 #   op-agent header <op://ref>   emit {"Authorization":"Bearer …"} for an MCP
@@ -9,12 +7,12 @@
 #   op-agent provision           ensure SA vault + keychain token + git PAT
 #   op-agent status              report keychain token presence (exit 0/1)
 #
-# This stays a standalone script ONLY because Claude Code's headersHelper execs
-# it by path; the boomfile drives provision/status via `on sync|verify op-agent …`.
+# A standalone script rather than a boom hook because Claude Code's headersHelper execs it by
+# path; the boomfile `link`s it onto PATH and drives provision/status from `run` steps.
 set -euo pipefail
 
 KEYCHAIN="op-claude-agent"
-VAULT="${BOOM_vault:-claude-agent}"
+VAULT="${OP_AGENT_VAULT:-claude-agent}"
 
 # Load the SA token from the login keychain into THIS process only (no biometric,
 # headless-safe). Empty/missing → op falls back to desktop auth.

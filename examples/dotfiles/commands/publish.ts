@@ -74,7 +74,8 @@ function realignIfLanded(dir: string, report: (s: string) => void): void {
   if (touched.code !== 0 || touched.out.length === 0) return; // nothing local-only to drop
   const paths = touched.out.split("\n");
   if (git(dir, "diff", "--quiet", ref, "HEAD", "--", ...paths).code !== 0) return; // genuinely ahead
-  if (git(dir, "reset", "--hard", ref).code === 0) report(`realigned onto ${ref} — published work has landed`);
+  if (git(dir, "reset", "--hard", ref).code === 0)
+    report(`realigned onto ${ref} — published work has landed`);
 }
 
 interface Flags {
@@ -103,7 +104,11 @@ function parse(args: string[]): Flags | Error {
 // A branch name git will accept from any hostname: everything outside [a-z0-9._-] folded to a dash.
 // The sha suffix keeps two publishes from the same machine distinct.
 function branchFor(host: string, sha: string): string {
-  const slug = host.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "machine";
+  const slug =
+    host
+      .toLowerCase()
+      .replace(/[^a-z0-9._-]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "machine";
   return `boom/${slug}-${sha.slice(0, 7)}`;
 }
 

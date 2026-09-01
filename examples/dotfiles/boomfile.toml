@@ -7,10 +7,8 @@
 [boom]
 skill_on_sync = true             # regenerate ~/.claude/skills/boom/SKILL.md each sync
 upgrade_on_sync = "check"        # warn when a newer boom release ships; upgrade it the way you installed it
-# `schedule` used to live here, generating a launchd timer per entry. It is RETIRED: still
-# accepted so an old boomfile keeps parsing, but nothing reads it, and no timer is created or
-# reaped. To run boom on a schedule, write the plist yourself and link it with the `launchd`
-# resource (see the macOS section below).
+# To run boom on a schedule, write the plist yourself and link it with the `launchd` resource
+# (see the LaunchAgents section below).
 
 [[section]]
 name = "Shell + git"
@@ -60,9 +58,7 @@ name = "Per-machine git identity"
 
 # `tmpl` renders the file before writing: ${env:VAR}/${host}/${os} (plus ${NAME} from the
 # top-level [vars] table) are substituted, so one repo file yields per-machine content without
-# a hook. This used to be a `copy` with `expand = true`; that key is retired and `tmpl` renders
-# a strict superset of it, so the migration is this rename and no content change. `link` still
-# can't render — a symlink has no content of its own.
+# a hook. `link` can't render — a symlink has no content of its own.
 [[section.tmpl]]
 src = "gitconfig-local.tmpl"
 dst = "~/.config/git/local"
@@ -100,24 +96,21 @@ dst = "~/.claude/settings.json"
 [[section]]
 name = "Packages + zsh fragments"
 
-# `pkg`: one array entry per manager. `brew` runs `brew bundle` over `file` (default
-# "Brewfile"); `mise` runs `mise install` against the repo's mise config.
+# `pkg`: one array entry per manager — `brew`, `mise` or `gh`. `brew` runs `brew bundle` over
+# `file` (default "Brewfile"), never upgrading; `mise` runs `mise install` against the repo's
+# mise config. `cleanup` (brew only) is the inverse of a Brewfile: "check" makes every verb
+# name installed-but-undeclared packages, "uninstall" lets sync remove them.
 #
-# `remove_on_uninstall` decides what `boom uninstall` reclaims, per entry. Omit it and nothing
-# changes: the user-scoped managers (cargo/npm/pipx/gem/flatpak/gh) already remove what they
-# installed, apt/dnf never do. `= true` opts a system manager *in* (a root `apt-get remove -y`
-# of the listed packages — opt-in because those are shared machine state); `= false` opts a
-# user-scoped one *out*. It is rejected on brew/mise, which have no "remove exactly what this
-# file declares" verb — tear those down with a `run` step bound to `on = "uninstall"`.
+# `remove_on_uninstall` decides what `boom uninstall` reclaims, per entry. It is rejected on
+# brew/mise, which have no "remove exactly what this file declares" verb — tear those down with
+# a `run` step bound to `on = "uninstall"`. `gh` removes what it installed unless `= false`.
 pkg = [
-  { manager = "brew", file = "Brewfile" },
+  { manager = "brew", file = "Brewfile", cleanup = "check" },
   { manager = "mise" },
-  # { manager = "apt",  file = "apt.txt", remove_on_uninstall = true },   # opt system pkgs in
-  # { manager = "npm",  file = "npm.txt", remove_on_uninstall = false },  # keep these globals
 ]
 
 # A glob `src` places every match under `dst` (a directory), preserving structure below the
-# pattern's static prefix — the old `glob`, now just a `link` whose src has a wildcard.
+# pattern's static prefix.
 [[section.link]]
 src = "zsh/[0-9]*.zsh"
 dst = "~/.config/zsh/"
@@ -137,9 +130,9 @@ pkg = [{ manager = "gh", file = "gh-extensions.txt" }]
 [[section]]
 name = "SSH perms"
 
-# `dir` ensures a standalone directory exists with a mode — the declarative form of the
-# mkdir -p/chmod run steps this used to be. `remove_on_uninstall = true` would remove it on
-# uninstall (only if empty); omitted here since ~/.ssh holds user data.
+# `dir` ensures a standalone directory exists with a mode — a declarative `mkdir -p` + `chmod`.
+# `remove_on_uninstall = true` would remove it on uninstall (only if empty); omitted here since
+# ~/.ssh holds user data.
 [[section.dir]]
 path = "~/.ssh"
 mode = "700"
@@ -152,8 +145,7 @@ mode = "700"
 name = "Guardrails"
 
 # A verify-time `run` step is how you assert machine state: a non-zero exit folds into
-# `boom verify`'s exit code and JSON report. This replaced the `check` resource in 0.35.0 —
-# `run` is the shell you were going to reach for anyway, and it honours `timeout` too.
+# `boom verify`'s exit code and JSON report, and `timeout` caps a hung command.
 [[section.run]]
 on = "verify"
 cmd = "grep -q '\\[user\\]' ~/.gitconfig || { echo 'git identity not configured'; exit 1; }"
@@ -184,8 +176,10 @@ creates = ".git/hooks/pre-commit"
 name = "op-agent"
 when = { os = "darwin" }   # a bare scalar is still valid — the one-element list
 
+# A plain script boom puts on PATH, not a hook: `hooks/<name>.ts` is for a module that needs
+# the run's context (`HookApi`); a CLI other tools exec by path is just a `link`.
 [[section.link]]
-src = "hooks/op-agent.sh"
+src = "bin/op-agent.sh"
 dst = "~/.local/bin/op-agent"
 
 # A `run` step fires on every reconcile unless a guard says otherwise. `unless` is a *predicate*,

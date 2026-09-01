@@ -22,7 +22,9 @@ case "$os/$arch" in
     ;;
 esac
 
+# BOOM_VERSION takes the tag (`v0.38.1`) or the bare version (`0.38.1`); releases are tagged `v*`.
 ver="${BOOM_VERSION:-latest}"
+case "$ver" in latest | v*) ;; *) ver="v$ver" ;; esac
 if [ "$ver" = "latest" ]; then
   base="https://github.com/${REPO}/releases/latest/download"
 else
@@ -38,8 +40,7 @@ curl -fsSL -o "$tmp" "$base/$asset"
 
 # Verify the download against the release's published SHA256SUMS before trusting the
 # binary — the curl-pipe bootstrap is otherwise the one install path with no integrity
-# check (`boom upgrade` already verifies this same manifest). Every path that cannot actually
-# verify — manifest unfetchable, no entry for this asset, hash mismatch, no checksum tool —
+# check. Every path that cannot actually verify — manifest unfetchable, no entry for this asset, hash mismatch, no checksum tool —
 # refuses to install. BOOM_SKIP_VERIFY=1 is the single, explicit opt-out; nothing else
 # degrades to "installed it anyway", because a silent downgrade is indistinguishable from
 # a successful verification to the person running the one-liner.
@@ -84,7 +85,7 @@ else
 fi
 
 mv "$tmp" "$BIN/boom"
-chmod +x "$BIN/boom"
+chmod 755 "$BIN/boom" # mktemp created it 0600; +x alone would leave a 0700 binary under a shared prefix
 
 # macOS release binaries are signed on a real macOS host (Developer ID when configured,
 # else ad-hoc), so a downloaded binary should already carry a valid signature. Only
