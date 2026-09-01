@@ -249,13 +249,41 @@ export function lastLine(s?: string): string {
 //
 // stdout is included because a script is free to explain itself there, and under `silent` it is
 // hidden too; a step reporting on stdout used to fail with a bare "(exit N)" and no reason at all.
-export function failureDetail(stderr?: string, stdout?: string): string {
+// Env var NAMES whose VALUES must never survive into a report. Matched on the name, not on
+// the value's shape: a token that happens to look like a word is still a token, and a
+// value-shape heuristic would both miss those and mangle innocent output.
+const SECRET_NAME_RE = /(TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|_KEY|APIKEY|API_KEY|SESSION)/i;
+
+// Shortest value worth substituting. Below this, a "secret" is more likely to be a flag value
+// or an empty placeholder, and blanket-replacing a 3-character string would corrupt the very
+// output someone is reading to debug the failure.
+const MIN_REDACT_LEN = 8;
+
+// Replace any secret-shaped env VALUE appearing in text with a named marker.
+//
+// A `run` step inherits the invoking environment, which on this project's own consumer carries
+// OP_SERVICE_ACCOUNT_TOKEN, NPM_TOKEN and friends. `run.ts` captures BOTH channels (a step may
+// explain itself on either) and hands them here on failure, so a step that echoed its
+// environment — `set -x`, a curl that prints its own headers, a tool dumping config on error —
+// put a live credential into the report and into `--json`. Losing the step's explanation is not
+// an acceptable fix; scrubbing the values that could only have come from the environment is.
+export function redactSecrets(text: string, env: Env): string {
+  let out = text;
+  for (const [name, value] of Object.entries(env)) {
+    if (!value || value.length < MIN_REDACT_LEN || !SECRET_NAME_RE.test(name)) continue;
+    out = out.split(value).join(`«redacted:${name}»`);
+  }
+  return out;
+}
+
+export function failureDetail(stderr?: string, stdout?: string, env?: Env): string {
   const body = [stderr, stdout]
     .map((s) => s?.trim())
     .filter((s): s is string => Boolean(s))
     .join("\n");
   if (!body) return "";
-  return `\n${body
+  const safe = env ? redactSecrets(body, env) : body;
+  return `\n${safe
     .split("\n")
     .map((l) => `    ${l}`)
     .join("\n")}`;

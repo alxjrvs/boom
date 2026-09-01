@@ -1,5 +1,11 @@
 # Migrating to boom 0.23.0
 
+> **The module system described here no longer exists.** `use` and shared modules were removed in
+> **0.30.0** ("delete the module system, which has no module"), and `use` is not a key the
+> boomfile schema accepts — it is a `strictObject`, so a boomfile carrying one fails to load with
+> an unknown-key error. This document is kept as the record of the 0.23 upgrade; do not read it
+> as current guidance.
+
 0.23 is the release where boom stopped claiming things it hadn't done. Three of the changes need
 an edit to your `boomfile.toml` before **any** boom command will run; the rest need no edit but
 make a run behave differently, and one of those can silently stop a scheduled job from doing its

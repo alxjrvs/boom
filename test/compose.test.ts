@@ -96,9 +96,8 @@ test("compose: base and overlay sections are stamped with origin + source", asyn
   // The base, then each matching overlay in overlayFiles order — composition order IS
   // precedence order.
   expect(c.sections.map((s) => s.name)).toEqual(["strong", "os", "overlaid"]);
-  // Every section's paths resolve against the one repo now; `origin` stayed on ComposedSection
-  // because it is what the resources join against, and an overlay's sections need it too.
-  expect(c.sections.every((s) => s.origin === repo)).toBe(true);
+  // Every section's paths resolve against the one repo — there is no per-section origin any
+  // more, so `source` (which file declared it) is the only provenance a composed section carries.
   expect(c.sections.find((s) => s.name === "strong")?.source).toBe("boomfile.toml");
   expect(c.sections.find((s) => s.name === "os")?.source).toBe("boomfile.linux.toml");
   expect(c.sections.find((s) => s.name === "overlaid")?.source).toBe("boomfile.testhost.toml");

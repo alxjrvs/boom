@@ -16,15 +16,19 @@ import { CONFIG_FILE, loadOverlayFile } from "./load.ts";
 import { overlayFiles, type ProfileContext, sectionApplies } from "./profile.ts";
 import type { Boomfile, BoomSettings, Section } from "./schema.ts";
 
-// A section plus where it came from. `origin` is the ABSOLUTE directory this section's
-// repo-relative paths (`src`, `file`, `hooks/<name>.ts`, …) resolve against — the base repo for
-// the repo's own and overlay sections, the module's own directory for a module's. `source` is the
-// human label used when reporting who declared what.
+// A section plus which FILE declared it — the human label used by the duplicate-destination
+// note below.
 //
-// Deliberately NOT part of `SectionSchema`: that is a `v.strictObject`, so an `origin` key there
-// would let a boomfile forge its own provenance. These are compose-time derived facts, not input.
+// There used to be an `origin` directory here too, so a MODULE could ship the files its own
+// sections declared: `reconcileSection` swapped `ctx.repo` for it before running any resource.
+// The module system was deleted in 0.30.0 and nothing has set `origin` to anything but the base
+// repo since, so that branch could never be taken — along with the GOTCHA comment beside it
+// warning that the swap narrowed the repo-self-link guard for a case that can no longer occur.
+// Both are gone.
+//
+// Deliberately NOT part of `SectionSchema`: that is a `v.strictObject`, so a `source` key there
+// would let a boomfile forge its own provenance. This is a compose-time derived fact, not input.
 export interface ComposedSection extends Section {
-  readonly origin?: string;
   readonly source?: string;
 }
 
@@ -53,7 +57,6 @@ export async function composeConfig(
 ): Promise<Composition> {
   const sections: ComposedSection[] = config.section.map((s) => ({
     ...s,
-    origin: repo,
     source: CONFIG_FILE,
   }));
   let vars: Record<string, string> = { ...(config.vars ?? {}) };
@@ -64,7 +67,7 @@ export async function composeConfig(
     // `[[section]]` (OverlaySchema). The base above went through the strict loader.
     const overlay = await loadOverlayFile(join(repo, name));
     if (!overlay) continue;
-    sections.push(...overlay.section.map((s) => ({ ...s, origin: repo, source: name })));
+    sections.push(...overlay.section.map((s) => ({ ...s, source: name })));
     vars = { ...vars, ...(overlay.vars ?? {}) };
     // `[boom]` is a flat table, so it merges shallowly, last-wins PER KEY. The gotcha:
     // `schedule` is an array, and a shallow merge REPLACES an array rather than appending — an
