@@ -60,6 +60,8 @@ async function configRepo(env: Record<string, string | undefined>): Promise<stri
 // already equals HEAD's, then dropping those commits cannot lose a byte — reset onto upstream.
 // The check is per-file rather than whole-tree so it still fires when main moved on underneath.
 // Anything that fails it is left alone for a human: boom will report the conflict as it does today.
+// It needs a clean tree to have something unambiguous to reset onto, so the realign happens on the
+// run AFTER a PR lands — publish once when it merges and the next round of edits starts level.
 function realignIfLanded(dir: string, report: (s: string) => void): void {
   if (git(dir, "status", "--porcelain").out.length > 0) return; // dirty: nothing to realign onto
   const upstream = git(dir, "rev-parse", "--abbrev-ref", "@{u}");
@@ -122,6 +124,7 @@ export default async function publish(args: string[], ctx: Ctx): Promise<number>
     return 1;
   }
 
+  const host = ctx.env.BOOM_HOST ?? Bun.env.HOSTNAME ?? "local";
   const dir = await configRepo(ctx.env);
   if (!dir) {
     stderr.write("boom publish: no config repo linked — run `boom source set <owner/repo>`\n");
@@ -144,7 +147,6 @@ export default async function publish(args: string[], ctx: Ctx): Promise<number>
       stderr.write("boom publish: git add failed\n");
       return 1;
     }
-    const host = ctx.env.BOOM_HOST ?? Bun.env.HOSTNAME ?? "local";
     const msg = flags.message ?? `boom: ${host} config changes`;
     const commit = git(dir, "commit", "-m", msg);
     if (commit.code !== 0) {
@@ -164,7 +166,6 @@ export default async function publish(args: string[], ctx: Ctx): Promise<number>
     return 0;
   }
 
-  const host = ctx.env.BOOM_HOST ?? Bun.env.HOSTNAME ?? "machine";
   const branch = flags.branch ?? branchFor(host, git(dir, "rev-parse", "HEAD").out);
 
   // The whole point: a refspec push. HEAD never moves, no branch is checked out, so the working

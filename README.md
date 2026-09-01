@@ -129,7 +129,9 @@ Two things it does that a hand-rolled `git push` gets wrong:
   `git pull --rebase` replays a patch that is already upstream and stops on a conflict — that is
   `boom source` failing on every run until someone untangles it by hand. Publish resets onto the
   upstream branch when, for every file its local-only commits touched, upstream's content already
-  matches HEAD's — a reset that cannot lose a byte — and leaves anything else alone for you.
+  matches HEAD's — a reset that cannot lose a byte — and leaves anything else alone for you. That
+  needs a clean tree, so it happens on the run *after* the merge: publish once when the PR lands and
+  the next round of edits starts level.
 
 ### Housekeeping
 
