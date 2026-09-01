@@ -20,7 +20,6 @@ type SyncFlags = {
   profile?: string[];
   commit?: boolean;
   message?: string;
-  update?: boolean;
   verbose?: boolean;
 };
 
@@ -52,11 +51,6 @@ export const syncCommand = buildCommand<SyncFlags, [], BoomContext>({
         optional: true,
         brief: 'Commit message for --commit (default: "boom: local changes")',
       },
-      update: {
-        kind: "boolean",
-        optional: true,
-        brief: "Also update outdated brewfile formulae, not just reconcile declared state",
-      },
       only: onlyFlag,
       profile: profileFlag,
       json: jsonFlag,
@@ -74,7 +68,6 @@ export const syncCommand = buildCommand<SyncFlags, [], BoomContext>({
       linkMode: linkModeOf(flags),
       commit: flags.commit,
       commitMessage: flags.message,
-      update: flags.update,
       verbose: flags.verbose,
       command: "source",
     });

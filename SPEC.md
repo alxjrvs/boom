@@ -36,7 +36,7 @@ A `boom` invocation does one of two things:
 1. **Reconcile verbs** over a config repo's `boomfile.toml` — the `sync` verb runs on
    the bare `boom source` command (and its explicit `boom source sync` spelling); the
    rest are their own top-level commands:
-   - `boom source` / `boom source sync` — reconcile the machine to the boomfile, running the `sync` verb (`--fix` repairs drift by overwriting conflicts; `--update` also updates outdated brew formulae)
+   - `boom source` / `boom source sync` — reconcile the machine to the boomfile, running the `sync` verb (`--fix` repairs drift by overwriting conflicts). No verb upgrades a package: `brew bundle` always runs `--no-upgrade`, because Bundle's upgrade reaches casks and a cask upgrade quits the running app. Upgrading is `brew upgrade --formula` / `mise upgrade`
    - `boom verify` — check drift, exit 0 ok / 2 warn / 1 fail (`--json` for a report; `--ci`
      narrows to a non-interactive schema-check gate, 0/1, no machine walk)
    - `boom uninstall`
@@ -255,8 +255,8 @@ verb-aware (sync installs/refreshes, verify reports drift, uninstall tears the t
 ### Escalation, and why there is no askpass key
 
 A tool boom spawns can escalate on its own — Homebrew runs `sudo` for any cask carrying a
-`launchctl`/`pkgutil` stanza, which `boom source --update` reaches whenever an outdated cask is
-declared (`greedy` or not). **boom lets it ask you.** sudo writes its prompt to `/dev/tty`, which
+`launchctl`/`pkgutil` stanza, which a Bundle run reaches whenever such a cask is declared and not
+yet installed. **boom lets it ask you.** sudo writes its prompt to `/dev/tty`, which
 no amount of silenced stdout suppresses, so the only thing that ever hid it was boom's own spinner
 redrawing that line 11×/second — an escalating step therefore runs under a persistent label instead
 of an animation, and the prompt survives. That needs no configuration.
@@ -298,7 +298,7 @@ optional `declare` run on *every* verb — receiving a `HookApi`:
 
 ```
 { with, verb, dryRun, env,                       // inputs
-  repo, vars, os, host, profiles, linkMode, verbose, update,   // the run's context
+  repo, vars, os, host, profiles, linkMode, verbose,   // the run's context
   ok, warn, fail, note, plan, skip,              // the same output tiers a core resource uses
   declare(entry), journalWrite(op, file) }       // the two capabilities
 ```

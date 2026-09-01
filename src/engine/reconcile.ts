@@ -47,10 +47,6 @@ interface ReconcileOptions {
   // pulling, instead of the default autostash.
   readonly commit?: boolean;
   readonly commitMessage?: string;
-  // Only consulted for verb "sync": also update outdated brewfile formulae
-  // (what `boom source --update` sets). Default false — plain sync reconciles declared
-  // state, it doesn't force package upgrades as a side effect.
-  readonly update?: boolean;
 }
 
 // Merge a partial run's declared set into the prior manifest (union by dst, declared
@@ -281,7 +277,6 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
       // Safe by default: never clobber a file boom doesn't own. `boom source --fix` sets
       // "overwrite" to repair drift; `boom source set` (no linkMode) inherits this skip.
       linkMode: opts.linkMode ?? "skip",
-      update: opts.update ?? false,
       verbose,
       env: childEnv,
       vars: composition.vars,
