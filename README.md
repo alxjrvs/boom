@@ -103,6 +103,34 @@ does the rest. The `boom source status|diff|push|reset` wrappers were removed in
 (see [docs/MIGRATING-0.33.md](docs/MIGRATING-0.33.md)); boom still *reports* config-repo
 drift, because `verify` has to.
 
+### Publishing local edits back
+
+Editing a symlinked dotfile edits the clone's working tree, so boom already *sees* it: `verify`
+reports "uncommitted local changes", then "local commit(s) not pushed to origin" once you commit
+(pair it with `[boom] notify = true` and a scheduled `verify` to be told rather than to remember).
+
+Getting it onto the remote is a **user command** — a name boom doesn't own resolves to
+`<config>/commands/<name>.ts` in your config repo and runs as `(args, ctx) => number`. A worked one
+ships in [`examples/dotfiles/commands/publish.ts`](examples/dotfiles/commands/publish.ts): copy it
+to `commands/publish.ts` in your dotfiles repo and it is `boom publish`.
+
+```sh
+boom publish -m "zsh: add the fzf keybinding"   # commit, push a branch, open the PR
+boom publish --no-pr                            # …just the branch
+boom publish                                    # no local edits: realign after a merged PR
+```
+
+Two things it does that a hand-rolled `git push` gets wrong:
+
+- **It never checks the branch out.** The clone *is* your live config — every symlink points into
+  its working tree, so `git checkout -b` swaps `~/.zshrc` and everything else under you. It pushes
+  `HEAD:refs/heads/<branch>` instead: the remote gets a branch, the working tree never moves.
+- **It realigns once the PR lands.** A squash merge rewrites your commit, so the next
+  `git pull --rebase` replays a patch that is already upstream and stops on a conflict — that is
+  `boom source` failing on every run until someone untangles it by hand. Publish resets onto the
+  upstream branch when, for every file its local-only commits touched, upstream's content already
+  matches HEAD's — a reset that cannot lose a byte — and leaves anything else alone for you.
+
 ### Housekeeping
 
 ```sh
