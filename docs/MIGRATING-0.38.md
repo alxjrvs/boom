@@ -45,8 +45,7 @@ same argument that removed the four git-wrapping subcommands in
 fails to parse — `No flag registered for --update`, non-zero, nothing reconciled — rather than
 running and quietly doing something other than what you asked. A retired *config key* is worth
 accepting for a release (that is why `secret` and `sudo_askpass` still parse); a retired *flag*
-typed by hand is better
-off failing loudly, because the fix is one line in a script or one habit.
+typed by hand is better off failing loudly, because the fix is one line in a script or one habit.
 
 ## The `HookApi` loses `update`
 
