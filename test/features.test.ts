@@ -42,10 +42,6 @@ test("overlays: a vars-only overlay loads and its value wins over the base's", a
   expect(await readFile(join(sb.home, ".gitconfig"), "utf8")).toContain("email = host");
 });
 
-// --- named checkpoints --------------------------------------------------------------------
-
-// --- boom.lock ----------------------------------------------------------------------------
-
 // --- drift notifications ------------------------------------------------------------------
 
 test("notifyArgv: platform-correct commands, undefined where boom has no notifier", () => {
@@ -53,8 +49,6 @@ test("notifyArgv: platform-correct commands, undefined where boom has no notifie
   expect(notifyArgv("linux", "boom", "drift")).toEqual(["notify-send", "boom", "drift"]);
   expect(notifyArgv("unknown", "boom", "drift")).toBeUndefined();
 });
-
-// --- boom status (the machine dashboard) --------------------------------------------------
 
 // --- verify --ci (config-repo CI gate; wraps `doctor --config`) -----------------------------
 
@@ -87,12 +81,8 @@ test("verify --ci fails (exit 1) when no config repo resolves (strict gate)", as
 
 // --- precedence: duplicate destinations resolve last-wins, end to end -----------------------
 
-// Two composition layers fighting over one destination, weakest first.
-//
-// This used to build the weak layer from a local module (`use = ["./mod"]`). With modules gone,
-// an OS overlay is the remaining second layer, and it drives the same `resolveDuplicates` path:
-// an overlay composes AFTER the base, so the second argument is still the winner and every
-// assertion below keeps its meaning.
+// Two composition layers fighting over one destination, weakest first: the base boomfile, then
+// an OS overlay, which composes AFTER the base — so the second argument is the winner.
 async function twoLayerSandbox(weakSection: string, strongSection: string): Promise<Sandbox> {
   const sb = await sandbox(weakSection, { env: { BOOM_OS: "linux" } });
   await writeFile(join(sb.repo, "boomfile.linux.toml"), strongSection);

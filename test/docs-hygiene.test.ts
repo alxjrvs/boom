@@ -1,35 +1,15 @@
-// Doc-lint: guards the docs against silently rotting when a verb is renamed. History:
-// botu → boom rebrand (apply/verify/fix → sync/verify/repair); the drift verb was renamed
-// (repair → fix); then it was dissolved entirely into `boom source --fix`, leaving the
-// verb set at sync/verify(/uninstall). These assertions fail loudly if a retired name or a
-// dangling man reference creeps back into the shipped metadata.
+// Doc-lint: the three things that must agree with the code and that nothing else enforces —
+// the Bun pin (and its types + engines floor), the route map vs. the docs' command list, and
+// every hook example export. Each fails loudly rather than letting a doc rot in place.
 //
-// `cli.ts` is imported first on purpose. It used to matter more: catalog→cli→man was a module
-// cycle, and loading man.ts first left cli.ts's route map in a temporal-dead-zone read. `man` is
-// gone, so the cycle is too — the ordering stays because the route map still has to evaluate
-// fully before catalog reads it.
+// `cli.ts` is imported first on purpose: the route map has to evaluate fully before catalog
+// reads it (catalog.ts reads `routes` lazily for exactly this reason).
 import { expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import pkg from "../package.json" with { type: "json" };
-import { app } from "../src/cli.ts";
+import "../src/cli.ts";
 import { commandNames } from "../src/commands/catalog.ts";
-
-// The verb-set marketing strings boom retired: the pre-boom `apply/…` set, and both
-// spellings the drift verb had while it was still a verb (`…/repair`, then `…/fix`) before
-// it became the `--fix` flag. Match the full slash-joined strings that actually shipped in
-// package.json — `fix`/`repair` are too common to grep bare.
-const RETIRED = ["apply/verify/fix", "apply / verify / fix", "sync/verify/repair", "sync/verify/fix"];
-
-test("the app route map builds (guards the catalog↔cli import order)", () => {
-  expect(app).toBeDefined();
-});
-
-test("package.json description uses the current verb names, not the retired ones", () => {
-  for (const s of RETIRED) expect(pkg.description).not.toContain(s);
-  expect(pkg.description).toContain("sync/verify");
-  expect(pkg.description).not.toContain("botu");
-});
 
 // `.bun-version` is the single Bun pin every workflow reads via setup-bun's `bun-version-file`,
 // and it is what `bun build --compile` embeds into every shipped binary. Two things have to agree

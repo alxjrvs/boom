@@ -2,11 +2,6 @@
 // cannot reach the real machine — is invisible when it works and silent when it breaks: a sandbox
 // missing one variable still passes every test it hosts, right up until someone's global git
 // config or a stray $HOME makes CI disagree with a laptop.
-//
-// This is also why there is now one definition instead of six. transaction.test.ts's copy had
-// quietly lost GIT_CONFIG_NOSYSTEM, so 700+ lines of journal and rollback coverage ran with git
-// free to read /etc/gitconfig. Nothing failed; the isolation was simply weaker there than the
-// comments in the other five claimed it was everywhere.
 import { expect, test } from "bun:test";
 import { makeSandbox } from "./support/sandbox.ts";
 

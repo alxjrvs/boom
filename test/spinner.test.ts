@@ -45,15 +45,11 @@ test("spin: still clears the spinner and rethrows if the work throws", async () 
     { out: s.stream, err: s.stream },
     { color: true, surface: "bands", interactive: true },
   );
-  let threw = false;
-  try {
-    await r.spin("mise install", async () => {
+  await expect(
+    r.spin("mise install", async () => {
       throw new Error("boom");
-    });
-  } catch (e) {
-    threw = (e as Error).message === "boom";
-  }
-  expect(threw).toBe(true); // the work's error propagates
+    }),
+  ).rejects.toThrow("boom"); // the work's error propagates
   expect(s.read().endsWith("\r\x1b[K")).toBe(true); // erased even on failure
 });
 

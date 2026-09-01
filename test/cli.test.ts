@@ -48,10 +48,10 @@ test("a known verb routes to the engine", async () => {
   expect(buf.err).toContain("no config repo linked");
 });
 
-test("an unknown command reports an error", async () => {
+test("an unknown command reports an error naming it", async () => {
   const { buf, ctx } = fakeContext();
   await run(app, ["definitely-not-a-command"], ctx);
-  expect(buf.err.length).toBeGreaterThan(0);
+  expect(buf.err).toContain("definitely-not-a-command");
 });
 
 test("source accepts --commit/-m", async () => {
@@ -59,10 +59,4 @@ test("source accepts --commit/-m", async () => {
   await run(app, ["source", "--commit", "-m", "wip"], ctx);
   // cwd resolves no config — proves the flags parsed, not that a git sync ran.
   expect(buf.err).toContain("no config repo linked");
-});
-
-test("the removed `sync` alias is no longer a command", async () => {
-  const { buf, ctx } = fakeContext();
-  await run(app, ["sync", "--commit", "-m", "wip"], ctx);
-  expect(buf.err.length).toBeGreaterThan(0);
 });

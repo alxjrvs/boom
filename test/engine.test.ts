@@ -232,7 +232,7 @@ test("run: a guarded step records no side-effect row", async () => {
   );
   await writeFile(join(sb.repo, "sentinel"), "");
   expect(await reconcile("sync", sb.ctx, {})).toBe(0);
-  // A condition is not a side effect: a skipped step must leave nothing for rollback to warn about.
+  // A condition is not a side effect: a skipped step must leave no side-effect row in the run.
   expect((await readRun(sb.ctx.env))?.sides ?? []).toHaveLength(0);
 });
 

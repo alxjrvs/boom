@@ -1,8 +1,6 @@
-// End-to-end reconcile tests for the resources/behaviors added for the dotFiles cleanup
-// sweep: `dir` (#54), `check` (#53), and the `[boom]` table's skill refresh (#55). Sandboxed
-// $HOME + repo, driving reconcile() directly (the same oracle style as engine.test.ts).
-// The timer-scheduling cases these once covered went with `[boom] schedule`; what remains of
-// that key is one case asserting it parses and does nothing.
+// End-to-end reconcile tests for `dir`, `launchd`, the `[boom]` table, the `gh` package
+// manager, `osx_default` uninstall, `tmpl`, and `copy` modes. Sandboxed $HOME + repo, driving
+// reconcile() directly (the same oracle style as engine.test.ts).
 import { expect, test } from "bun:test";
 import { chmod, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -86,9 +84,7 @@ test("dir: a corrected mode shows the change under --verbose; an already-correct
   expect(sb.out().slice(before)).not.toContain("~/box (mode 700)");
 });
 
-// -------------------------------------------------------------------------- check (#53)
-
-// ----------------------------------------------------------------- launchd (#52)
+// ----------------------------------------------------------------- launchd
 
 test("launchd: darwin dry-run plans the plist link without invoking launchctl", async () => {
   const sb = await sandbox(`[[section]]\nname = "l"\nlaunchd = [{ src = "agent.plist" }]\n`, {
@@ -159,7 +155,7 @@ test("launchd: verify reports an agent that is loaded but whose last run FAILED"
   // every guardrail it carried went unrun. Loaded is not working.
   const sb = await launchdSandbox("78"); // EX_CONFIG — the exact code that outage produced
   expect(await reconcile("sync", sb.ctx, {})).toBe(0);
-  await reconcile("verify", sb.ctx, { verbose: true });
+  expect(await reconcile("verify", sb.ctx, { verbose: true })).toBe(2); // the warn tier, so it is visible
   expect(sb.out()).toContain("last run FAILED (exit 78)");
 });
 
@@ -314,8 +310,6 @@ test("pkg gh: gh absent from PATH is a reported failure, not a crash", async () 
   expect(sb.out()).toContain("gh not installed");
 });
 
-// ------------------------------------------------------ osx_default journaling + rollback
-
 // ----------------------------------------------------------------- osx_default uninstall
 
 // The stateful fake `defaults` the uninstall tests drive, plus a `killall` stub so finalizeOsx
@@ -424,7 +418,7 @@ test("osx_default: uninstall restores the true prior even after the first run wa
 // The stash that makes `firstOsxUndo` durable is never invalidated by an uninstall, so the
 // delete is re-attempted on every later run — and real `defaults delete` exits 1 on a key that
 // is already gone. Teardown is idempotent everywhere else in the engine; it has to be here too,
-// or the ordinary `uninstall` → `uninstall` (and `rollback` → `uninstall`) sequence exits 1.
+// or the ordinary `uninstall` → `uninstall` sequence exits 1.
 test("osx_default: uninstall is idempotent — a re-deleted key is already-unset, not a failure", async () => {
   const rig = await osxRig(DOCK_TWO);
   await writeFile(rig.store, "com.test.dock|tilesize=64\n"); // ShowPathbar is boom's own
@@ -438,8 +432,6 @@ test("osx_default: uninstall is idempotent — a re-deleted key is already-unset
   expect(await rig.value("com.test.dock", "tilesize")).toBe("64"); // and the restore still holds
 });
 
-// Same hazard on the rollback path: reversing a run that introduced a key must stay green when
-// the key is already gone (rolled back twice, or the user tidied it away first).
 test("osx_default: uninstall with no journal record leaves the key alone", async () => {
   const rig = await osxRig(
     `[[section]]\nname = "O"\nosx_default = [{ domain = "com.test.dock", key = "tilesize", value = 48 }]\n`,
@@ -585,9 +577,3 @@ test("copy: mode drift on an unchanged file is seen by verify and repaired by sy
   expect(await mode(dst)).toBe("600");
   expect(await reconcile("verify", sb.ctx, {})).toBe(0);
 });
-
-// --- check: json assertions ------------------------------------------------
-// A regex over a JSON file's TEXT is the wrong tool for asserting about its STRUCTURE. The
-// reference consumer was writing patterns like '"model"\s*:\s*"[^"]*fable' and hoping the
-// formatting never changed, and hand-rolling `jq` walks in `run` steps for anything a regex
-// could not express. These assert against the parsed document instead.

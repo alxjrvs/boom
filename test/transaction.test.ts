@@ -1,5 +1,5 @@
-// M3: the sync transaction — journal, backups, rollback, verify --json, and orphan
-// reaping. Each test drives the engine against a fully sandboxed $HOME + repo.
+// The sync transaction — journal, backups, --resume, verify --json, and orphan reaping. Each
+// test drives the engine against a fully sandboxed $HOME + repo.
 import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -306,8 +306,8 @@ test("an unloadable hook suppresses reaping instead of deleting what it declared
   // before it does anything that can fail) and a hook cannot: its declarations live in a module
   // that may not load. Without the guard, `rm hooks/placer.ts` is a DELETE of ~/.hooked on a run
   // that still exits 0 — and the byte-match guard doesn't save it, since a generated file is
-  // byte-identical to its source by definition. Realistic triggers: a `use`d module that failed
-  // to fetch, a renamed hook file, a partial checkout — all reachable by a scheduled `boom source`.
+  // byte-identical to its source by definition. Realistic triggers: a renamed hook file, a
+  // partial checkout — both reachable by a scheduled `boom source`.
   const missing = await sandbox(`[[section]]\nname = "S"\nhook = [{ name = "placer" }]\n`);
   const missingDst = join(missing.home, ".hooked");
   await missing.write("hooked.src", "generated\n");
@@ -377,8 +377,8 @@ test("a hook's journalWrite never displaces outside a mutating sync", async () =
 });
 
 test("uninstall opens its own run rather than adopting an interrupted sync's under --resume", async () => {
-  // A shared run id would let rollback replay one run that both created and destroyed the same
-  // destination — not a state the machine was ever in.
+  // A shared run id would record one run that both created and destroyed the same destination
+  // — not a state the machine was ever in.
   const sb = await sandbox(`[[section]]\nname = "S"\ncopy = [{ src = "cfg", dst = "~/.cfg" }]\n`);
   await writeFile(join(sb.repo, "cfg"), "v\n");
   expect(await reconcile("sync", sb.ctx, {})).toBe(0);
@@ -388,11 +388,10 @@ test("uninstall opens its own run rather than adopting an interrupted sync's und
   expect((await readRun(sb.env))?.runId).not.toBe(syncRun);
 });
 
-// Both of the cases below survive the rollback removal on purpose. Neither tests undo: one
-// asserts the mode of the backup tree `displace()` writes into (the thing that makes an
-// overwrite recoverable at all, and which `source --fix` depends on), and the other asserts
-// `--resume` reuses an interrupted run. They read journal state via `listRuns`, which is why
-// that reader outlived `boom rollback`.
+// Neither case below tests undo: one asserts the mode of the backup tree `displace()` writes into
+// (the thing that makes an overwrite recoverable at all, and which `source --fix` depends on),
+// and the other asserts `--resume` reuses an interrupted run. Both read journal state via
+// `listRuns`, the test-facing reader.
 
 test("the run backup tree is created 0700 — root and run dir alike", async () => {
   const sb = await sandbox(`[[section]]\nname = "S"\nlink = [{ src = ".z", dst = "~/.z" }]\n`);
