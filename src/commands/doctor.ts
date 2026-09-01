@@ -8,7 +8,7 @@ import { doctor } from "../engine/doctor.ts";
 import { jsonFlag } from "./flags.ts";
 
 export const doctorCommand = buildCommand<
-  { json?: boolean; config?: boolean; fix?: boolean; secrets?: boolean },
+  { json?: boolean; config?: boolean; fix?: boolean },
   [],
   BoomContext
 >({
@@ -27,15 +27,10 @@ export const doctorCommand = buildCommand<
         optional: true,
         brief: "Converge what's safe to fix (state dir, boom skill); the rest stays manual",
       },
-      secrets: {
-        kind: "boolean",
-        optional: true,
-        brief: "Audit op:// secret references in the config",
-      },
       json: jsonFlag,
     },
   },
   async func(flags) {
-    this.process.exitCode = await doctor(this, flags.json, flags.config, flags.fix, flags.secrets);
+    this.process.exitCode = await doctor(this, flags.json, flags.config, flags.fix);
   },
 });

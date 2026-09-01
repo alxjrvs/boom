@@ -5,7 +5,7 @@
 // Exit code mirrors verify: 0 ok / 2 warnings / 1 failures.
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
-import { loadConfig, NO_CONFIG_REPO_MSG, readConfigBreadcrumb, resolveConfigDir } from "../config/load.ts";
+import { NO_CONFIG_REPO_MSG, readConfigBreadcrumb, resolveConfigDir } from "../config/load.ts";
 import { detectOs } from "../config/profile.ts";
 import type { BoomContext } from "../context.ts";
 import { pathExists } from "../lib/fs.ts";
@@ -15,7 +15,6 @@ import { boomStateDir } from "../lib/paths.ts";
 import { hasCommand } from "../lib/proc.ts";
 import { bandsReporter, type Reporter } from "../lib/reporter.ts";
 import { VERSION } from "../lib/version.ts";
-import { getBackend } from "./secrets/backends.ts";
 import { skillDoc, skillInstallPath } from "./skill.ts";
 import { validateConfigFiles } from "./validate.ts";
 
@@ -58,95 +57,16 @@ async function checkSkill(ctx: BoomContext, report: Reporter, fix: boolean): Pro
   report.ok(`installed boom skill → ${file} (v${VERSION})`);
 }
 
-// How many declared secrets resolve through 1Password — the `op` backend is either stated
-// outright or inferred from an `op://` ref, matching how backends.ts picks one. Returns 0 for an
-// unreadable boomfile: the keychain check this gates is a nicety, and a config error is already
-// being reported by validateConfigFiles above.
-async function countOpSecrets(repo: string): Promise<number> {
-  try {
-    const config = await loadConfig(repo);
-    return config.section
-      .flatMap((s) => s.secret ?? [])
-      .filter((s) => s.backend === "op" || (!s.backend && (s.ref ?? "").startsWith("op://"))).length;
-  } catch {
-    return 0;
-  }
-}
-
-// `secretsOnly` (the `--secrets` flag): audit every secret reference the boomfile declares —
-// does each still resolve? — so a stale/renamed/missing ref surfaces here rather than mid-sync.
-// Every backend, not just 1Password: the audit routes through the same `getBackend` seam the
-// `secret` resource does, so what it reports is what a sync would actually attempt. The resolved
-// plaintext is NEVER logged. Warning tier like verify: an unresolvable ref is "attention"
-// (exit 2), not a hard failure. `template` secrets are noted, not resolved — checking one means
-// running the backend's injector, out of scope for an audit.
-async function auditSecrets(ctx: BoomContext, report: Reporter): Promise<void> {
-  const repo = await resolveConfigDir(ctx.env, ctx.cwd);
-  if (!repo) {
-    report.warn(NO_CONFIG_REPO_MSG);
-    return;
-  }
-  const config = await loadConfig(repo);
-  const secrets = config.section.flatMap((s) => s.secret ?? []);
-
-  report.header("Secrets");
-  const refs = secrets.filter((s) => s.ref);
-  const templates = secrets.filter((s) => s.template);
-  if (refs.length === 0 && templates.length === 0) {
-    report.ok("no secret references declared");
-    return;
-  }
-  for (const s of refs) {
-    const ref = s.ref as string;
-    // Dispatch through the same seam the `secret` resource uses, so the audit agrees with what
-    // a sync would actually do. This used to shell `op read` at EVERY ref regardless of scheme,
-    // which reported a perfectly good `env:`/`pass:`/age/sops secret as unresolvable — and
-    // returned early when `op` was absent, so a machine with no 1Password audited nothing while
-    // claiming to. `getBackend` honours an explicit `backend =` and otherwise infers from the
-    // scheme; `resolveRef` is not used here because it discards that explicit field.
-    const backend = getBackend(s);
-    if (!backend.available(ctx.env)) {
-      report.warn(`${ref} — ${backend.tool} not installed, cannot audit`);
-      continue;
-    }
-    // A read may be a network round-trip (op) → run it under the spinner. Only `ok`/`err` are
-    // inspected: the resolved plaintext is never bound, logged, or reported. It exists in memory
-    // for the life of the call, and goes nowhere.
-    const r = await report.spin(`${backend.name} read ${ref}`, () => backend.read(s, { env: ctx.env, repo }));
-    if (r.ok) report.ok(`${ref} resolves (${backend.name})`);
-    else report.warn(`${ref} — unresolvable (${r.err})`);
-  }
-  // A template's refs live inside a file rendered by the backend's injector (`op inject` and
-  // friends); auditing them means running the injection (out of scope), so we only surface that
-  // the template exists — and which backend would render it.
-  for (const s of templates) {
-    report.note(`${s.template} — template (${getBackend(s).name}); resolvability not audited`);
-  }
-}
-
 export async function doctor(
   ctx: BoomContext,
   json = false,
   configOnly = false,
   fix = false,
-  secretsOnly = false,
 ): Promise<number> {
   const report = bandsReporter(ctx.process, ctx.env, "doctor", {
     json,
     setup: fix ? "MENDING WHAT WE CAN…" : "TAKING THE MACHINE'S PULSE…",
   });
-
-  // `--secrets` narrows doctor to just the secret-ref audit — a single warning-tier job (0/2/1),
-  // fully independent of the rest, exactly as `--config` narrows it to the boomfile parse.
-  if (secretsOnly) {
-    await auditSecrets(ctx, report);
-    if (json) return report.finishJson(ctx.process.stdout, true);
-    return report.finish({
-      ok: "doctor: all secret refs resolve",
-      warn: (w) => `doctor: ${w} secret warning(s)`,
-      fail: (f, w) => `doctor: ${f} failure(s), ${w} warning(s)`,
-    });
-  }
 
   report.header("Config");
   const repo = await resolveConfigDir(ctx.env, ctx.cwd);
@@ -196,32 +116,24 @@ export async function doctor(
     else report.warn(`${cmd} not on PATH — needed for ${why}`);
   }
 
-  // Only when the config actually declares an `op`-backed secret. This used to run on every
-  // macOS machine, so a brand-new user's first `boom doctor` — the command whose whole job is
-  // "is boom set up to do its job" — warned about a 1Password service-account item they had
-  // never heard of, and told them to run `op-agent provision`, which boom neither ships nor
-  // installs. A false positive on first run with an unactionable remedy.
+  // Only when the token is actually there. This used to run on every macOS machine, so a
+  // brand-new user's first `boom doctor` — the command whose whole job is "is boom set up to do
+  // its job" — warned about a 1Password service-account item they had never heard of, and told
+  // them to run `op-agent provision`, which boom neither ships nor installs. A false positive on
+  // first run with an unactionable remedy.
   if (detectOs(ctx.env) === "darwin") {
     const item = agentKeychainItem(ctx.env);
-    // Two independent reasons to report, because `secret` resources are not the only way to use
-    // this token. It is equally the backing for `headersHelper`, `*_COMMAND` resolvers and hook
-    // scripts that shell out to `op` — none of which appear in the boomfile as a `secret`.
-    //
-    // Gating solely on declared secrets (as this did) silenced the check completely for a config
-    // that resolves every credential at runtime and declares zero — which is the setup most
-    // likely to depend on the item, and exactly the case that regressed. Presence is the honest
-    // second signal: if the item is there, something put it there, so confirm it.
-    const present = agentTokenPresent(ctx.env);
-    const opSecrets = repo ? await countOpSecrets(repo) : 0;
-    if (present || opSecrets > 0) {
+    // PRESENCE IS THE WHOLE SIGNAL, and it is the one this check was already arguing for. It
+    // used to also count declared `secret` entries and warn when the item was missing while some
+    // existed. That gate had regressed once by being the ONLY gate: a config resolving every
+    // credential at runtime and declaring zero secrets — the setup most likely to depend on the
+    // item — silenced the check completely. `secret` is gone (0.37), so the count is always zero
+    // and the fallback added to fix that regression is now the only path. Which is correct: the
+    // token backs `headersHelper`, `*_COMMAND` resolvers and any hook shelling out to `op`, none
+    // of which ever appeared in a boomfile. If the item is there, something put it there.
+    if (agentTokenPresent(ctx.env)) {
       report.header("1Password agent");
-      if (present) report.ok(`${item} service-account token present in keychain`);
-      else
-        report.warn(
-          `${item} keychain item missing — ${opSecrets} op:// secret(s) declared. Add the ` +
-            `service-account token to the login keychain under that name, or set ` +
-            `BOOM_OP_KEYCHAIN_ITEM to the item you use.`,
-        );
+      report.ok(`${item} service-account token present in keychain`);
     }
     // Neither present nor needed → stay silent. That is the case this gate was narrowed for:
     // a new user on macOS with no op-backed anything should not be told to provision a

@@ -196,7 +196,7 @@ test("compose: a gated-out section is never a dedupe winner", async () => {
 test("compose: a kind that owns no destination never evicts one that does", async () => {
   const repo = await repoWith({
     "boomfile.linux.toml":
-      '[[section]]\nname = "strong"\nsecret = [{ dst = "~/.netrc", ref = "env:NETRC" }]\nlaunchd = [{ src = "repo/a.plist", dst = "~/.npmrc" }]\n',
+      '[[section]]\nname = "strong"\nlaunchd = [{ src = "repo/a.plist", dst = "~/.npmrc" }]\n',
     "boomfile.toml":
       '[[section]]\nname = "weak"\ncopy = [{ src = "weak/netrc", dst = "~/.netrc" }]\nlink = [{ src = "weak/npmrc", dst = "~/.npmrc" }]\n',
   });
@@ -204,24 +204,27 @@ test("compose: a kind that owns no destination never evicts one that does", asyn
   const c = await compose(repo, { notify });
   expect(c.sections.find((s) => s.name === "weak")?.copy).toHaveLength(1);
   expect(c.sections.find((s) => s.name === "weak")?.link).toHaveLength(1);
-  expect(c.sections.find((s) => s.name === "strong")?.secret).toHaveLength(1);
   expect(notes).toEqual([]);
 });
 
 // …but a non-owning kind still resolves against ITSELF, which is the duplicate that actually
-// happens: two layers rendering the same secret would otherwise both run, last write silently
-// winning after the first had already touched the file.
-test("compose: two secrets at one dst still resolve last-wins", async () => {
+// happens: two layers writing the same destination would otherwise both run, the last write
+// silently winning after the first had already touched the file.
+//
+// Ported from `secret` at 0.37. `launchd` off darwin is now the only kind on this side of the
+// partition, so it carries both halves of the rule: this one (a non-owning kind beats a
+// duplicate of ITSELF) and the one above (it never beats a kind that owns).
+test("compose: two off-darwin launchd entries at one dst still resolve last-wins", async () => {
   const repo = await repoWith({
     "boomfile.linux.toml":
-      '[[section]]\nname = "strong"\nsecret = [{ dst = "~/.netrc", ref = "env:BASE" }]\n',
-    "boomfile.toml": '[[section]]\nname = "weak"\nsecret = [{ dst = "~/.netrc", ref = "env:MOD" }]\n',
+      '[[section]]\nname = "strong"\nlaunchd = [{ src = "repo/base.plist", dst = "~/.netrc" }]\n',
+    "boomfile.toml": '[[section]]\nname = "weak"\nlaunchd = [{ src = "repo/mod.plist", dst = "~/.netrc" }]\n',
   });
   const { notify, notes } = notifier();
   const c = await compose(repo, { notify });
-  expect(c.sections.find((s) => s.name === "weak")?.secret).toEqual([]);
-  expect(c.sections.find((s) => s.name === "strong")?.secret).toHaveLength(1);
+  expect(c.sections.find((s) => s.name === "weak")?.launchd).toEqual([]);
+  expect(c.sections.find((s) => s.name === "strong")?.launchd).toHaveLength(1);
   expect(notes[0]).toContain(
-    "~/.netrc — secret from boomfile.toml overridden by secret in boomfile.linux.toml",
+    "~/.netrc — launchd from boomfile.toml overridden by launchd in boomfile.linux.toml",
   );
 });
