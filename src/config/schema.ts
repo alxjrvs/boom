@@ -178,94 +178,6 @@ const DirSchema = v.strictObject({
   remove_on_uninstall: v.optional(v.boolean()),
 });
 
-// A content assertion on a file: every `present` regex must match and every `absent` regex
-// must not. On `verify` a failure contributes to the exit code + JSON report; on `sync`, if
-// `repair` is set and the assertion currently fails, that shell command runs to make it so —
-// so `check` converges drift like every other resource instead of only reporting it.
-// `missing_file` picks how a nonexistent file is treated (default `fail` — a guardrail that
-// silently stops guarding when its file vanishes is worse than useless).
-//
-// Three kinds of assertion, all sharing `message`/`repair`/`missing_file`:
-//
-//   present/absent  regexes over the file's TEXT
-//   json            assertions over the file's PARSED structure
-//   cmd             a command's exit status and output
-//
-// The last two exist because a regex over text is the wrong tool for the two things consumers
-// kept hand-rolling `run` steps for. Asserting a JSON key by regex means writing
-// `'"model"\s*:\s*"[^"]*fable'` and hoping formatting never changes; asserting that a command
-// succeeds means a `run` step with `unless`, which reports through a shell exit code rather
-// than the drift report. Both were common enough in boom's own reference consumer to account
-// for most of its verify-only `run` steps.
-
-// One assertion against a parsed JSON document. `key` is a dot path; a numeric segment indexes
-// an array (`hooks.PreToolUse.0.matcher`). Exactly one predicate per entry.
-const JsonAssertSchema = v.pipe(
-  v.strictObject({
-    key: v.string(),
-    // Deep-equality against a literal. Scalars cover the real cases; an object/array literal
-    // works too, and compares structurally.
-    equals: v.optional(v.union([v.string(), v.number(), v.boolean(), v.null_()])),
-    // The key resolves to something (including `null`, which is a value a config can mean).
-    present: v.optional(v.boolean()),
-    // The key does not resolve at all.
-    absent: v.optional(v.boolean()),
-    // An array-valued key includes this element.
-    contains: v.optional(v.union([v.string(), v.number(), v.boolean()])),
-  }),
-  v.check(
-    (e) =>
-      [
-        e.equals !== undefined,
-        e.present !== undefined,
-        e.absent !== undefined,
-        e.contains !== undefined,
-      ].filter(Boolean).length === 1,
-    "a json assertion needs exactly one of equals / present / absent / contains",
-  ),
-);
-
-const CheckSchema = v.pipe(
-  v.strictObject({
-    // Optional so a `cmd` check — which asserts about a command rather than a file — does not
-    // have to invent a path. Required for every file-shaped assertion; see the check below.
-    path: v.optional(v.string()),
-    present: v.optional(v.array(v.string())),
-    absent: v.optional(v.array(v.string())),
-    json: v.optional(v.array(JsonAssertSchema)),
-    // Assert about a COMMAND rather than a file: it must exit `exit` (default 0), and its
-    // combined output must match every `stdout_present` regex and no `stdout_absent` one.
-    // Read-only by contract — this runs on `verify`, so a `cmd` that mutates anything turns a
-    // read-only drift check into a write. Use `repair` for the mutating half.
-    cmd: v.optional(v.string()),
-    exit: v.optional(v.number()),
-    stdout_present: v.optional(v.array(v.string())),
-    stdout_absent: v.optional(v.array(v.string())),
-    message: v.optional(v.string()),
-    missing_file: v.optional(v.picklist(["skip", "fail", "pass"])),
-    repair: v.optional(v.string()),
-  }),
-  v.check(
-    (e) => (e.path === undefined) !== (e.cmd === undefined),
-    "a check needs exactly one of `path` (a file assertion) or `cmd` (a command assertion)",
-  ),
-  v.check(
-    (e) =>
-      e.cmd === undefined ||
-      (e.present === undefined &&
-        e.absent === undefined &&
-        e.json === undefined &&
-        e.missing_file === undefined),
-    "a `cmd` check uses exit / stdout_present / stdout_absent — present, absent, json and missing_file are for a `path` check",
-  ),
-  v.check(
-    (e) =>
-      e.path === undefined ||
-      (e.exit === undefined && e.stdout_present === undefined && e.stdout_absent === undefined),
-    "exit / stdout_present / stdout_absent belong to a `cmd` check, not a `path` check",
-  ),
-);
-
 // A rendered secret: resolve a secret reference (or a whole template of them) to a file at sync
 // time, so a machine's secret-bearing config is declared like everything else instead of living
 // out of band. `ref` is a single reference (`op://vault/item/field`, `env:VAR`, `pass:path`, or
@@ -342,7 +254,6 @@ const SectionSchema = v.strictObject({
   tmpl: v.optional(v.array(TmplSchema)),
   secret: v.optional(v.array(SecretSchema)),
   run: v.optional(v.array(RunSchema)),
-  check: v.optional(v.array(CheckSchema)),
   absent: v.optional(v.array(AbsentSchema)),
   hook: v.optional(v.array(HookSchema)),
 });
@@ -419,7 +330,6 @@ export const OverlaySchema = v.strictObject({
 export type File = v.InferOutput<typeof FileSchema>;
 export type Pkg = v.InferOutput<typeof PkgSchema>;
 export type Dir = v.InferOutput<typeof DirSchema>;
-export type Check = v.InferOutput<typeof CheckSchema>;
 export type Absent = v.InferOutput<typeof AbsentSchema>;
 export type Secret = v.InferOutput<typeof SecretSchema>;
 export type Tmpl = v.InferOutput<typeof TmplSchema>;

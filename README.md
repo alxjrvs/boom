@@ -100,7 +100,7 @@ boom skill              # emit a Claude Code SKILL.md (--install writes it to ~/
 
 Your dotfiles repo's config is a typed, validated TOML document, grouped into
 sections that run in phase order
-(`link → copy → tmpl → secret → dir → pkg → osx_default → launchd → systemd → run → check → hook`):
+(`link → copy → tmpl → secret → dir → pkg → osx_default → launchd → run → hook`):
 
 ```toml
 # Optional: named values `tmpl` templates interpolate as ${NAME} (per-machine via overlays).
@@ -151,9 +151,7 @@ systemd = [{ name = "nightly-backup", exec = "/usr/local/bin/backup", timer = "d
 
 [[section]]
 name = "Guardrails"
-# Verify-time content assertions — legible where a grep-in-a-run would be escaping-heavy.
-check = [{ path = "~/.claude/settings.json", absent = ["osxkeychain"], message = "cached-PAT regression" }]
-# And the inverse: a path that must NOT exist. Sync removes it (into the backup tree, so
+# A path that must NOT exist: a path that must NOT exist. Sync removes it (into the backup tree, so
 # it is recoverable from the run's backup tree), verify fails while it is there. For files a tool re-creates
 # behind your back — an agent writing settings.local.json on an "always allow" click.
 absent = [{ path = "~/.claude/settings.local.json", message = "machine-local override" }]

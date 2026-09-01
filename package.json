@@ -1,6 +1,6 @@
 {
   "name": "boom",
-  "version": "0.34.0",
+  "version": "0.35.0",
   "description": "BoomTube \u2014 declarative dev-machine setup (executable: boom). Converge your machine from a declarative boomfile.toml \u2014 dotfiles, packages, and tools (sync/verify) with drift detection.",
   "type": "module",
   "private": true,
