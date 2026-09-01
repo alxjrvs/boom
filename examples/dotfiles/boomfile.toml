@@ -151,13 +151,12 @@ mode = "700"
 [[section]]
 name = "Guardrails"
 
-# `check` asserts file content on verify: every `present` regex must match, every `absent`
-# must not — folded into `boom verify`'s exit code and JSON report. With `repair`, sync also
-# *converges* the assertion (running the command only when it currently fails).
-[[section.check]]
-path = "~/.gitconfig"
-present = ["\\[user\\]"]
-message = "git identity not configured"
+# A verify-time `run` step is how you assert machine state: a non-zero exit folds into
+# `boom verify`'s exit code and JSON report. This replaced the `check` resource in 0.35.0 —
+# `run` is the shell you were going to reach for anyway, and it honours `timeout` too.
+[[section.run]]
+on = "verify"
+cmd = "grep -q '\\[user\\]' ~/.gitconfig || { echo 'git identity not configured'; exit 1; }"
 
 [[section]]
 name = "LaunchAgents"

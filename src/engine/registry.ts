@@ -2,7 +2,7 @@
 // executable form of the phase order that used to live only in a comment above a hand-written
 // dispatch sequence. Adding a resource is one table entry, not an edit to the section loop.
 // The order below is the one SPEC.md and config/schema.ts state:
-//   link → copy → tmpl → secret → dir → pkg → osx_default → launchd → run → check → hook
+//   link → copy → tmpl → secret → dir → pkg → osx_default → launchd → run → hook
 //
 // Each resource declares how to turn a Section into labelled work units (so the per-item
 // error boundary can name what failed) and, optionally, a `finalize` hook that runs once at
@@ -11,7 +11,6 @@
 import type { ComposedSection } from "../config/compose.ts";
 import type { Section } from "../config/schema.ts";
 import { reconcileAbsent } from "./resources/absent.ts";
-import { reconcileCheck } from "./resources/check.ts";
 import { reconcileDir } from "./resources/dir.ts";
 import { reconcileCopy, reconcileLink } from "./resources/filesystem.ts";
 import { reconcileHook } from "./resources/hook.ts";
@@ -103,14 +102,6 @@ const RESOURCES: readonly ResourceType[] = [
     items: (s) => (s.run ?? []).map((e) => ({ label: "run", run: (ctx) => reconcileRun(e, ctx) })),
   },
   {
-    category: "CHECKS",
-    items: (s) =>
-      (s.check ?? []).map((e) => ({ label: `check ${e.path}`, run: (ctx) => reconcileCheck(e, ctx) })),
-  },
-  {
-    // Beside `check` because it is the same job from the other side: `check` asserts what a
-    // file says, `absent` asserts that there is no file. After it, so a run that both repairs
-    // a file and removes another reports them in that order.
     category: "CHECKS",
     items: (s) =>
       (s.absent ?? []).map((e) => ({
