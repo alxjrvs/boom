@@ -100,22 +100,25 @@ async function reconcileBrew(
   // argv array, not a shell string: a repo path with a space or quote is just an argument
   // here, never re-parsed by sh.
   const path = join(ctx.repo, file);
-  // Homebrew Bundle upgrades outdated formulae by default — `sync` should only reconcile
-  // declared state, not silently upgrade packages as a side effect, so it opts out unless the
-  // caller asked for it (`boom source --update`).
+  // ALWAYS `--no-upgrade`, on every verb. Homebrew Bundle upgrades outdated packages by default,
+  // and that governs *casks* as well as formulae: observed on Homebrew 6.0.12, dropping the flag
+  // had Bundle run `brew upgrade --cask` on an outdated cask that set no `greedy: true` in the
+  // Brewfile and is `auto_updates: true` — so `greedy` is not the opt-out it reads as (this
+  // comment used to claim it was, and that cost a ten-minute mystery hang). Upgrading a cask
+  // replaces the `.app`, so Homebrew quits the running program to do it. **A reconcile that
+  // closes your browser is not a reconcile**, so boom no longer has a way to ask for one:
+  // `boom source --update` opted into exactly this and is gone in 0.38. Upgrading is
+  // `brew upgrade --formula` and `mise upgrade` — each its own tool's verb, with a blast radius
+  // that tool defines, and neither one boom has to hold a second opinion about.
+  // See docs/MIGRATING-0.38.md.
   //
-  // This flag governs *casks* too, which is worth knowing because that's the expensive half:
-  // observed on Homebrew 6.0.12, dropping `--no-upgrade` had Bundle run `brew upgrade --cask` on
-  // an outdated cask that set no `greedy: true` in the Brewfile and is `auto_updates: true` — so
-  // don't read `greedy` as a guarantee that `--update` leaves casks alone (this comment used to
-  // claim exactly that, and it cost a ten-minute mystery hang). A cask upgrade is also what
-  // reaches for `sudo`, via any `launchctl`/`pkgutil` stanza in the cask — see
-  // `withAskpass` below for what happens when the caller has exported SUDO_ASKPASS.
-  const noUpgrade = ctx.update ? [] : ["--no-upgrade"];
+  // Cask *installation* still escalates — a `launchctl`/`pkgutil` stanza reaches for `sudo` the
+  // first time a cask lands, which is why the prompt machinery below is not going anywhere. See
+  // `withAskpass` for what happens when the caller has exported SUDO_ASKPASS.
   switch (ctx.verb) {
     case "sync": {
       if (ctx.dryRun) {
-        report.plan(`would run: brew bundle --file=${path}${ctx.update ? "" : " --no-upgrade"}`);
+        report.plan(`would run: brew bundle --file=${path} --no-upgrade`);
         return;
       }
       {
@@ -132,7 +135,7 @@ async function reconcileBrew(
         const r = await report.spin(
           "brew bundle",
           () =>
-            runArgvAsync(["brew", "bundle", `--file=${path}`, ...noUpgrade], env, {
+            runArgvAsync(["brew", "bundle", `--file=${path}`, "--no-upgrade"], env, {
               ...toolIo(ctx.json, ctx.verbose),
               ...(mayPrompt ? { onStdoutLine: relayProgress(ctx) } : {}),
             }),
@@ -165,12 +168,12 @@ async function reconcileBrew(
       return;
     }
     case "verify": {
-      // Mirrors sync's --no-upgrade gate: otherwise a plain `verify` would flag
-      // merely-outdated (but still declared) formulae as drift that `boom source` then
-      // won't reconcile, since sync itself no longer upgrades by default.
+      // Mirrors sync's --no-upgrade: otherwise a plain `verify` would flag merely-outdated
+      // (but still declared) packages as drift that `boom source` then won't reconcile, since
+      // sync never upgrades. Drift is "declared and not installed", never "installed and old".
       const check = await report.spin("brew bundle check", () =>
         runArgvAsync(
-          ["brew", "bundle", "check", `--file=${path}`, ...noUpgrade],
+          ["brew", "bundle", "check", `--file=${path}`, "--no-upgrade"],
           ctx.env,
           toolIo(ctx.json, ctx.verbose),
         ),

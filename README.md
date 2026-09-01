@@ -64,7 +64,6 @@ separate verb: it's `boom source --fix` (sync, but overwriting conflicts).
 ```sh
 boom source             # make it so: symlink / copy / install / run from boomfile.toml
 boom source --fix       # repair drift: overwrite conflicting targets (skipped by default)
-boom source --update    # also update outdated brewfile formulae, not just declared state
 boom source --commit    # commit local config-repo edits before pulling
 boom source --resume    # continue an interrupted sync (skips completed steps)
 
@@ -72,6 +71,14 @@ boom verify             # check for drift — exit 0 ok / 2 warn / 1 fail
 boom verify --json      # …as a structured drift report
 boom verify --ci        # non-interactive config gate for CI (schema-check only; exit 0/1)
 ```
+
+**No verb upgrades.** Reconciling is "what is declared is installed", never "what is installed
+is current" — `brew bundle` always runs `--no-upgrade`, on every verb. Homebrew Bundle's upgrade
+reaches casks whatever `greedy` says, and upgrading a cask replaces the `.app`, so it quits the
+running program: a reconcile that closes your browser is not a reconcile. Upgrading is each
+tool's own verb — `brew upgrade --formula`, `mise upgrade` — with the blast radius that tool
+defines. `boom source --update` did this and was removed in 0.38
+([migration](docs/MIGRATING-0.38.md)).
 
 A shippable GitHub Action wrapping `verify --ci` lives in
 [`examples/github-action/`](examples/github-action/) so a config repo can gate its own PRs.

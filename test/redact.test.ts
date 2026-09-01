@@ -62,7 +62,6 @@ function ctxFor(dryRun: boolean, repo: string) {
     ctx: {
       verb: "sync" as const,
       dryRun,
-      update: false,
       json: false,
       verbose: false,
       repo,

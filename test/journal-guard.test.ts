@@ -38,7 +38,6 @@ function ctxFor(env: Env, over: Partial<ReconcileCtx> = {}): ReconcileCtx {
     dryRun: false,
     json: false,
     linkMode: "skip",
-    update: false,
     verbose: false,
     env,
     vars: {},

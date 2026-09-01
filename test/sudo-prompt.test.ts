@@ -166,7 +166,7 @@ test("brew's own ==> headers are relayed, so the cask that escalates is named", 
     'brew "mise"\ncask "tuple"\n',
     'echo "==> Downloading https://example.com/t.zip"\necho "####### 45.2%"\necho "==> Upgrading cask tuple"\nexit 0\n',
   );
-  expect(await reconcile("sync", sb.ctx, { update: true })).toBe(0);
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
   expect(sb.out()).toContain("Upgrading cask tuple");
   // Only headers — Homebrew's byte-count noise stays hidden under the band.
   expect(sb.out()).not.toContain("45.2%");
@@ -176,7 +176,7 @@ test("SUDO_PROMPT names boom and the step, so a prompt is never anonymous", asyn
   const root = await base();
   const log = join(root, "prompt");
   const sb = await brewSandbox(PKG_SECTION, 'cask "tuple"\n', `echo "$SUDO_PROMPT" > ${log}\nexit 0\n`);
-  expect(await reconcile("sync", sb.ctx, { update: true })).toBe(0);
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
   const prompt = (await readFile(log, "utf8")).trim();
   expect(prompt).toContain("[boom]");
   expect(prompt).toContain("brew bundle");
@@ -191,7 +191,7 @@ test("no SUDO_PROMPT and no relay when a formula-only Brewfile can't escalate", 
     'brew "mise"\n',
     `echo "$SUDO_PROMPT" > ${log}\necho "==> Pouring mise"\nexit 0\n`,
   );
-  expect(await reconcile("sync", sb.ctx, { update: true })).toBe(0);
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
   expect((await readFile(log, "utf8")).trim()).toBe("");
   expect(sb.out()).not.toContain("Pouring mise"); // nothing can prompt → nothing to narrate
 });
@@ -210,7 +210,7 @@ test("an inherited SUDO_ASKPASS means no prompt to label and no relay", async ()
     `echo "$SUDO_PROMPT" > ${log}\necho "==> Upgrading cask tuple"\nexit 0\n`,
     { SUDO_ASKPASS: "/usr/local/bin/some-askpass" },
   );
-  expect(await reconcile("sync", sb.ctx, { update: true })).toBe(0);
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
   expect((await readFile(log, "utf8")).trim()).toBe("");
   expect(sb.out()).not.toContain("Upgrading cask tuple");
 });
@@ -230,7 +230,7 @@ test("a boomfile carrying the retired sudo_askpass key still loads and syncs", a
     'echo "==> Pouring mise"\nexit 0\n',
   );
   // 0, not a config-validation failure: the key parses.
-  expect(await reconcile("sync", sb.ctx, { update: true })).toBe(0);
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
 });
 
 test("…and says so, rather than ignoring it in silence", async () => {
@@ -239,7 +239,7 @@ test("…and says so, rather than ignoring it in silence", async () => {
     'brew "mise"\n',
     'echo "==> Pouring mise"\nexit 0\n',
   );
-  await reconcile("sync", sb.ctx, { update: true });
+  await reconcile("sync", sb.ctx, {});
   expect(sb.out()).toContain("sudo_askpass is retired and ignored");
   expect(sb.out()).toContain("SUDO_ASKPASS");
 });

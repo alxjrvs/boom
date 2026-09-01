@@ -28,7 +28,6 @@ export interface HookApi {
   readonly profiles: ReadonlySet<string>;
   readonly linkMode: LinkMode;
   readonly verbose: boolean;
-  readonly update: boolean;
   ok(s: string): void;
   warn(s: string): void;
   fail(s: string): void;
@@ -123,7 +122,6 @@ export async function reconcileHook(entry: Hook, ctx: ReconcileCtx): Promise<voi
     profiles: ctx.profile.profiles,
     linkMode: ctx.linkMode,
     verbose: ctx.verbose,
-    update: ctx.update,
     ok: (s) => report.ok(s),
     warn: (s) => report.warn(s),
     fail: (s) => report.fail(s),

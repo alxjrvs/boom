@@ -268,7 +268,7 @@ test("a hook sees the run's context, not just its inputs", async () => {
      export function sync(api) {
        writeFileSync(api.env.HOME + "/ctx.json", JSON.stringify({
          repo: api.repo, os: api.os, host: api.host, profiles: [...api.profiles],
-         linkMode: api.linkMode, verbose: api.verbose, update: api.update, vars: api.vars,
+         linkMode: api.linkMode, verbose: api.verbose, vars: api.vars,
        }));
      }\n`,
   );
@@ -276,7 +276,6 @@ test("a hook sees the run's context, not just its inputs", async () => {
     await reconcile("sync", sb.ctx, {
       profiles: ["work"],
       linkMode: "overwrite",
-      update: true,
       verbose: true,
     }),
   ).toBe(0);
@@ -288,7 +287,6 @@ test("a hook sees the run's context, not just its inputs", async () => {
     profiles: ["work"],
     linkMode: "overwrite",
     verbose: true,
-    update: true,
     vars: { EMAIL: "a@b.c" },
   });
 });
@@ -334,9 +332,11 @@ test("a sync-only hook reports unchecked on verify instead of passing silently",
 });
 
 // A fake `brew` on PATH that just logs its argv — real `brew bundle` isn't installable
-// in CI, but the argv it's invoked with is exactly the behavior under test: plain
-// sync must not silently upgrade outdated formulae (Homebrew Bundle's own default),
-// and `sync --update` must be the one opt-in path that does.
+// in CI, but the argv it's invoked with is exactly the behavior under test: NO verb may
+// silently upgrade an outdated package (Homebrew Bundle's own default). That default reaches
+// casks, and upgrading a cask replaces the `.app` and quits the running program, so 0.38
+// removed the `--update` flag that used to opt into it. `--no-upgrade` is unconditional now,
+// and this is the case that fails if anything ever hands it back a way out.
 async function fakeBrew(
   repo: string,
   env: Record<string, string | undefined>,
@@ -357,20 +357,20 @@ async function fakeBrew(
   };
 }
 
-test("pkg brew: sync passes --no-upgrade; sync --update omits it", async () => {
+test("pkg brew: every verb passes --no-upgrade, and no flag takes it away", async () => {
   const sb = await sandbox(`[[section]]\nname = "Pkg"\npkg = [{ manager = "brew", file = "Brewfile" }]\n`);
   await writeFile(join(sb.repo, "Brewfile"), "");
   const calls = await fakeBrew(sb.repo, sb.ctx.env as Record<string, string | undefined>);
 
+  // Every shape a caller can ask for, including the drift-repair one that overwrites files:
+  // none of them is an upgrade.
   expect(await reconcile("sync", sb.ctx, {})).toBe(0);
-  expect(await reconcile("sync", sb.ctx, { update: true })).toBe(0);
+  expect(await reconcile("sync", sb.ctx, { linkMode: "overwrite", verbose: true })).toBe(0);
   expect(await reconcile("verify", sb.ctx, {})).toBe(0);
 
   const argvLines = await calls();
   expect(argvLines).toHaveLength(3);
-  expect(argvLines[0]).toContain("--no-upgrade"); // plain sync
-  expect(argvLines[1]).not.toContain("--no-upgrade"); // sync --update
-  expect(argvLines[2]).toContain("--no-upgrade"); // verify mirrors sync's default
+  for (const argv of argvLines) expect(argv).toContain("--no-upgrade");
 });
 
 // A fake `mise` on PATH: `install` just logs + exits 0; `ls --missing` prints whatever
