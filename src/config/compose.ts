@@ -81,25 +81,29 @@ export async function composeConfig(
 // The kinds whose `dst` is a real file destination, and so can fight over one path at run time.
 // `dir` is deliberately absent: it keys on `path`, never declares ownership, and a duplicate
 // `mkdir -p` is idempotent.
-const KEYED_FIELDS = ["link", "copy", "tmpl", "secret", "launchd"] as const;
+const KEYED_FIELDS = ["link", "copy", "tmpl", "launchd"] as const;
 type KeyedField = (typeof KEYED_FIELDS)[number];
 
 // Whether this kind takes OWNERSHIP of its destination — i.e. pushes it to `ctx.declared`, which
-// is what the owned-destinations manifest is rebuilt from. Only three of the five always do:
-//   • `secret` NEVER does, deliberately (resources/secret.ts), so reaping can't auto-delete a
-//     rendered secret;
-//   • `launchd` returns before its push when the machine isn't darwin. `pc.os` is the same
-//     `detectOs(env)` the resource itself calls (BOOM_OS override included), so the two cannot
-//     disagree about which run that is.
+// is what the owned-destinations manifest is rebuilt from. `launchd` is now the only kind that
+// can fail to: it returns before its push when the machine isn't darwin. `pc.os` is the same
+// `detectOs(env)` the resource itself calls (BOOM_OS override included), so the two cannot
+// disagree about which run that is.
+//
+// STILL A PREDICATE, not an inlined `field !== "launchd"`, and one kind is enough to need it: a
+// darwin `launchd` DOES own its destination, so the answer depends on the run and not only on
+// the kind. `secret` was the second case until 0.37 — it never declared, so that reaping could
+// not auto-delete a rendered secret — and its removal narrows this without simplifying it away.
+//
 // This partitions the dedupe keyspace below, and it is load-bearing rather than tidy: a winner
 // that declares nothing would evict a loser that declares, leaving the destination owned by
 // nobody on a run whose prior manifest still lists it — and `reapOrphans` DELETES exactly that.
 function declaresOwnership(field: KeyedField, pc: ProfileContext): boolean {
-  return field !== "secret" && (field !== "launchd" || pc.os === "darwin");
+  return field !== "launchd" || pc.os === "darwin";
 }
 
 // The two fields precedence reads off an entry. Every keyed kind is structurally one of these:
-// `secret` has no `src`, `launchd`'s `dst` is optional, the rest carry both.
+// `launchd`'s `dst` is optional, the rest carry both.
 interface Keyable {
   readonly src?: string;
   readonly dst?: string;
@@ -164,7 +168,7 @@ function resolveDuplicates(
         if (dst === undefined) continue;
         // Kinds that take ownership share ONE keyspace (a module `link` and a base `copy` at one
         // path are a single conflict). A kind that does not gets its own, so it can still beat a
-        // duplicate of itself — secret-vs-secret, launchd-vs-launchd, the real duplicate case —
+        // duplicate of itself — launchd-vs-launchd off darwin, the real duplicate case —
         // without ever evicting the declaration that keeps the file out of the orphan sweep.
         // NUL is the separator because it is the one byte a path cannot contain, so a partitioned
         // key can never alias a shared one however a `dst` is spelled.

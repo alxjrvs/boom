@@ -129,7 +129,7 @@ reports ahead-of-upstream): push or discard that work first, then re-link.
 `boomfile.toml` is a TOML document validated against a schema (`src/config/schema.ts`,
 valibot). It is grouped into `[[section]]`s; within a section, resources run in a
 fixed phase order:
-`link → copy → tmpl → secret → dir → pkg → osx_default → launchd → run → absent → hook`.
+`link → copy → tmpl → dir → pkg → osx_default → launchd → run → absent → hook`.
 Resources:
 
 - `link` / `copy` `= [{ src, dst, mode? }]` — place a repo file at `dst` (symlink vs
@@ -144,9 +144,10 @@ Resources:
   replaces N near-identical overlay files. An unknown `${NAME}` is a hard failure (never a
   dangling write). A boomfile still carrying `expand` fails at **load**, with a message naming
   the two-line migration
-- `secret = [{ dst, ref? | template?, mode?, backend? }]` — render a secret to a file at sync
-  time; `mode` defaults to `0600`. The `backend` is inferred from the ref scheme (`op://`→op,
-  `env:`→env) or set explicitly — 1Password (`op read`/`op inject`) or a plain env var.
+- `secret` — **RETIRED at 0.37**, and still parsed so an old boomfile keeps loading. It rendered
+  a vault value to a file at sync time. Nothing reads it now; reconcile warns once per run with a
+  count of the ignored declarations (never their paths). Resolve a secret at point of use instead
+  — `op run --env-file=F -- CMD` — or render it from a `run` step you own. See MIGRATING-0.37.
   Secrets stay
   out of the owned-destinations manifest, so orphan reaping never auto-deletes one. boom never
   journals or backs up the plaintext **it** renders (a fresh render's undo is a plain remove); a
@@ -217,9 +218,10 @@ interpolate.
 among the sections that *apply to this run*. `link`, `copy`, `tmpl` and (on macOS) `launchd` are
 keyed on their expanded `dst` alone (a module `link` and a base `copy` to the same path are one
 conflict, not two declarations), the loser is dropped at compose time rather than run and then
-fought over, and each override is reported as a `CONFIG` note. A `secret` — and a `launchd` off
-macOS — is keyed per kind instead, so it still beats a duplicate of *itself* but never overrides a
-kind of a different name. Both gates exist for the same reason: only a kind that takes ownership of
+fought over, and each override is reported as a `CONFIG` note. A `launchd` off macOS is keyed per
+kind instead, so it still beats a duplicate of *itself* but never overrides a kind of a different
+name. (`secret` was the other such kind until 0.37; the partition remains because a darwin
+`launchd` does own its destination, so the answer depends on the run and not only on the kind.) Both gates exist for the same reason: only a kind that takes ownership of
 the destination may take it away from another, because a winner that declares nothing leaves the
 file declared by nobody — and orphan reaping deletes exactly that. A winner hidden behind `when`
 would do the same, which is why gating is resolved before keying.
@@ -386,8 +388,7 @@ src/
     sync.ts                pre-reconcile config-repo fetch/pull(--rebase --autostash)-and-report
                            (+ the `--commit` half: commit local edits instead of autostashing)
     registry.ts            data-driven resource table (phase order) + finalize hooks
-    resources/             link · copy · tmpl · secret · dir · pkg · osx · launchd · run · hook
-    secrets/backends.ts    pluggable secret backends (op · env)
+    resources/             link · copy · tmpl · dir · pkg · osx · launchd · run · hook
     db.ts journal.ts       bun:sqlite store: transaction journal
     state.ts               the owned-destinations manifest (layout lives in lib/paths.ts)
     skill.ts               renders the Claude SKILL.md (commands/skill.ts is the CLI wrapper)

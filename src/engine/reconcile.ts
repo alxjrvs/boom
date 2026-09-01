@@ -256,6 +256,21 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
       );
     }
 
+    // `secret` is retired but still parses, for the same reason and with the same shape. Warned
+    // on EVERY verb, not just a mutating one: a declaration that no longer renders means the
+    // file at `dst` is now whatever it was before boom stopped touching it, and a `verify` that
+    // reported "all clear" while silently ignoring a declared secret would be the more dangerous
+    // half. Counted rather than listed — a `dst` is a path, and paths to secret material are
+    // exactly what should not be echoed into a transcript.
+    const retiredSecrets = composition.sections.reduce((n, sec) => n + (sec.secret?.length ?? 0), 0);
+    if (retiredSecrets > 0) {
+      report.warn(
+        `${retiredSecrets} \`secret\` declaration(s) are retired and ignored — boom no longer ` +
+          "renders a vault value to a file. Resolve it at point of use instead (`op run " +
+          "--env-file=F -- CMD`), or render it with a `run` step you own. See MIGRATING-0.37.",
+      );
+    }
+
     const childEnv = ctx.env;
 
     const rctx: ReconcileCtx = {

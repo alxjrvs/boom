@@ -178,32 +178,6 @@ const DirSchema = v.strictObject({
   remove_on_uninstall: v.optional(v.boolean()),
 });
 
-// A rendered secret: resolve a secret reference (or a whole template of them) to a file at sync
-// time, so a machine's secret-bearing config is declared like everything else instead of living
-// out of band. `ref` is a single reference (`op://vault/item/field`, `env:VAR`, `pass:path`, or
-// an encrypted file path); `template` is a repo-relative file whose embedded references are
-// filled in — exactly one is required. `backend` picks the resolver (op/env); when
-// absent it's inferred from the ref scheme (`op://`→op, `env:`→env, `pass:`→pass) or a file
-// extension (`.age`→age, `.sops.*`/`.enc`→sops), defaulting to op so every existing `op://…`
-// boomfile keeps working untouched. boom never journals or backs up the plaintext IT renders —
-// a fresh render's undo is a plain remove — but a pre-existing file at `dst` is the user's, so
-// it is left alone by default and only displaced (backed up, recoverably) under
-// `boom source --fix`. `mode` defaults to 0600 (a secret nobody else can read). The declarative
-// counterpart to `tmpl`, for secrets.
-const SecretSchema = v.pipe(
-  v.strictObject({
-    dst: v.string(),
-    ref: v.optional(v.string()),
-    template: v.optional(v.string()),
-    backend: v.optional(v.picklist(["op", "env"])),
-    mode: v.optional(ModeSchema),
-  }),
-  v.check(
-    (s) => (s.ref === undefined) !== (s.template === undefined),
-    "a secret needs exactly one of `ref` (an op:// reference) or `template` (a file of op:// references)",
-  ),
-);
-
 // A rendered template: read one repo-relative `src`, substitute `${NAME}` placeholders from
 // the top-level `[vars]` table (plus the `${env:VAR}`/`${host}`/`${os}` vocabulary), and write
 // the result to `dst`. The replacement for the retired `copy.expand`, which rendered that same
@@ -252,7 +226,17 @@ const SectionSchema = v.strictObject({
   osx_default: v.optional(v.array(OsxDefaultSchema)),
   launchd: v.optional(v.array(LaunchdSchema)),
   tmpl: v.optional(v.array(TmplSchema)),
-  secret: v.optional(v.array(SecretSchema)),
+  // RETIRED at 0.37, and deliberately still accepted — the same call as `schedule` below, for
+  // the same reason. The `secret` resource rendered a vault value to a file at sync time. It is
+  // gone: writing a secret to disk is writing a secret somebody can read, boom's own reference
+  // consumer forbids it in its CLAUDE.md ("to *use* a secret, pass it: `op run --env-file=F --
+  // CMD`"), and after five releases and two consumers nothing had ever declared one.
+  //
+  // Parsed loosely and ignored, never `v.never`: a hard schema failure on a key that used to be
+  // valid turns an upgrade into an outage for anyone who did not read MIGRATING-0.37 first, and
+  // the replacement is a real edit rather than a rename. `reconcile` says once per run that the
+  // key is being skipped, so an ignored declaration is never silent. Delete at 1.0.
+  secret: v.optional(v.array(v.unknown())),
   run: v.optional(v.array(RunSchema)),
   absent: v.optional(v.array(AbsentSchema)),
   hook: v.optional(v.array(HookSchema)),
@@ -335,7 +319,6 @@ export type File = v.InferOutput<typeof FileSchema>;
 export type Pkg = v.InferOutput<typeof PkgSchema>;
 export type Dir = v.InferOutput<typeof DirSchema>;
 export type Absent = v.InferOutput<typeof AbsentSchema>;
-export type Secret = v.InferOutput<typeof SecretSchema>;
 export type Tmpl = v.InferOutput<typeof TmplSchema>;
 export type Launchd = v.InferOutput<typeof LaunchdSchema>;
 export type Run = v.InferOutput<typeof RunSchema>;

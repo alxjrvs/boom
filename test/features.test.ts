@@ -1,19 +1,20 @@
-// v0.17 feature surface: the secret resource, named
-// checkpoints, boom.lock, drift notifications, and doctor --fix. Each is exercised
-// against a fully sandboxed $HOME + state dir (never the real machine), like engine.test.ts.
+// Cross-cutting feature surface: overlay `vars`, drift notifications, `verify --ci`, and
+// destination precedence end to end. Each is exercised against a fully sandboxed $HOME +
+// state dir (never the real machine), like engine.test.ts.
+//
+// The `secret` resource's own suite lived here and went with it at 0.37. What stayed is the
+// precedence coverage it happened to carry: `secret` was one of two kinds that could win a
+// destination without owning it, and those tests are about THAT rule, not about secrets.
+// They are ported to `launchd`, the remaining such kind — see the note above them.
 import { expect, test } from "bun:test";
-import { chmod, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { run } from "@stricli/core";
 import { app } from "../src/cli.ts";
-import { loadConfig } from "../src/config/load.ts";
 import type { BoomContext } from "../src/context.ts";
-import { doctor } from "../src/engine/doctor.ts";
-import { readRun } from "../src/engine/journal.ts";
 import { reconcile } from "../src/engine/reconcile.ts";
 import { linkTarget, pathExists } from "../src/lib/fs.ts";
 import { notifyArgv } from "../src/lib/notify.ts";
-import { backupsDir } from "../src/lib/paths.ts";
 import { makeSandbox, type Sandbox } from "./support/sandbox.ts";
 
 const sandbox = (
@@ -25,206 +26,6 @@ const sandbox = (
     emptyPath: opts.emptyPath ?? false,
     env: { BOOM_HOST: "testhost", ...(opts.env ?? {}) },
   });
-
-// A sandbox like engine.test's, plus an `emptyPath` switch: point PATH at a dir with no tools so
-// `hasCommand` deterministically reports brew/op/mise absent (for the secret paths).
-// Write an executable fake binary into `dir`; the caller prepends `dir` to PATH so the
-// sandboxed code shells out to this instead of the real tool.
-async function fakeBin(dir: string, name: string, script: string): Promise<void> {
-  await mkdir(dir, { recursive: true });
-  await writeFile(join(dir, name), `#!/bin/sh\n${script}`);
-  await chmod(join(dir, name), 0o755);
-}
-
-// --- doctor --secrets: audit op:// references ---------------------------------------------
-
-test("doctor --secrets: resolvable ref passes, unresolvable warns (exit 2), no value leaks", async () => {
-  const sb = await sandbox(
-    '[[section]]\nname = "s"\nsecret = [' +
-      '{ dst = "~/.good", ref = "op://vault/good/field" },' +
-      '{ dst = "~/.bad", ref = "op://vault/bad/field" }]\n',
-  );
-  // Fake `op`: exit 0 for the good ref (printing a secret to stdout that must NOT surface in the
-  // report), non-zero + stderr for the bad one. $3 is the ref (op read --no-newline <ref>).
-  const bin = join(sb.base, "bin");
-  await fakeBin(
-    bin,
-    "op",
-    'case "$3" in\n' +
-      "  op://vault/good/field) printf SUPERSECRETVALUE; exit 0;;\n" +
-      '  *) echo "item not found" >&2; exit 1;;\n' +
-      "esac\n",
-  );
-  sb.env.PATH = `${bin}:${sb.env.PATH}`;
-
-  // secretsOnly → doctor(ctx, json, configOnly, fix, secretsOnly)
-  expect(await doctor(sb.ctx, false, false, false, true)).toBe(2);
-  const out = sb.out();
-  expect(out).toContain("op://vault/good/field resolves");
-  expect(out).toContain("op://vault/bad/field — unresolvable");
-  expect(out).toContain("item not found");
-  // The plaintext op printed to stdout must never reach the report.
-  expect(out).not.toContain("SUPERSECRETVALUE");
-});
-
-test("doctor --secrets: warns cleanly when op is not on PATH", async () => {
-  const sb = await sandbox('[[section]]\nname = "s"\nsecret = [{ dst = "~/.k", ref = "op://v/i/f" }]\n', {
-    emptyPath: true,
-  });
-  expect(await doctor(sb.ctx, false, false, false, true)).toBe(2);
-  // Now reported per-ref rather than as one early return, so the warning names WHICH ref could
-  // not be audited — and the audit continues to any other backend's refs instead of stopping.
-  expect(sb.out()).toContain("op://v/i/f — op (1Password CLI) not installed");
-});
-
-// The audit used to shell `op read <ref>` at every declared ref regardless of scheme, and to
-// return early when `op` was missing. Both are wrong once backends exist: `op read env:TOKEN`
-// exits non-zero, so a perfectly good env secret was reported "unresolvable", and a machine
-// using only env/pass/age audited nothing while printing a 1Password warning. This drives the
-// whole thing with NO `op` on PATH at all — under the old code the run could not audit anything.
-test("doctor --secrets: audits non-op backends, and does not need op to do it", async () => {
-  const sb = await sandbox(
-    '[[section]]\nname = "s"\nsecret = [' +
-      '{ dst = "~/.set", ref = "env:BOOM_TEST_TOKEN" },' +
-      '{ dst = "~/.unset", ref = "env:BOOM_TEST_MISSING" }]\n',
-    { emptyPath: true },
-  );
-  sb.env.BOOM_TEST_TOKEN = "SUPERSECRETVALUE";
-
-  expect(await doctor(sb.ctx, false, false, false, true)).toBe(2);
-  const out = sb.out();
-  expect(out).toContain("env:BOOM_TEST_TOKEN resolves (env)");
-  expect(out).toContain("env:BOOM_TEST_MISSING — unresolvable");
-  expect(out).toContain("$BOOM_TEST_MISSING not set");
-  // The old failure mode, asserted directly: a good env ref must never be called unresolvable.
-  expect(out).not.toContain("env:BOOM_TEST_TOKEN — unresolvable");
-  // And the resolved plaintext still never reaches the report, on this path too.
-  expect(out).not.toContain("SUPERSECRETVALUE");
-});
-
-// --- secret resource schema ---------------------------------------------------------------
-
-test("secret schema: accepts exactly one of ref / template, rejects neither or both", async () => {
-  const ok = await sandbox('[[section]]\nname = "s"\nsecret = [{ dst = "~/.k", ref = "op://v/i/f" }]\n');
-  expect((await loadConfig(ok.repo)).section[0]?.secret?.[0]?.ref).toBe("op://v/i/f");
-
-  const both = await sandbox(
-    '[[section]]\nname = "s"\nsecret = [{ dst = "~/.k", ref = "op://v/i/f", template = "t" }]\n',
-  );
-  await expect(loadConfig(both.repo)).rejects.toThrow();
-
-  const neither = await sandbox('[[section]]\nname = "s"\nsecret = [{ dst = "~/.k" }]\n');
-  await expect(loadConfig(neither.repo)).rejects.toThrow();
-});
-
-test("secret: dry-run plans without needing op; sync fails cleanly when op is absent", async () => {
-  const sb = await sandbox('[[section]]\nname = "s"\nsecret = [{ dst = "~/.token", ref = "op://v/i/f" }]\n', {
-    emptyPath: true,
-  });
-  // dry run states intent, never touches 1Password → clean exit even with no `op`.
-  expect(await reconcile("sync", sb.ctx, { dryRun: true, verbose: true })).toBe(0);
-  expect(sb.out()).toContain("would be rendered");
-  // real sync with no op on PATH is a reported failure, not a crash.
-  expect(await reconcile("sync", sb.ctx, {})).toBe(1);
-  expect(sb.out()).toContain("op (1Password CLI) not installed");
-});
-
-test("secret verify: a missing rendered file warns", async () => {
-  const sb = await sandbox('[[section]]\nname = "s"\nsecret = [{ dst = "~/.token", ref = "op://v/i/f" }]\n', {
-    emptyPath: true,
-  });
-  expect(await reconcile("verify", sb.ctx, {})).toBe(2);
-  expect(sb.out()).toContain("secret not rendered");
-});
-
-// --- pluggable secret backends ------------------------------------------------------------
-
-test("secret env backend: needs no tool — sync writes the env value at 0600 even under emptyPath", async () => {
-  const sb = await sandbox(
-    '[[section]]\nname = "s"\nsecret = [{ dst = "~/.tok", ref = "env:MY_SECRET", backend = "env" }]\n',
-    { emptyPath: true },
-  );
-  sb.env.MY_SECRET = "s3cr3t-value";
-  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
-  const tok = join(sb.home, ".tok");
-  expect(await Bun.file(tok).text()).toBe("s3cr3t-value");
-  expect(((await stat(tok)).mode & 0o777).toString(8)).toBe("600");
-  // The plaintext must never leak into the reconcile's own output — only file content carries it.
-  expect(sb.out()).not.toContain("s3cr3t-value");
-  // Rotation is now deliberately gated. With a file already at dst, boom cannot tell its own
-  // earlier render from something the user put there, so a plain `boom source` leaves it alone
-  // and only `--fix` rewrites it. Pinning the behavior change: scheduled syncs stop rotating.
-  sb.env.MY_SECRET = "rotated-value";
-  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
-  expect(await Bun.file(tok).text()).toBe("s3cr3t-value");
-  expect(await reconcile("sync", sb.ctx, { linkMode: "overwrite" })).toBe(0);
-  expect(await Bun.file(tok).text()).toBe("rotated-value");
-});
-
-// --- secret: never destroy a file boom doesn't own -----------------------------------------
-
-const SECRET_BOOMFILE =
-  '[[section]]\nname = "s"\nsecret = [{ dst = "~/.tok", ref = "env:MY_SECRET", backend = "env" }]\n';
-
-test("secret: a pre-existing foreign file survives the default (skip) sync", async () => {
-  const sb = await sandbox(SECRET_BOOMFILE, { emptyPath: true });
-  sb.env.MY_SECRET = "s3cr3t-value";
-  const tok = join(sb.home, ".tok");
-  await writeFile(tok, "USER-OWNED");
-  // verbose: report.skip is quiet-suppressed by default, so the new line only shows here.
-  expect(await reconcile("sync", sb.ctx, { verbose: true })).toBe(0);
-  expect(await readFile(tok, "utf8")).toBe("USER-OWNED");
-  expect(sb.out()).toContain("boom source --fix");
-  expect(sb.out()).not.toContain("s3cr3t-value");
-  // Nothing was journalled for that destination: boom did not touch it, so there is no undo.
-  expect((await readRun(sb.env))?.done.some((r) => r.dst === tok)).toBe(false);
-});
-
-test("secret: a foreign file whose bytes match the secret is not chmod'ed under the default", async () => {
-  const sb = await sandbox(SECRET_BOOMFILE, { emptyPath: true });
-  sb.env.MY_SECRET = "s3cr3t-value";
-  const tok = join(sb.home, ".tok");
-  // Bytes identical to the resolved secret by coincidence — the file is still the user's, so
-  // the mode-tightening branch must not reach it and re-permission it to 0600.
-  await writeFile(tok, "s3cr3t-value");
-  await chmod(tok, 0o644);
-  expect(await reconcile("sync", sb.ctx, { verbose: true })).toBe(0);
-  expect(((await stat(tok)).mode & 0o777).toString(8)).toBe("644");
-  expect(sb.out()).toContain("--fix");
-});
-
-test("secret: `--fix` over an already-current secret writes nothing and backs up nothing", async () => {
-  const sb = await sandbox(SECRET_BOOMFILE, { emptyPath: true });
-  sb.env.MY_SECRET = "s3cr3t-value";
-  const tok = join(sb.home, ".tok");
-  // Boom renders it itself first — so the file at dst on the second run is boom's own render.
-  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
-  // The steady state a converged machine is routinely told to run. It must be a pure no-op:
-  // if the conflict gate carried its own overwrite arm, this run would displace the unchanged
-  // secret into the backup tree and re-render it — a fresh plaintext copy, every single run.
-  expect(await reconcile("sync", sb.ctx, { linkMode: "overwrite", verbose: true })).toBe(0);
-  const run = await readRun(sb.env);
-  expect(run?.done.some((r) => r.dst === tok)).toBe(false);
-  expect(await pathExists(join(backupsDir(sb.env), run?.runId ?? "MISSING"))).toBe(false);
-});
-
-test("secret env backend: a missing env var is a clean reported failure, not a crash", async () => {
-  const sb = await sandbox(
-    '[[section]]\nname = "s"\nsecret = [{ dst = "~/.tok", ref = "env:ABSENT_VAR", backend = "env" }]\n',
-    { emptyPath: true },
-  );
-  expect(await reconcile("sync", sb.ctx, {})).toBe(1);
-  expect(sb.out()).toContain("$ABSENT_VAR not set");
-});
-
-test("secret backend inference: a bare op:// ref still routes to op (fails cleanly with no op)", async () => {
-  const sb = await sandbox('[[section]]\nname = "s"\nsecret = [{ dst = "~/.token", ref = "op://v/i/f" }]\n', {
-    emptyPath: true,
-  });
-  // No `backend =`: inferred as op from the `op://` scheme → same op-not-installed failure.
-  expect(await reconcile("sync", sb.ctx, {})).toBe(1);
-  expect(sb.out()).toContain("op (1Password CLI) not installed");
-});
 
 // --- overlays carry vars + [boom], not just sections ---------------------------------------
 
@@ -368,28 +169,71 @@ test("precedence: a `when`-gated winner never causes the loser's file to be reap
   expect(sb.out()).not.toContain("reaped orphan");
 });
 
-// The second way a winner can fail to own what it wins: a `secret` is deliberately kept out of the
-// owned-destinations manifest, so a secret that evicted the `copy` declaring the same path would
-// leave it declared by nobody — while the prior manifest still lists it, and reaping deletes that.
-// (Worse with the backend unavailable: the render fails AND the file goes.) Keyed per kind now, so
-// the two are independent declarations and the secret's own skip arm leaves the file alone.
-test("precedence: a secret never evicts the copy that owns the same dst", async () => {
+// THE SECOND WAY a winner can fail to own what it wins, and the reason `declaresOwnership`
+// still exists as a predicate rather than a constant. A `launchd` entry does not push its
+// destination to `ctx.declared` off darwin — the resource returns before that push — so a
+// launchd entry that EVICTED the `copy` declaring the same path would leave it declared by
+// nobody, while the prior manifest still lists it, and reaping deletes exactly that.
+//
+// Ported from `secret`, which was the other such kind until 0.37. The rule is unchanged and so
+// is this test's shape; only the kind exercising it moved. Deleting it with the resource would
+// have left the predicate — and the NUL-partitioned keyspace under it — with no coverage at all,
+// which is how a subtle correctness rule quietly becomes decorative.
+test("precedence: an off-darwin launchd never evicts the copy that owns the same dst", async () => {
   const sb = await twoLayerSandbox(
-    `[[section]]\nname = "Mod"\ncopy = [{ src = "dotfile", dst = "~/.netrc" }]\n`,
+    `[[section]]\nname = "Mod"\ncopy = [{ src = "agent.plist", dst = "~/Library/LaunchAgents/agent.plist" }]\n`,
     `[[section]]\nname = "Base"\n`,
   );
-  const dst = join(sb.home, ".netrc");
+  await writeFile(join(sb.repo, "agent.plist"), "<plist/>\n");
+  const dst = join(sb.home, "Library", "LaunchAgents", "agent.plist");
+
   expect(await reconcile("sync", sb.ctx, {})).toBe(0);
   expect(await pathExists(dst)).toBe(true); // run 1 places it and takes ownership
 
-  // The user then adds the documented cross-kind override to the STRONGER layer — the overlay,
-  // which composes after the base and so is where an override belongs.
-  sb.env.MY_NETRC = "rendered\n";
+  // The stronger layer then declares a `launchd` resolving to the SAME destination — its `dst`
+  // defaults to the LaunchAgents dir plus basename(src). BOOM_OS is linux in this sandbox, so
+  // the launchd entry wins the key but declares nothing.
   await writeFile(
     join(sb.repo, "boomfile.linux.toml"),
-    `[[section]]\nname = "Base"\nsecret = [{ dst = "~/.netrc", ref = "env:MY_NETRC" }]\n`,
+    `[[section]]\nname = "Base"\nlaunchd = [{ src = "agent.plist" }]\n`,
   );
   expect(await reconcile("sync", sb.ctx, {})).toBe(0);
   expect(await pathExists(dst)).toBe(true);
   expect(sb.out()).not.toContain("reaped orphan");
+});
+
+// --- `secret` is retired, and an ignored declaration is never silent ------------------------
+// The key still parses (a hard schema failure on a formerly-valid key turns an upgrade into an
+// outage), so the only thing standing between a stale declaration and a file nobody renders any
+// more is this warning. It fires on EVERY verb, including verify: a `verify` reporting all-clear
+// while ignoring a declared secret is the more dangerous half.
+test("secret: a retired declaration still loads, and warns on both sync and verify", async () => {
+  const sb = await sandbox('[[section]]\nname = "s"\nsecret = [{ dst = "~/.token", ref = "op://v/i/f" }]\n');
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  expect(sb.out()).toContain("retired and ignored");
+  expect(await pathExists(join(sb.home, ".token"))).toBe(false); // nothing was rendered
+
+  // And on verify, where it lands in the ATTENTION tier — exit 2, not 0 and not a failure.
+  // Pinned because it is a real consequence for anyone gating CI on `boom verify`: a stale key
+  // turns a green gate amber until it is deleted. That is the intended trade (a verify reporting
+  // all-clear while ignoring a declared secret would be worse), so it is asserted here rather
+  // than left to be discovered.
+  const sb2 = await sandbox('[[section]]\nname = "s"\nsecret = [{ dst = "~/.token", ref = "op://v/i/f" }]\n');
+  expect(await reconcile("verify", sb2.ctx, {})).toBe(2);
+  expect(sb2.out()).toContain("retired and ignored");
+});
+
+// The count is reported, never the paths: a `dst` for secret material is exactly what must not
+// be echoed into a transcript.
+test("secret: the retirement warning counts declarations and never prints their paths", async () => {
+  const sb = await sandbox(
+    '[[section]]\nname = "s"\nsecret = [\n' +
+      '  { dst = "~/.aws-creds-do-not-log", ref = "op://v/i/f" },\n' +
+      '  { dst = "~/.npmrc-secret", ref = "op://v/i/g" },\n' +
+      "]\n",
+  );
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  expect(sb.out()).toContain("2 `secret` declaration(s) are retired");
+  expect(sb.out()).not.toContain("aws-creds-do-not-log");
+  expect(sb.out()).not.toContain("npmrc-secret");
 });

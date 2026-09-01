@@ -102,7 +102,6 @@ drift, because `verify` has to.
 boom doctor --config    # parse + schema-check the boomfile; change nothing (exit 0/1)
 boom doctor             # check boom's own preconditions (tools, keychain, state)
 boom doctor --fix       # …and mend the safe ones (state dir, boom skill)
-boom doctor --secrets   # audit that every secret ref (op:// and pluggable backends) resolves
 boom skill              # emit a Claude Code SKILL.md (--install writes it to ~/.claude)
 ```
 
@@ -110,7 +109,7 @@ boom skill              # emit a Claude Code SKILL.md (--install writes it to ~/
 
 Your dotfiles repo's config is a typed, validated TOML document, grouped into
 sections that run in phase order
-(`link → copy → tmpl → secret → dir → pkg → osx_default → launchd → run → hook`):
+(`link → copy → tmpl → dir → pkg → osx_default → launchd → run → hook`):
 
 ```toml
 # Optional: named values `tmpl` templates interpolate as ${NAME} (per-machine via overlays).
@@ -139,13 +138,6 @@ pkg = [
   { manager = "cargo", file = "cargo.txt" },        # also: apt, dnf, npm (-g), pipx, gem, flatpak, gh (extensions)
   { manager = "apt", file = "apt.txt", remove_on_uninstall = true },
 ]
-
-[[section]]
-name = "Secrets"
-# Render a secret to a 0600 file at sync time — never journaled in plaintext. The backend is
-# inferred from the ref scheme (op://, env:, pass:, *.age, *.sops) or set with `backend = …`.
-# A pre-existing file at `dst` is left alone (skipped) unless you run `boom source --fix`.
-secret = [{ dst = "~/.config/gh/token", ref = "op://Private/GitHub/token" }]
 
 [[section]]
 name = "macOS only"
