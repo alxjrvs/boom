@@ -95,5 +95,6 @@ export async function reconcileRun(entry: Run, ctx: ReconcileCtx): Promise<void>
     }),
   );
   if (timedOut) ctx.report.fail(`${entry.cmd} (timed out after ${entry.timeout}s)`);
-  else if (code !== 0) ctx.report.fail(`${entry.cmd} (exit ${code})${failureDetail(stderr, stdout)}`);
+  else if (code !== 0)
+    ctx.report.fail(`${entry.cmd} (exit ${code})${failureDetail(stderr, stdout, ctx.env)}`);
 }

@@ -234,7 +234,7 @@ replace rather than an append, an overlay declaring one drops the base's entries
 A top-level `[vars]` table (a name→string map) supplies the values `tmpl` resources
 interpolate.
 
-**Duplicate file destinations resolve last-wins** across `[modules…, base, overlays…]` — and only
+**Duplicate file destinations resolve last-wins** across `[base, overlays…]` — and only
 among the sections that *apply to this run*. `link`, `copy`, `tmpl` and (on macOS) `launchd` are
 keyed on their expanded `dst` alone (a module `link` and a base `copy` to the same path are one
 conflict, not two declarations), the loser is dropped at compose time rather than run and then

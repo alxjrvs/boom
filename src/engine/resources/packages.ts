@@ -85,6 +85,15 @@ async function reconcileBrew(
 ): Promise<void> {
   const { report } = ctx;
   if (!hasCommand("brew", ctx.env)) {
+    // A dry run changes nothing and cannot install anything, so an absent package manager is a
+    // fact about THIS machine rather than a defect in the config. Failing here made `--dry-run`
+    // unusable as a config validator anywhere the manager is missing — a CI runner, a fresh
+    // box, a Linux checkout of a macOS config — which is exactly where you most want to preview
+    // a boomfile before trusting it. `verify` still fails: there, a missing brew IS drift.
+    if (ctx.dryRun) {
+      report.skip("brew not installed — cannot preview its plan");
+      return;
+    }
     report.fail("brew not installed");
     return;
   }
@@ -308,6 +317,11 @@ async function reconcileUserPkgs(mgr: UserMgrName, entry: Pkg, ctx: ReconcileCtx
     return;
   }
   if (!hasCommand(spec.cli, ctx.env)) {
+    // Same reasoning as brew above: a dry run cannot install, so an absent CLI is machine state.
+    if (ctx.dryRun) {
+      report.skip(`${spec.cli} not installed — cannot preview its plan`);
+      return;
+    }
     report.fail(`${spec.cli} not installed`);
     return;
   }

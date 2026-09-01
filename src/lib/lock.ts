@@ -20,15 +20,24 @@ function lockPath(env: Env): string {
   return join(boomStateDir(env), "lock");
 }
 
-// Whether a process with `pid` is alive. `kill(pid, 0)` sends no signal — it only probes:
-// it throws ESRCH when the process is gone, EPERM when it exists but we may not signal it
-// (still alive → still holding the lock).
+// Whether a process with `pid` is STILL A BOOM RUN OF OURS. `kill(pid, 0)` sends no signal —
+// it only probes: it throws ESRCH when the process is gone, EPERM when a process with that
+// pid exists but we may not signal it.
+//
+// EPERM is treated as NOT-ours, and that is the whole point of this function rather than a
+// detail of it. A boom lock is always written by a process running as the invoking user, so a
+// pid we are not permitted to signal cannot be the run that wrote this lock — it is a
+// different user's process that happens to have inherited the number after a pid rollover.
+// Reading EPERM as "alive, still holding it" meant that a crash plus a rollover onto any
+// long-lived daemon wedged EVERY future mutating run, permanently, with "wait for it to
+// finish, or remove <path>" — an unrecoverable state a user could only escape by deleting the
+// file by hand. Same-user liveness is what the lock actually models, so that is what this asks.
 function pidAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
-  } catch (e) {
-    return (e as NodeJS.ErrnoException).code === "EPERM";
+  } catch {
+    return false;
   }
 }
 
