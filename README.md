@@ -69,6 +69,9 @@ boom source --resume    # continue an interrupted sync (skips completed steps)
 boom verify             # check for drift — exit 0 ok / 2 warn / 1 fail
 boom verify --json      # …as a structured drift report
 boom verify --ci        # non-interactive config gate for CI (schema-check only; exit 0/1)
+
+boom uninstall          # tear down what boom installed — prompts on a TTY, refuses on a pipe
+boom uninstall --yes    # …consent for scripts and CI (`--json` implies it)
 ```
 
 **No verb upgrades.** Reconciling is "what is declared is installed", never "what is installed

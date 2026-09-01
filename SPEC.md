@@ -26,7 +26,8 @@ A `boom` invocation does one of two things:
    - `boom source` / `boom source sync` — reconcile the machine to the boomfile, running the `sync` verb (`--fix` repairs drift by overwriting conflicts). No verb upgrades a package — see "Reconciling never upgrades" below
    - `boom verify` — check drift, exit 0 ok / 2 warn / 1 fail (`--json` for a report; `--ci`
      narrows to a non-interactive schema-check gate, 0/1, no machine walk)
-   - `boom uninstall`
+   - `boom uninstall` — prompts on a terminal and refuses on a non-TTY without `--yes`
+     (a `--json` run is machine-driven, so it counts as consent)
    These share **one verb-parameterized loop** (`src/engine/reconcile.ts`) over a
    resource-type registry — siblings, not separate scripts. `source --resume` continues an
    interrupted one. A
