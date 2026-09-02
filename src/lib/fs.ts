@@ -1,6 +1,6 @@
 // Filesystem helpers for the reconcile engine. node:fs/promises (not Bun.write) for
 // all metadata/link ops — Bun.write cannot create symlinks or set modes.
-import { cp, lstat, mkdir, readlink, rename, rm, symlink } from "node:fs/promises";
+import { cp, lstat, mkdir, readlink, rename, rm, stat, symlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { Env } from "./paths.ts";
 
@@ -47,6 +47,20 @@ export function expandHome(p: string, env: Env): string {
   const home = env.HOME ?? "";
   if (!home) return p;
   return expandTilde(p, env).replace(/\$\{HOME\}|\$HOME/g, () => home);
+}
+
+// The schema's octal mode string ("644", "0700") as permission bits, parsed here once rather than
+// at every site that reads `entry.mode`. The schema has already guaranteed the spelling.
+export const modeBits = (mode: string): number => Number.parseInt(mode, 8);
+
+// Permission bits back to the octal spelling the reports use ("644"), so a drift line and a
+// declared mode read the same way.
+export const fmtMode = (bits: number): string => bits.toString(8);
+
+// The permission bits a path currently has, or undefined when it cannot be stat'ed.
+export async function modeOf(path: string): Promise<number | undefined> {
+  const st = await stat(path).catch(() => undefined);
+  return st ? st.mode & 0o777 : undefined;
 }
 
 export function displayPath(p: string, env: Env): string {
