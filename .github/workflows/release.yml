@@ -4,8 +4,9 @@ name: release
 # GitHub release for that version — the cross-compiled binary matrix + checksums are
 # attached and the tag is created — unless that version already shipped. So the flow is
 # just: bump the version in a PR, merge, and install.sh / the Homebrew formula are both
-# updated here by CI. The release is gated on the same checks ci runs, so a red tree never
-# ships. Bun compiles every target from one Linux host (job: build); the macOS binaries
+# updated here by CI. No checks re-run here: main is protected, so a red tree cannot reach it
+# — ci.yml already ran on the PR and again on the push. Bun compiles every target from one
+# Linux host (job: build); the macOS binaries
 # are then signed + notarized on a real macOS host (job: sign-macos) before the release
 # is assembled and the checksums computed over the *final* binaries (job: release). A
 # final job (formula) writes the shipped version + sha256s into Formula/boom.rb and opens
@@ -50,14 +51,6 @@ jobs:
         with:
           bun-version-file: .bun-version
       - run: bun install --frozen-lockfile
-
-      # Gate the release on the same checks ci enforces — never ship a red tree.
-      - name: Lint + format (biome)
-        run: bun run lint
-      - name: Typecheck (tsc)
-        run: bun run typecheck
-      - name: Test (bun test)
-        run: bun test
 
       # The version in package.json is the single control: release it only if its tag
       # doesn't yet exist, so a package.json edit that doesn't bump the version (e.g. a

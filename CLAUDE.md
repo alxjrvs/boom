@@ -5,10 +5,8 @@
 **BoomTube** is **declarative dev-machine setup** — a single self-contained binary (the
 executable is **`boom`**), compiled from **TypeScript on Bun**, that converges a
 machine to a declared state (dotfiles, packages, tools) from a declarative
-`boomfile.toml`, with drift detection and a recoverable teardown, then opens portals to your
-code: reconcile fast, get out of the way, get to work. It is a rewrite of
-the original bash engine (now removed); read [`SPEC.md`](SPEC.md) for the design
-of record.
+`boomfile.toml`, with drift detection and a recoverable teardown: reconcile fast, get out of
+the way, get to work. Read [`SPEC.md`](SPEC.md) for the design of record.
 
 ## North stars
 
@@ -61,7 +59,9 @@ of record.
 - **Every change lands via PR; direct pushes to `main` are blocked.**
 - **CI must be green before merge** — the single required check is `ci-gate`, which fails if
   `check` on Linux + macOS (biome + tsc + bun test + binary/generator smoke), `cross-compile`,
-  or `version-guard` fails.
+  or `version-guard` fails. `action-smoke` (the shipped GitHub Action + install.sh against the
+  live latest release) runs on every PR but is deliberately outside the gate: a public download
+  must never block a merge.
 - **One merge, at most one release.** Each PR must move `package.json`'s version exactly
   one semver step from `main` — patch (`x.y.z+1`), minor (`x.y+1.0`), or major
   (`x+1.0.0`) — or leave it unchanged. Never skip (`0.0.1`→`0.0.3`) or jump

@@ -7,8 +7,9 @@
 # formula is absent.
 # sha256 values are filled in by the release workflow when a tag is cut.
 class Boom < Formula
-  desc "Declarative dev-machine setup — sync/verify dotfiles, packages, and tools from boomfile.toml"
+  desc "Declarative dev-machine setup: dotfiles, packages, tools from a boomfile.toml"
   homepage "https://github.com/alxjrvs/boom"
+  license "MIT"
   version "0.39.0"
 
   on_macos do
