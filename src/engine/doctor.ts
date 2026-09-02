@@ -14,7 +14,7 @@ import { boomStateDir } from "../lib/paths.ts";
 import { hasCommand } from "../lib/proc.ts";
 import { bandsReporter, type Reporter } from "../lib/reporter.ts";
 import { VERSION } from "../lib/version.ts";
-import { installSkill, skillState } from "./skill.ts";
+import { installSkill, skillState, skillStatusLabel } from "./skill.ts";
 import { validateConfigFiles } from "./validate.ts";
 
 // The external tools boom's resources shell out to, and what needs each. None are required for
@@ -40,9 +40,10 @@ async function checkSkill(ctx: BoomContext, report: Reporter, fix: boolean): Pro
     report.ok(`boom skill installed + current (v${VERSION})`);
     return;
   }
-  const word = state.status === "missing" ? "not installed" : "stale";
   if (!fix) {
-    report.warn(`boom skill ${word} — run \`boom skill --install\` (or \`boom doctor --fix\`)`);
+    report.warn(
+      `boom skill ${skillStatusLabel(state.status)} — run \`boom skill --install\` (or \`boom doctor --fix\`)`,
+    );
     return;
   }
   await installSkill(state);

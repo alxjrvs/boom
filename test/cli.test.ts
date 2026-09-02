@@ -54,6 +54,16 @@ test("an unknown command reports an error naming it", async () => {
   expect(buf.err).toContain("definitely-not-a-command");
 });
 
+// Through the parser, not the catalog: the catalog filters hidden routes, so a hidden `sync`
+// alias would pass the exact-set test while `boom sync` quietly worked again. `boom source`
+// is the one spelling.
+test("`sync` is not a top-level command", async () => {
+  const { buf, ctx } = fakeContext();
+  await run(app, ["sync"], ctx);
+  expect(buf.err).toContain("sync");
+  expect(buf.err).not.toContain("no config repo linked");
+});
+
 test("source accepts --commit/-m", async () => {
   const { buf, ctx } = fakeContext();
   await run(app, ["source", "--commit", "-m", "wip"], ctx);

@@ -4,7 +4,7 @@
 // `[boom] skill_on_sync` and `boom doctor`); this module is only the Stricli wrapper.
 import { buildCommand } from "@stricli/core";
 import type { BoomContext } from "../context.ts";
-import { installSkill, skillDoc, skillState } from "../engine/skill.ts";
+import { installSkill, skillDoc, skillInstallPath } from "../engine/skill.ts";
 import { VERSION } from "../lib/version.ts";
 
 export const skillCommand = buildCommand<{ install?: boolean }, [], BoomContext>({
@@ -19,19 +19,20 @@ export const skillCommand = buildCommand<{ install?: boolean }, [], BoomContext>
     },
   },
   async func(flags) {
+    const doc = skillDoc(VERSION);
     if (!flags.install) {
-      this.process.stdout.write(skillDoc(VERSION));
+      this.process.stdout.write(doc);
       return;
     }
-    const state = await skillState(this.env);
-    if (!state) {
+    const file = skillInstallPath(this.env);
+    if (!file) {
       this.process.stderr.write(
         "boom: can't resolve the Claude config dir — set HOME or CLAUDE_CONFIG_DIR\n",
       );
       this.process.exitCode = 1;
       return;
     }
-    await installSkill(state);
-    this.process.stdout.write(`boom: installed skill → ${state.file}\n`);
+    await installSkill({ file, doc });
+    this.process.stdout.write(`boom: installed skill → ${file}\n`);
   },
 });

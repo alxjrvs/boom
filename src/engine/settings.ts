@@ -13,7 +13,7 @@ import { fetchLatestVersion } from "../lib/release.ts";
 import { compareVersions, VERSION } from "../lib/version.ts";
 import { journalWrite } from "./journal.ts";
 import { runWorkItems, type WorkItem } from "./registry.ts";
-import { installSkill, skillState } from "./skill.ts";
+import { installSkill, skillState, skillStatusLabel } from "./skill.ts";
 import type { ReconcileCtx } from "./types.ts";
 
 // Any field configured? Gates the header so an absent or all-off `[boom]` table stays silent.
@@ -79,7 +79,7 @@ async function applySkill(ctx: ReconcileCtx): Promise<void> {
 
   if (ctx.verb === "verify") {
     if (state.status === "current") report.skip(`skill current (v${VERSION})`);
-    else report.warn(`skill ${state.status === "missing" ? "not installed" : "stale"} — sync refreshes it`);
+    else report.warn(`skill ${skillStatusLabel(state.status)} — sync refreshes it`);
     return;
   }
   // sync

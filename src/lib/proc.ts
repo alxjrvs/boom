@@ -218,7 +218,9 @@ export function redactSecrets(text: string, env: Env): string {
   let out = text;
   for (const [name, value] of Object.entries(env)) {
     if (!value || value.length < MIN_REDACT_LEN || !SECRET_NAME_RE.test(name)) continue;
-    out = out.replaceAll(value, `«redacted:${name}»`);
+    // A function replacer: a string replacement is subject to `$&`/`$$` expansion, and this is
+    // the one path where re-inserting the match would put the secret back.
+    out = out.replaceAll(value, () => `«redacted:${name}»`);
   }
   return out;
 }

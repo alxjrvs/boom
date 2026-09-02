@@ -41,6 +41,11 @@ export interface SkillState {
   readonly status: "current" | "stale" | "missing";
 }
 
+// The one human wording for a status, so `boom doctor` and `[boom] skill_on_sync` cannot drift.
+export function skillStatusLabel(status: SkillState["status"]): string {
+  return status === "missing" ? "not installed" : status;
+}
+
 export async function skillState(env: Env): Promise<SkillState | undefined> {
   const file = skillInstallPath(env);
   if (!file) return undefined;
@@ -49,11 +54,12 @@ export async function skillState(env: Env): Promise<SkillState | undefined> {
   return { file, doc, status: (await Bun.file(file).text()) === doc ? "current" : "stale" };
 }
 
-// Write the rendered doc into place. `Bun.write` creates the parent directory itself; a parent
-// that exists as a regular file makes it throw, which is the failure the journaling caller
-// (engine/settings.ts) deliberately records its undo ahead of.
-export async function installSkill(state: SkillState): Promise<void> {
-  await Bun.write(state.file, state.doc);
+// Write the rendered doc into place. Takes only the file + doc, so an unconditional install
+// (`boom skill --install`) need not read the existing copy first. `Bun.write` creates the parent
+// directory itself; a parent that exists as a regular file makes it throw, which is the failure
+// the journaling caller (engine/settings.ts) deliberately records its undo ahead of.
+export async function installSkill(target: Pick<SkillState, "file" | "doc">): Promise<void> {
+  await Bun.write(target.file, target.doc);
 }
 
 export function skillDoc(version: string): string {
