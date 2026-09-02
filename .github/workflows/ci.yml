@@ -115,6 +115,20 @@ jobs:
       - name: Cross-compile release matrix
         run: bun run build:all
 
+  action-smoke:
+    # The shipped GitHub Action example, end to end, against the LIVE latest release — the one
+    # place install.sh (download, SHA256SUMS verification, PATH) and the composite action are
+    # exercised at all. Deliberately NOT in ci-gate's `needs`: it depends on a public download,
+    # and a GitHub outage must not block a merge. A red here is a broken installer or action,
+    # visible on every PR. BOOM_CONFIG points the gate at the example config, since this repo's
+    # root is not a config repo.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./examples/github-action
+        env:
+          BOOM_CONFIG: examples/dotfiles
+
   ci-gate:
     # The single required check. Branch protection points here and nowhere else:
     # requiring each job individually strands a required check in "pending" the

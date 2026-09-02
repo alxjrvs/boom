@@ -5,7 +5,7 @@
 machine to a declared state — dotfiles, packages, and tools from one
 `boomfile.toml`, with drift detection — and a journal that preserves whatever it displaces.
 Named for Kirby's **Boom Tube** — an instant conduit between worlds —
-it opens a portal to your machine's ideal state, and to your code.
+it opens a portal to your machine's ideal state.
 
 It began as a bash prototype (extracted from `alxjrvs/dotFiles`) and was rewritten
 to TypeScript; this document is the design of record for that engine.
