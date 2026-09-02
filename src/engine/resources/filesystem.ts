@@ -13,10 +13,13 @@ import {
   GLOB_MAGIC,
   isGlobPattern,
   linkTarget,
+  modeBits,
+  modeOf,
   pathExists,
 } from "../../lib/fs.ts";
 import { journalWrite, removeOwned } from "../journal.ts";
 import type { LinkMode, ReconcileCtx } from "../types.ts";
+import { enforceMode, verifyMode } from "./mode.ts";
 
 // A resolved src→dst pair. `srcRel` (the repo-relative path) is carried only for legible
 // messages — the abs `src` is what the filesystem calls use.
@@ -191,7 +194,7 @@ async function linkOne(entry: File, place: Placement, ctx: ReconcileCtx): Promis
       // a file boom doesn't own.
       if (entry.mode && !ctx.dryRun && (await linkTarget(dst)) === src) {
         try {
-          await chmod(dst, Number.parseInt(entry.mode, 8));
+          await chmod(dst, modeBits(entry.mode));
         } catch {
           // best-effort: a mode the target's filesystem refuses is not a broken link
         }
@@ -206,9 +209,7 @@ async function linkOne(entry: File, place: Placement, ctx: ReconcileCtx): Promis
         if (!(await pathExists(src))) {
           report.fail(`${disp} → ${srcRel} (dangling — source missing)`);
         } else if (entry.mode) {
-          const perms = (await stat(dst)).mode & 0o777;
-          if (perms === Number.parseInt(entry.mode, 8)) report.skip(`${disp} (mode ${entry.mode})`);
-          else report.warn(`${disp} mode ${perms.toString(8)}, expected ${entry.mode}`);
+          await verifyMode(dst, disp, modeBits(entry.mode), ctx, `${disp} (mode ${entry.mode})`);
         } else {
           report.skip(disp);
         }
@@ -247,9 +248,9 @@ async function copyOne(entry: File, place: Placement, ctx: ReconcileCtx): Promis
   };
 
   // Desired dst mode: explicit, else preserve the *source's* mode — copyFile/Bun.write don't,
-  // so an unqualified copy used to land as 0o755 (executable). Predictable beats surprising.
+  // so an unqualified copy would land as 0o755 (executable). Predictable beats surprising.
   const wantMode = async (): Promise<number> =>
-    entry.mode ? Number.parseInt(entry.mode, 8) : (await stat(src)).mode & 0o777;
+    entry.mode ? modeBits(entry.mode) : ((await modeOf(src)) ?? 0o644);
 
   switch (ctx.verb) {
     case "sync": {
@@ -262,21 +263,9 @@ async function copyOne(entry: File, place: Placement, ctx: ReconcileCtx): Promis
       // verb contract (verify already calls this state "copy current") and churns a fresh
       // retained backup of an unchanged file each sync.
       if (await current()) {
-        // Content is current — but the mode still has to be enforced, or a copy whose
-        // permissions drifted looser is never repaired: this gate returns before the chmod
-        // below, so `--fix` is a no-op and `verify` (which calls the same `current()`) is
-        // blind. A copied `~/.ssh/config` left 0777 stays 0777 forever. Re-chmod only —
+        // Content is current — the mode still has to be enforced (see mode.ts); re-chmod only,
         // no rewrite, no journal churn, no fresh backup.
-        const want = await wantMode();
-        if (((await stat(dst)).mode & 0o777) !== want) {
-          if (ctx.dryRun) {
-            report.plan(`${disp} mode would be set to 0${want.toString(8)}`);
-            return;
-          }
-          await chmod(dst, want);
-          report.ok(`${disp} mode set to 0${want.toString(8)}`);
-          return;
-        }
+        if (await enforceMode(dst, disp, await wantMode(), ctx)) return;
         report.skip(`${disp} already up to date`);
         return;
       }
@@ -303,12 +292,8 @@ async function copyOne(entry: File, place: Placement, ctx: ReconcileCtx): Promis
         report.warn(`${disp} copy missing/stale`);
         return;
       }
-      // Content current — check mode too, so verify reports the drift sync now repairs.
-      // `link`'s verify has always done this (see the mode branch above); copy was the outlier.
-      const want = await wantMode();
-      const perms = (await stat(dst)).mode & 0o777;
-      if (perms !== want) report.warn(`${disp} mode ${perms.toString(8)}, expected ${want.toString(8)}`);
-      else report.skip(`${disp} (copy current)`);
+      // Content current — check the mode too, so verify reports the drift sync repairs.
+      await verifyMode(dst, disp, await wantMode(), ctx, `${disp} (copy current)`);
       return;
     }
     case "uninstall": {

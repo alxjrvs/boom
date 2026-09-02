@@ -9,12 +9,13 @@
 //     with an unresolved placeholder is worse than one that loudly refuses to render;
 //   • a literal shell `${FOO:-bar}` (anything that isn't a bare identifier) is left verbatim,
 //     so real shell config survives.
-import { chmod, stat } from "node:fs/promises";
+import { chmod } from "node:fs/promises";
 import { join } from "node:path";
 import type { Tmpl } from "../../config/schema.ts";
-import { displayPath, expandTilde, pathExists } from "../../lib/fs.ts";
+import { displayPath, expandTilde, modeBits, pathExists } from "../../lib/fs.ts";
 import { journalWrite, removeOwned } from "../journal.ts";
 import type { ReconcileCtx } from "../types.ts";
+import { enforceMode, verifyMode } from "./mode.ts";
 
 // The machine vocabulary: `${env:VAR}` / `${host}` / `${os}`. Unknown `${env:…}` resolves to
 // empty; unmatched `${…}` is left verbatim (so a literal shell `${...}` in a config survives).
@@ -54,7 +55,7 @@ export async function reconcileTmpl(entry: Tmpl, ctx: ReconcileCtx): Promise<voi
   ctx.declared.push({ kind: "copy", dst, src });
   const disp = displayPath(dst, ctx.env);
   const { report } = ctx;
-  const wantMode = entry.mode ? Number.parseInt(entry.mode, 8) : undefined;
+  const wantMode = entry.mode ? modeBits(entry.mode) : undefined;
 
   // The rendered content, or undefined on any render failure (missing template, unknown var) —
   // `report` is only called when `announce` is set, so the quiet uninstall change-gate can
@@ -83,19 +84,8 @@ export async function reconcileTmpl(entry: Tmpl, ctx: ReconcileCtx): Promise<voi
       // Change-gate: an already-rendered dst is skipped (no rewrite, no journal churn, no fresh
       // backup of an unchanged file), mirroring copy.
       if ((await pathExists(dst)) && (await Bun.file(dst).text()) === content) {
-        // Content is current — but still enforce the declared mode. A rendered file whose
-        // permissions drifted looser (a prior umask, a manual chmod) would otherwise never be
-        // repaired: the change-gate returns before the chmod below, so `--fix` is a no-op and
-        // `verify` is blind. Re-chmod without rewriting.
-        if (wantMode !== undefined && ((await stat(dst)).mode & 0o777) !== wantMode) {
-          if (ctx.dryRun) {
-            report.plan(`${disp} mode would be set to 0${wantMode.toString(8)}`);
-            return;
-          }
-          await chmod(dst, wantMode);
-          report.ok(`${disp} mode set to 0${wantMode.toString(8)}`);
-          return;
-        }
+        // Content is current — the declared mode still has to be enforced (see mode.ts).
+        if (wantMode !== undefined && (await enforceMode(dst, disp, wantMode, ctx))) return;
         report.skip(`${disp} already up to date`);
         return;
       }
@@ -126,14 +116,8 @@ export async function reconcileTmpl(entry: Tmpl, ctx: ReconcileCtx): Promise<voi
         return;
       }
       // Content current — check the declared mode too, so verify can see the drift sync repairs.
-      if (wantMode !== undefined) {
-        const perms = (await stat(dst)).mode & 0o777;
-        if (perms !== wantMode) {
-          report.warn(`${disp} mode ${perms.toString(8)}, expected ${wantMode.toString(8)}`);
-          return;
-        }
-      }
-      report.skip(`${disp} (template current)`);
+      if (wantMode !== undefined) await verifyMode(dst, disp, wantMode, ctx, `${disp} (template current)`);
+      else report.skip(`${disp} (template current)`);
       return;
     }
     case "uninstall": {

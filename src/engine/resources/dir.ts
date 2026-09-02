@@ -5,26 +5,20 @@
 // *if empty*.
 import { chmod, mkdir, readdir, rmdir, stat } from "node:fs/promises";
 import type { Dir } from "../../config/schema.ts";
-import { displayPath, expandTilde, pathExists } from "../../lib/fs.ts";
+import { displayPath, expandTilde, fmtMode, modeBits, modeOf, pathExists } from "../../lib/fs.ts";
 import type { ReconcileCtx } from "../types.ts";
-
-// Current mode bits (octal string) of a path, or undefined if unreadable.
-async function modeOf(path: string): Promise<string | undefined> {
-  const st = await stat(path).catch(() => undefined);
-  return st ? (st.mode & 0o777).toString(8) : undefined;
-}
 
 export async function reconcileDir(entry: Dir, ctx: ReconcileCtx): Promise<void> {
   const path = expandTilde(entry.path, ctx.env);
   const disp = displayPath(path, ctx.env);
   const { report } = ctx;
-  const wantMode = entry.mode ? Number.parseInt(entry.mode, 8) : undefined;
+  const wantMode = entry.mode ? modeBits(entry.mode) : undefined;
 
   // Returns true iff it actually chmoded (corrected mode drift) — so the caller can report a
   // corrected mode as a change (ok, shown even in quiet) and an already-correct dir as a no-op.
   const applyMode = async (): Promise<boolean> => {
     if (wantMode === undefined) return false;
-    if ((await modeOf(path)) === entry.mode) return false;
+    if ((await modeOf(path)) === wantMode) return false;
     await chmod(path, wantMode);
     return true;
   };
@@ -34,7 +28,7 @@ export async function reconcileDir(entry: Dir, ctx: ReconcileCtx): Promise<void>
       const st = await stat(path).catch(() => undefined);
       if (st?.isDirectory()) {
         if (ctx.dryRun) {
-          if (entry.mode && (await modeOf(path)) !== entry.mode)
+          if (wantMode !== undefined && (await modeOf(path)) !== wantMode)
             report.plan(`${disp} would be chmod ${entry.mode}`);
           else report.skip(`${disp} already exists`);
           return;
@@ -82,8 +76,9 @@ export async function reconcileDir(entry: Dir, ctx: ReconcileCtx): Promise<void>
         report.fail(`${disp} exists but is not a directory`);
         return;
       }
-      if (entry.mode && (await modeOf(path)) !== entry.mode)
-        report.warn(`${disp} mode ${await modeOf(path)}, expected ${entry.mode}`);
+      const have = await modeOf(path);
+      if (wantMode !== undefined && have !== undefined && have !== wantMode)
+        report.warn(`${disp} mode ${fmtMode(have)}, expected ${entry.mode}`);
       else report.skip(entry.mode ? `${disp} (mode ${entry.mode})` : disp);
       return;
     }
