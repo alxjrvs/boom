@@ -28,7 +28,7 @@ const FileSchema = v.strictObject({
   // Retired, and kept *declared* so the failure can name the migration: dropping the key
   // outright leaves strictObject's generic "unknown key", which says the config is wrong but
   // not what to do about it. `v.never` rejects any present value (an absent key still parses
-  // through `v.optional`). Delete the key at 1.0, once the message has outlived its usefulness.
+  // through `v.optional`). The same pattern rejects every other retired key below.
   // A template literal with escaped `\${`: these are placeholder *spellings* for the reader, and
   // spelling them in a plain string trips noTemplateCurlyInString (which cannot tell prose from a
   // forgotten interpolation).
@@ -218,17 +218,14 @@ const SectionSchema = v.strictObject({
   osx_default: v.optional(v.array(OsxDefaultSchema)),
   launchd: v.optional(v.array(LaunchdSchema)),
   tmpl: v.optional(v.array(TmplSchema)),
-  // RETIRED at 0.37, and deliberately still accepted — the same call as `schedule` below, for
-  // the same reason. The `secret` resource rendered a vault value to a file at sync time. It is
-  // gone: writing a secret to disk is writing a secret somebody can read, boom's own reference
-  // consumer forbids it in its CLAUDE.md ("to *use* a secret, pass it: `op run --env-file=F --
-  // CMD`"), and after five releases and two consumers nothing had ever declared one.
-  //
-  // Parsed loosely and ignored, never `v.never`: a hard schema failure on a key that used to be
-  // valid turns an upgrade into an outage for anyone who did not read CHANGELOG.md#0370 first, and
-  // the replacement is a real edit rather than a rename. `reconcile` says once per run that the
-  // key is being skipped, so an ignored declaration is never silent. Delete at 1.0.
-  secret: v.optional(v.array(v.unknown())),
+  // The `secret` resource (removed 0.37) was accepted-and-ignored for two releases; it is now a
+  // named rejection, like `copy.expand`, so the error says what to do instead of "unknown key".
+  secret: v.optional(
+    v.never(
+      "the `secret` resource is retired — resolve at point of use (`op run --env-file=F -- CMD`) " +
+        `or render from a \`run\` step you own; retired keys are rejected at load — see CHANGELOG.md#0390`,
+    ),
+  ),
   run: v.optional(v.array(RunSchema)),
   absent: v.optional(v.array(AbsentSchema)),
   hook: v.optional(v.array(HookSchema)),
@@ -242,36 +239,23 @@ const BoomSettingsSchema = v.strictObject({
   // self-describing skill can never lag an upgrade of that binary.
   skill_on_sync: v.optional(v.boolean()),
   // After a sync: print a one-line notice when a newer boom release is available (cheap,
-  // non-fatal, offline-safe). Taking the upgrade is your package manager's job.
-  //
-  // `"auto"` is retired with the `boom upgrade` verb it called — see CHANGELOG.md#0360.
-  // Still ACCEPTED rather than rejected, so a boomfile carrying it keeps loading; it now
-  // behaves exactly like `"check"`, and `settings.ts` says so once per sync.
-  upgrade_on_sync: v.optional(v.picklist(["check", "auto"])),
-  // RETIRED, and deliberately still accepted — the same call as `sudo_askpass` below, for
-  // the same reason. boom used to generate and reap `com.boomtube.*` launchd timers from this
-  // array. The machinery is gone (engine/settings.ts, and the renderer in lib/launchd.ts).
-  //
-  // NOT `v.never`, and not deleted: this is a `strictObject`, so an unknown key fails the whole
-  // boomfile. Stranding a machine over a key that used to work — and whose replacement is
-  // "write a plist and link it with the `launchd` resource", which is not a one-line edit — is
-  // a worse outcome than ignoring it. Parsed loosely and ignored. Delete at 1.0.
-  //
-  // Loose rather than the old shape on purpose: nothing validates a value nothing reads, and
-  // keeping the strict entry schema would mean maintaining a spec for a dead feature.
-  schedule: v.optional(v.array(v.unknown())),
-  // RETIRED, and deliberately still accepted. The vault-backed askpass helper this named was
-  // removed: it made `boom askpass <ref>` a real command that printed a resolved secret to
-  // stdout, which is a second way to read a vault value under a program name a machine's own
-  // controls are unlikely to have denied.
-  //
-  // Unlike `copy.expand` above, this is NOT `v.never`. That pattern is right when the migration
-  // is another config key — the error names it and the user edits one line. Here the migration
-  // is an ENVIRONMENT action (export SUDO_ASKPASS yourself), which no config edit expresses, so
-  // failing the whole boomfile would strand a machine over a key whose replacement isn't in the
-  // file at all. The value is parsed and ignored; reconcile warns when it is set. Delete the key
-  // at 1.0, once the warning has outlived its usefulness.
-  sudo_askpass: v.optional(v.string()),
+  // non-fatal, offline-safe). Taking the upgrade is your package manager's job — which is why
+  // `"check"` is the only value: `"auto"` went with the `boom upgrade` verb (CHANGELOG.md#0360).
+  upgrade_on_sync: v.optional(v.picklist(["check"])),
+  // Two more retired keys, rejected by name rather than as "unknown key". `schedule` generated
+  // launchd timers (gone in 0.31: link a plist with the `launchd` resource); `sudo_askpass`
+  // named a vault-backed askpass helper (gone in 0.30: export SUDO_ASKPASS yourself — it is
+  // sudo's variable, and boom honours an inherited one).
+  schedule: v.optional(
+    v.never(
+      `\`[boom] schedule\` is retired — link a plist with the \`launchd\` resource; retired keys are rejected at load — see CHANGELOG.md#0390`,
+    ),
+  ),
+  sudo_askpass: v.optional(
+    v.never(
+      `\`[boom] sudo_askpass\` is retired — export SUDO_ASKPASS yourself; retired keys are rejected at load — see CHANGELOG.md#0390`,
+    ),
+  ),
   // When a scheduled `verify` finds drift, raise a desktop notification (macOS osascript /
   // Linux notify-send) instead of letting the 0/2/1 exit code die in a timer log. Opt-in;
   // a no-op on a machine with no notifier.

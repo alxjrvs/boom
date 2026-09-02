@@ -68,7 +68,6 @@ boom source --resume    # continue an interrupted sync (skips completed steps)
 
 boom verify             # check for drift — exit 0 ok / 2 warn / 1 fail
 boom verify --json      # …as a structured drift report
-boom verify --ci        # non-interactive config gate for CI (schema-check only; exit 0/1)
 
 boom uninstall          # tear down what boom installed — prompts on a TTY, refuses on a pipe
 boom uninstall --yes    # …consent for scripts and CI (`--json` implies it)
@@ -82,7 +81,7 @@ tool's own verb — `brew upgrade --formula`, `mise upgrade` — with the blast 
 defines. `boom source --update` did this and was removed in 0.38
 ([changelog](CHANGELOG.md#0380)).
 
-A shippable GitHub Action wrapping `verify --ci` lives in
+A shippable GitHub Action wrapping `doctor --config` (the schema-only CI gate) lives in
 [`examples/github-action/`](examples/github-action/) so a config repo can gate its own PRs.
 
 `verify` reports whether the machine matches the boomfile. It does **not** audit package

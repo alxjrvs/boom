@@ -229,34 +229,6 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
       return finish();
     }
 
-    // `[boom].sudo_askpass` is retired but still parses, so a boomfile carrying it keeps
-    // loading rather than failing over a key whose replacement is an environment variable. Say
-    // so on a mutating run, which is the only kind that could have escalated: silently doing
-    // nothing here would turn a configured machine's unattended sync into an invisible hang at a
-    // sudo prompt, which is the exact failure the key existed to prevent.
-    if (composition.boom?.sudo_askpass && mutating) {
-      report.warn(
-        "[boom].sudo_askpass is retired and ignored — boom no longer resolves a sudo password " +
-          "from the vault. Export SUDO_ASKPASS yourself if this run must escalate unattended; " +
-          "boom still honours an inherited one. Remove the key to silence this.",
-      );
-    }
-
-    // `secret` is retired but still parses, for the same reason and with the same shape. Warned
-    // on EVERY verb, not just a mutating one: a declaration that no longer renders means the
-    // file at `dst` is now whatever it was before boom stopped touching it, and a `verify` that
-    // reported "all clear" while silently ignoring a declared secret would be the more dangerous
-    // half. Counted rather than listed — a `dst` is a path, and paths to secret material are
-    // exactly what should not be echoed into a transcript.
-    const retiredSecrets = composition.sections.reduce((n, sec) => n + (sec.secret?.length ?? 0), 0);
-    if (retiredSecrets > 0) {
-      report.warn(
-        `${retiredSecrets} \`secret\` declaration(s) are retired and ignored — boom no longer ` +
-          "renders a vault value to a file. Resolve it at point of use instead (`op run " +
-          "--env-file=F -- CMD`), or render it with a `run` step you own. See CHANGELOG.md#0370.",
-      );
-    }
-
     const rctx: ReconcileCtx = {
       repo,
       verb,

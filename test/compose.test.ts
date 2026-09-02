@@ -69,23 +69,6 @@ test("compose: an overlay's [boom] merges per key over the base's", async () => 
   expect(c.boom?.upgrade_on_sync).toBe("check");
 });
 
-test("compose: an overlay's [boom].schedule REPLACES the base's array", async () => {
-  const repo = await repoWith({
-    "boomfile.toml":
-      '[boom]\nschedule = [{ cmd = "verify", every = "15m" }, { cmd = "code fetch", every = "1h" }]\n[[section]]\nname = "x"\n',
-    "boomfile.testhost.toml": '[boom]\nschedule = [{ cmd = "verify", every = "1h" }]\n',
-  });
-  const c = await compose(repo);
-  // A shallow last-wins merge on an array key is a replace, not an append — correct, surprising,
-  // and the reason SPEC.md says so out loud.
-  //
-  // `schedule` is RETIRED now, parsed loosely and ignored, which makes it a fine vehicle for the
-  // replace semantics and gives this case a second job: it proves a boomfile still carrying
-  // `schedule` parses, instead of failing the whole strictObject on an unknown key.
-  expect(c.boom?.schedule).toHaveLength(1);
-  expect(c.boom?.schedule?.[0]).toEqual({ cmd: "verify", every: "1h" });
-});
-
 test("compose: base and overlay sections are stamped with origin + source", async () => {
   const repo = await repoWith({
     "boomfile.toml": '[[section]]\nname = "strong"\n',

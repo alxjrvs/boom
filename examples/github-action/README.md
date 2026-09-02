@@ -1,7 +1,7 @@
 # boom verify — GitHub Action
 
 CI-gate your boom config repo (your dotfiles) on every pull request. This composite
-action installs `boom` and runs [`boom verify --ci`](../../README.md), which parse- and
+action installs `boom` and runs [`boom doctor --config`](../../README.md), which parse- and
 schema-checks your `boomfile.toml` and every overlay non-interactively — exit `0` when the
 config is valid, `1` when it isn't. It's a **config gate**, not a machine check: no
 reconcile, no machine walk, safe to run on a stock runner.

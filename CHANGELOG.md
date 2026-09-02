@@ -12,6 +12,38 @@ there.
 
 ---
 
+## 0.39.0
+
+Two removals. Both fail loudly rather than being accepted and ignored.
+
+### Removed: `boom verify --ci`
+
+The flag abandoned the verify verb and ran the doctor engine's config check, a command that
+exists on its own with the same exit contract (0 valid / 1 invalid) and the same output.
+
+| Removed | Native equivalent |
+| --- | --- |
+| `boom verify --ci` | `boom doctor --config` |
+
+The shipped GitHub Action example (`examples/github-action`) runs `boom doctor --config`.
+
+### Retired config keys now fail to load
+
+`secret`, `[boom] schedule`, `[boom] sudo_askpass` and `upgrade_on_sync = "auto"` were accepted
+and ignored (with a warning) after their features were removed. A boomfile carrying one now fails
+at load, and the error names this entry and the replacement:
+
+| Key | Delete it and… |
+| --- | --- |
+| `secret = […]` | resolve at point of use (`op run --env-file=F -- CMD`), or render from a `run` step |
+| `[boom] schedule` | link a plist with the `launchd` resource |
+| `[boom] sudo_askpass` | export `SUDO_ASKPASS` yourself; boom honours an inherited one |
+| `upgrade_on_sync = "auto"` | use `"check"`; upgrading is your package manager's job |
+
+`copy.expand` has failed at load since 0.23 and is unchanged.
+
+---
+
 ## 0.38.0
 
 One removal, and it is a flag rather than config.

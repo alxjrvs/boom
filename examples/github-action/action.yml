@@ -2,7 +2,7 @@
 #
 # A composite action a dotfiles repo consumes with:
 #   uses: alxjrvs/boom/examples/github-action@main
-# It installs boom and runs `boom verify --ci` in the checked-out repo, which
+# It installs boom and runs `boom doctor --config` in the checked-out repo, which
 # parse- and schema-checks boomfile.toml + every overlay non-interactively and
 # exits 0 (valid) / 1 (invalid) — no machine walk, so it's safe on a runner.
 #
@@ -22,4 +22,4 @@ runs:
         echo "$HOME/.local/bin" >> "$GITHUB_PATH"
     - name: Validate the config
       shell: bash
-      run: boom verify --ci
+      run: boom doctor --config

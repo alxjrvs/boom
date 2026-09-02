@@ -185,24 +185,6 @@ test("[boom] skill_on_sync: sync installs the skill; verify reports it current",
   expect(sb.out()).toContain("skill current"); // verbose: "current" is a quiet skip by default
 });
 
-// `schedule` is retired: parsed, ignored, no longer generating launchd timers. Two things have
-// to hold, and neither is the absence of a test — a deleted case would assert nothing.
-//
-//   1. A boomfile still carrying it PARSES. BoomSettingsSchema is a strictObject, so the only
-//      alternative to accepting the key is failing the entire config on it.
-//   2. It DOES NOTHING. No timer is planned, and with no other field set the self-wiring header
-//      does not appear at all.
-test("[boom] schedule: a retired key parses and is inert", async () => {
-  const sb = await sandbox(
-    `[boom]\nschedule = [{ cmd = "verify", every = "15m" }]\n\n[[section]]\nname = "s"\n`,
-    { BOOM_OS: "darwin" },
-  );
-  expect(await reconcile("sync", sb.ctx, { dryRun: true })).toBe(0);
-  expect(sb.out()).not.toContain("schedule");
-  expect(sb.out()).not.toContain("timer");
-  expect(sb.out()).not.toContain("self-wiring");
-});
-
 test("[boom] an absent table changes nothing (no self-wiring header)", async () => {
   const sb = await sandbox(`[[section]]\nname = "s"\n`);
   expect(await reconcile("sync", sb.ctx, {})).toBe(0);

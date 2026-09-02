@@ -196,11 +196,9 @@ test("no SUDO_PROMPT and no relay when a formula-only Brewfile can't escalate", 
   expect(sb.out()).not.toContain("Pouring mise"); // nothing can prompt → nothing to narrate
 });
 
-// boom stopped installing an askpass shim of its own (`[boom].sudo_askpass` was deleted — it was
-// a second way to print a vault secret to stdout, for a feature nobody had configured). But
-// SUDO_ASKPASS is *sudo's* variable, not boom's, and a user can export it: when they have, nothing
-// will prompt, so there is still no prompt to label and no reason to relay Homebrew's headers.
-// The behaviour is unchanged; only where the variable comes from is.
+// boom installs no askpass shim of its own, but SUDO_ASKPASS is *sudo's* variable and a user can
+// export it: when they have, nothing will prompt, so there is no prompt to label and no reason
+// to relay Homebrew's headers.
 test("an inherited SUDO_ASKPASS means no prompt to label and no relay", async () => {
   const root = await base();
   const log = join(root, "prompt");
@@ -213,43 +211,4 @@ test("an inherited SUDO_ASKPASS means no prompt to label and no relay", async ()
   expect(await reconcile("sync", sb.ctx, {})).toBe(0);
   expect((await readFile(log, "utf8")).trim()).toBe("");
   expect(sb.out()).not.toContain("Upgrading cask tuple");
-});
-
-// ------------------------------------------------------------------ the retired key
-//
-// `[boom].sudo_askpass` was removed as a feature but is still ACCEPTED by the schema. These two
-// cases are the whole non-breaking claim: an existing boomfile carrying the key must still load
-// and still sync, and the operator must be told the key does nothing — because silently ignoring
-// it would turn a configured machine's unattended sync into an invisible hang at a sudo prompt,
-// which is the exact failure the key existed to prevent.
-
-test("a boomfile carrying the retired sudo_askpass key still loads and syncs", async () => {
-  const sb = await brewSandbox(
-    `[boom]\nsudo_askpass = "op://Private/Mac/password"\n\n${PKG_SECTION}`,
-    'brew "mise"\n',
-    'echo "==> Pouring mise"\nexit 0\n',
-  );
-  // 0, not a config-validation failure: the key parses.
-  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
-});
-
-test("…and says so, rather than ignoring it in silence", async () => {
-  const sb = await brewSandbox(
-    `[boom]\nsudo_askpass = "op://Private/Mac/password"\n\n${PKG_SECTION}`,
-    'brew "mise"\n',
-    'echo "==> Pouring mise"\nexit 0\n',
-  );
-  await reconcile("sync", sb.ctx, {});
-  expect(sb.out()).toContain("sudo_askpass is retired and ignored");
-  expect(sb.out()).toContain("SUDO_ASKPASS");
-});
-
-test("a verify run stays quiet about it — nothing a verify spawns escalates", async () => {
-  const sb = await brewSandbox(
-    `[boom]\nsudo_askpass = "op://Private/Mac/password"\n\n${PKG_SECTION}`,
-    'brew "mise"\n',
-    'echo "==> Pouring mise"\nexit 0\n',
-  );
-  await reconcile("verify", sb.ctx, {});
-  expect(sb.out()).not.toContain("sudo_askpass is retired");
 });
