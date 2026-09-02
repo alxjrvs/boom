@@ -47,11 +47,13 @@ export async function reconcileLaunchd(entry: Launchd, ctx: ReconcileCtx): Promi
   }
 
   const ours = async (): Promise<boolean> => (await linkTarget(dst)) === src;
+  // Declared on every verb, like the file resources — after the darwin gate above, which is the
+  // one place this kind legitimately declines ownership (see compose.ts's declaresOwnership).
+  ctx.declared.push({ kind: "link", dst, src });
 
   switch (ctx.verb) {
     case "sync": {
       await applyLink(src, dst, disp, ctx.linkMode, ctx);
-      ctx.declared.push({ kind: "link", dst, src });
       if (ctx.dryRun || !(await ours())) return; // applyLink already planned/skipped
       // A (re)load runs every sync to keep the agent live, so "loaded" is a steady-state
       // confirmation, not a change — skip-level (quiet-suppressed); a failure still surfaces.
@@ -60,7 +62,6 @@ export async function reconcileLaunchd(entry: Launchd, ctx: ReconcileCtx): Promi
       return;
     }
     case "verify": {
-      ctx.declared.push({ kind: "link", dst, src });
       if (!(await ours())) {
         report.fail((await pathExists(dst)) ? `${disp} exists but is not our plist` : `${disp} not linked`);
         return;
@@ -90,7 +91,7 @@ export async function reconcileLaunchd(entry: Launchd, ctx: ReconcileCtx): Promi
     case "uninstall": {
       if (!(await ours())) return;
       if (ctx.dryRun) {
-        report.note(`would unload + remove ${disp}`);
+        report.plan(`would unload + remove ${disp}`);
         return;
       }
       unloadAgent(dst, ctx.env);

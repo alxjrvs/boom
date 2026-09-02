@@ -15,7 +15,7 @@ import {
   linkTarget,
   pathExists,
 } from "../../lib/fs.ts";
-import { journalRemove, journalWrite } from "../journal.ts";
+import { journalWrite, removeOwned } from "../journal.ts";
 import type { LinkMode, ReconcileCtx } from "../types.ts";
 
 // A resolved src→dst pair. `srcRel` (the repo-relative path) is carried only for legible
@@ -223,11 +223,7 @@ async function linkOne(entry: File, place: Placement, ctx: ReconcileCtx): Promis
     }
     case "uninstall": {
       if ((await linkTarget(dst)) !== src) return;
-      if (ctx.dryRun) report.note(`would remove ${disp}`);
-      else {
-        await journalRemove("link-rm", dst, ctx);
-        report.ok(`${disp} removed`);
-      }
+      await removeOwned("link-rm", dst, disp, ctx);
       return;
     }
   }
@@ -318,11 +314,7 @@ async function copyOne(entry: File, place: Placement, ctx: ReconcileCtx): Promis
     case "uninstall": {
       // Only remove a copy we still own — one that still matches what boom would write.
       if (!(await current())) return;
-      if (ctx.dryRun) report.note(`would remove ${disp}`);
-      else {
-        await journalRemove("copy-rm", dst, ctx);
-        report.ok(`${disp} removed`);
-      }
+      await removeOwned("copy-rm", dst, disp, ctx);
       return;
     }
   }

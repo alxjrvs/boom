@@ -69,7 +69,7 @@ async function reapOrphans(ctx: ReconcileCtx, prior: readonly ManifestEntry[]): 
   const reap = async (dst: string, disp: string, why: string): Promise<void> => {
     head();
     if (ctx.verb === "verify") ctx.report.warn(`${disp} ${why} — boom source reaps it`);
-    else if (ctx.dryRun) ctx.report.note(`would reap ${disp}`);
+    else if (ctx.dryRun) ctx.report.plan(`would reap ${disp}`);
     else {
       // Same transaction as every other mutation here: journaled with a backup, so a reaped
       // file lands in the run's backup tree with a row naming it, instead of the deletion

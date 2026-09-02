@@ -74,3 +74,15 @@ test("runShellAsync drains both pipes without deadlocking on a chatty child", as
   expect((r.stdout?.length ?? 0) > 64 * 1024).toBe(true);
   expect((r.stderr?.length ?? 0) > 64 * 1024).toBe(true);
 });
+
+// The deadline is Bun.spawn's own `timeout`; a child it kills reports `timedOut` and never a
+// zero code, and the caller is back well before the child would have finished on its own.
+// `exec`, so the sleeper IS the child sh: the deadline kills the process boom spawned, and a
+// grandchild that inherited the stderr pipe would keep the drain open until it exited on its own.
+test("runShellAsync reports a child killed by the deadline as timedOut", async () => {
+  const t0 = performance.now();
+  const r = await runShellAsync("exec sleep 5", { PATH: process.env.PATH }, { silent: true, timeoutMs: 150 });
+  expect(r.timedOut).toBe(true);
+  expect(r.code).not.toBe(0);
+  expect(performance.now() - t0).toBeLessThan(4000);
+});

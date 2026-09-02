@@ -104,13 +104,13 @@ dst = "~/rendered.txt"
 `;
 
 // The structural guard behind this whole invariant. `intent(op, dst, plan)` takes the undo token
-// the mutation is ABOUT to become, and BOTH orphan readers (readRun, listRuns) filter
-// `AND undo IS NOT NULL` — so an intent row without one is invisible to `--resume` and counts
-// as 0 in a run listing, leaving a hole for any crash between the displace and the `done`.
+// the mutation is ABOUT to become, and the orphan count (listRuns) filters `AND undo IS NOT
+// NULL` — so an intent row without one counts as 0 in a run listing, leaving a hole for any
+// crash between the displace and the `done`.
 //
 // Asserted over the whole ops table rather than per-site on purpose: this fails for a NEW writer
 // that inlines intent→displace→done and omits the token.
-test("every intent row names its own undo (readRun/--resume cannot see one that does not)", async () => {
+test("every intent row names its own undo (listRuns cannot count one that does not)", async () => {
   const sb = await sandbox(WRITERS);
   await writeFile(join(sb.repo, "src.txt"), "hello");
   await writeFile(join(sb.repo, "t.tmpl"), "value={{ host }}\n");

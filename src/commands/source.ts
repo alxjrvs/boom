@@ -9,7 +9,7 @@ import { buildCommand, buildRouteMap } from "@stricli/core";
 import { linkRemoteConfigRepo } from "../config/remote.ts";
 import type { BoomContext } from "../context.ts";
 import { reconcile } from "../engine/reconcile.ts";
-import { str } from "./flags.ts";
+import { str, verboseFlag } from "./flags.ts";
 import { syncCommand } from "./reconcile.ts";
 
 // `boom source set <owner/repo>` — the fresh-machine bootstrap
@@ -25,11 +25,7 @@ const setCommand = buildCommand<{ sync?: boolean; verbose?: boolean }, [string],
         optional: true,
         brief: "Reconcile immediately after cloning (default; --no-sync records only)",
       },
-      verbose: {
-        kind: "boolean",
-        optional: true,
-        brief: "Show every step of the post-clone sync (default: only changes + attention)",
-      },
+      verbose: verboseFlag,
     },
     positional: {
       kind: "tuple",

@@ -96,13 +96,18 @@ export async function reconcileDir(entry: Dir, ctx: ReconcileCtx): Promise<void>
         report.note(`${disp} not removed — not empty`);
         return;
       }
-      if (ctx.dryRun) report.note(`would remove ${disp}`);
-      else {
-        // rmdir (not rm): only removes an *empty* directory — a second safety net beyond the
-        // emptiness check above, so a race that fills the dir fails loudly instead of nuking it.
-        await rmdir(path);
-        report.ok(`${disp} removed`);
+      if (ctx.dryRun) {
+        report.plan(`would remove ${disp}`);
+        return;
       }
+      // Journaled like every other removal, before the rmdir. The undo is a bare `mkdir`: the
+      // directory is empty by the check above, so putting it back needs no content.
+      ctx.journal?.intent("rmdir", path, { kind: "mkdir" });
+      ctx.journal?.done("rmdir", path, { kind: "mkdir" });
+      // rmdir (not rm): only removes an *empty* directory — a second safety net beyond the
+      // emptiness check above, so a race that fills the dir fails loudly instead of nuking it.
+      await rmdir(path);
+      report.ok(`${disp} removed`);
       return;
     }
   }
