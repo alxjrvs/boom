@@ -3,16 +3,16 @@
 // bats behavioral oracle (verbs/exit-codes/--only/copy-vs-link/hook).
 import { expect, test } from "bun:test";
 import { realpathSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { readRun } from "../src/engine/journal.ts";
 import { reconcile } from "../src/engine/reconcile.ts";
 import { readManifest, writeManifest } from "../src/engine/state.ts";
 import { linkTarget, pathExists } from "../src/lib/fs.ts";
-import { makeSandbox, type Sandbox } from "./support/sandbox.ts";
+import { makeSandbox, octalMode, type Sandbox } from "./support/sandbox.ts";
+import { tmp } from "./support/tmp.ts";
 
-const sandbox = (boomfile: string): Promise<Sandbox> => makeSandbox(boomfile, { prefix: "boom-eng-" });
+const sandbox = (boomfile: string): Promise<Sandbox> => makeSandbox(boomfile, { prefix: "eng" });
 
 test("link: sync → verify ok → uninstall removes", async () => {
   const sb = await sandbox(`[[section]]\nname = "Shell"\nlink = [{ src = ".zshrc", dst = "~/.zshrc" }]\n`);
@@ -150,7 +150,7 @@ test("run step executes in the repo, independent of the invocation cwd", async (
   // The step records its own working dir. sync must run it from the dotfiles repo
   // (so e.g. `lefthook install` targets the repo's `.git`), NOT from process.cwd().
   const sb = await sandbox(`[[section]]\nname = "S"\nrun = [{ on = "sync", cmd = 'pwd > "$HOME/where"' }]\n`);
-  const elsewhere = await mkdtemp(join(tmpdir(), "boom-cwd-"));
+  const elsewhere = await tmp("cwd");
   const prev = process.cwd();
   process.chdir(elsewhere); // invoke from somewhere other than the repo
   try {
@@ -431,4 +431,22 @@ test("manifest: a duplicate dst collapses last-wins instead of throwing a raw SQ
   expect(rows).toHaveLength(1);
   expect(rows[0]?.kind).toBe("copy"); // the LAST entry is the one that survives
   expect(rows[0]?.src).toBe(join(sb.repo, "repo/zshrc"));
+});
+
+test("copy: mode drift on an unchanged file is seen by verify and repaired by sync", async () => {
+  // link's verify has always checked mode; copy compared content only, so a copied
+  // ~/.ssh/config left world-writable stayed that way and `--fix` could not repair it.
+  const sb = await sandbox(
+    `[[section]]\nname = "S"\ncopy = [{ src = "cfg", dst = "~/.cfg", mode = "600" }]\n`,
+  );
+  await sb.write("cfg", "k=v\n");
+  const dst = join(sb.home, ".cfg");
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  expect(await octalMode(dst)).toBe("600");
+
+  await chmod(dst, 0o777);
+  expect(await reconcile("verify", sb.ctx, {})).toBe(2);
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  expect(await octalMode(dst)).toBe("600");
+  expect(await reconcile("verify", sb.ctx, {})).toBe(0);
 });

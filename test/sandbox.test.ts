@@ -16,8 +16,12 @@ test("the sandbox redirects every path the engine could reach the real machine t
   expect(sb.repo.startsWith(sb.base)).toBe(true);
 
   // The one that drifted. A sandboxed HOME covers ~/.gitconfig but NOT /etc/gitconfig, so this
-  // is the half that has to be set explicitly — and the half that is easy to leave out.
+  // is the half that has to be set explicitly — and the half that is easy to leave out. The
+  // global config is pinned off too, and a commit identity supplied, so the engine's own git
+  // never depends on the developer's.
   expect(sb.env.GIT_CONFIG_NOSYSTEM).toBe("1");
+  expect(sb.env.GIT_CONFIG_GLOBAL).toBe("/dev/null");
+  expect(sb.env.GIT_COMMITTER_EMAIL).toBeDefined();
 
   // Deterministic output for byte-comparing assertions.
   expect(sb.env.NO_COLOR).toBe("1");

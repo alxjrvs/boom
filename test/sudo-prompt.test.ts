@@ -8,17 +8,12 @@
 //   • the tool's own progress output supplies the specific thing — Homebrew's "==> Upgrading cask
 //     tuple" — relayed as a live line so it sits directly above the prompt.
 import { expect, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { BoomContext } from "../src/context.ts";
 import { reconcile } from "../src/engine/reconcile.ts";
 import { runArgvAsync } from "../src/lib/proc.ts";
 import { Reporter } from "../src/lib/reporter.ts";
-
-async function base(): Promise<string> {
-  return mkdtemp(join(tmpdir(), "boom-sudoprompt-"));
-}
+import { makeSandbox, type Sandbox } from "./support/sandbox.ts";
 
 function sink() {
   const buf = { out: "" };
@@ -121,41 +116,18 @@ test("live() is suppressed for JSON (envelope stays clean) and verbose (tool alr
 
 // -------------------------------------------------------------- end-to-end through reconcile
 
+// The engine against a fake `brew` whose script the test chooses, so what it prints (and what
+// SUDO_PROMPT it sees) is the test's to decide.
 async function brewSandbox(
   boomfile: string,
   brewfile: string,
   brewScript: string,
   extraEnv: Record<string, string> = {},
-) {
-  const root = await base();
-  const home = join(root, "home");
-  const repo = join(root, "repo");
-  const bin = join(repo, ".fakebin");
-  await mkdir(home, { recursive: true });
-  await mkdir(bin, { recursive: true });
-  await writeFile(join(repo, "boomfile.toml"), boomfile);
-  await writeFile(join(repo, "Brewfile"), brewfile);
-  await writeFile(join(bin, "brew"), `#!/bin/sh\n${brewScript}`);
-  await chmod(join(bin, "brew"), 0o755);
-  const env: Record<string, string | undefined> = {
-    HOME: home,
-    XDG_STATE_HOME: join(root, "state"),
-    BOOM_CONFIG: repo,
-    NO_COLOR: "1",
-    GIT_CONFIG_NOSYSTEM: "1",
-    PATH: `${bin}:/usr/bin:/bin`,
-    ...extraEnv,
-  };
-  const buf = { out: "" };
-  const write = (s: string): void => {
-    buf.out += s;
-  };
-  const proc = { stdout: { write }, stderr: { write }, env, exitCode: 0 };
-  return {
-    repo,
-    ctx: { process: proc, env, cwd: repo } as unknown as BoomContext,
-    out: () => buf.out,
-  };
+): Promise<Sandbox> {
+  const sb = await makeSandbox(boomfile, { prefix: "sudoprompt", env: extraEnv });
+  await sb.write("Brewfile", brewfile);
+  await sb.fakeBin("brew", brewScript);
+  return sb;
 }
 
 const PKG_SECTION = `[[section]]\nname = "P"\npkg = [{ manager = "brew" }]\n`;
@@ -173,9 +145,13 @@ test("brew's own ==> headers are relayed, so the cask that escalates is named", 
 });
 
 test("SUDO_PROMPT names boom and the step, so a prompt is never anonymous", async () => {
-  const root = await base();
-  const log = join(root, "prompt");
-  const sb = await brewSandbox(PKG_SECTION, 'cask "tuple"\n', `echo "$SUDO_PROMPT" > ${log}\nexit 0\n`);
+  const sb = await brewSandbox(
+    PKG_SECTION,
+    'cask "tuple"\n',
+    'echo "$SUDO_PROMPT" > "$PROMPT_LOG"\nexit 0\n',
+  );
+  const log = join(sb.base, "prompt");
+  sb.env.PROMPT_LOG = log;
   expect(await reconcile("sync", sb.ctx, {})).toBe(0);
   const prompt = (await readFile(log, "utf8")).trim();
   expect(prompt).toContain("[boom]");
@@ -184,13 +160,13 @@ test("SUDO_PROMPT names boom and the step, so a prompt is never anonymous", asyn
 });
 
 test("no SUDO_PROMPT and no relay when a formula-only Brewfile can't escalate", async () => {
-  const root = await base();
-  const log = join(root, "prompt");
   const sb = await brewSandbox(
     PKG_SECTION,
     'brew "mise"\n',
-    `echo "$SUDO_PROMPT" > ${log}\necho "==> Pouring mise"\nexit 0\n`,
+    'echo "$SUDO_PROMPT" > "$PROMPT_LOG"\necho "==> Pouring mise"\nexit 0\n',
   );
+  const log = join(sb.base, "prompt");
+  sb.env.PROMPT_LOG = log;
   expect(await reconcile("sync", sb.ctx, {})).toBe(0);
   expect((await readFile(log, "utf8")).trim()).toBe("");
   expect(sb.out()).not.toContain("Pouring mise"); // nothing can prompt → nothing to narrate
@@ -200,14 +176,14 @@ test("no SUDO_PROMPT and no relay when a formula-only Brewfile can't escalate", 
 // export it: when they have, nothing will prompt, so there is no prompt to label and no reason
 // to relay Homebrew's headers.
 test("an inherited SUDO_ASKPASS means no prompt to label and no relay", async () => {
-  const root = await base();
-  const log = join(root, "prompt");
   const sb = await brewSandbox(
     PKG_SECTION,
     'cask "tuple"\n',
-    `echo "$SUDO_PROMPT" > ${log}\necho "==> Upgrading cask tuple"\nexit 0\n`,
+    'echo "$SUDO_PROMPT" > "$PROMPT_LOG"\necho "==> Upgrading cask tuple"\nexit 0\n',
     { SUDO_ASKPASS: "/usr/local/bin/some-askpass" },
   );
+  const log = join(sb.base, "prompt");
+  sb.env.PROMPT_LOG = log;
   expect(await reconcile("sync", sb.ctx, {})).toBe(0);
   expect((await readFile(log, "utf8")).trim()).toBe("");
   expect(sb.out()).not.toContain("Upgrading cask tuple");

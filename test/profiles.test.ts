@@ -1,42 +1,17 @@
-// M4: host/OS profiles — section `when` gating (os/host/profile) + overlay files.
+// Host/OS profiles: section `when` gating (os/host/profile), overlay files, and the [vars] an
+// overlay carries. Sandboxed $HOME + repo, driving reconcile() directly.
 import { expect, test } from "bun:test";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { BoomContext } from "../src/context.ts";
 import { reconcile } from "../src/engine/reconcile.ts";
 import { pathExists } from "../src/lib/fs.ts";
+import { makeSandbox, type Sandbox } from "./support/sandbox.ts";
 
-async function sandbox(
-  env: Record<string, string | undefined>,
-): Promise<{ home: string; repo: string; ctx: BoomContext }> {
-  const base = await mkdtemp(join(tmpdir(), "boom-prof-"));
-  const home = join(base, "home");
-  const repo = join(base, "repo");
-  await mkdir(home, { recursive: true });
-  await mkdir(repo, { recursive: true });
-  const fullEnv = {
-    HOME: home,
-    XDG_STATE_HOME: join(base, "state"),
-    BOOM_CONFIG: repo,
-    NO_COLOR: "1",
-    ...env,
-  };
-  const proc = {
-    stdout: { write: () => {} },
-    stderr: { write: () => {} },
-    env: fullEnv,
-    exitCode: 0,
-  };
-  return { home, repo, ctx: { process: proc, env: fullEnv, cwd: repo } as unknown as BoomContext };
-}
+const sandbox = (boomfile: string, env: Record<string, string> = {}): Promise<Sandbox> =>
+  makeSandbox(boomfile, { prefix: "prof", env });
 
 test("section when.os gates by operating system", async () => {
-  const sb = await sandbox({ BOOM_OS: "linux" });
-  await writeFile(join(sb.repo, ".a"), "a");
-  await writeFile(join(sb.repo, ".b"), "b");
-  await writeFile(
-    join(sb.repo, "boomfile.toml"),
+  const sb = await sandbox(
     `[[section]]
 name = "mac"
 when = { os = "darwin" }
@@ -47,18 +22,17 @@ name = "linux"
 when = { os = "linux" }
 link = [{ src = ".b", dst = "~/.b" }]
 `,
+    { BOOM_OS: "linux" },
   );
+  await sb.write(".a", "a");
+  await sb.write(".b", "b");
   expect(await reconcile("sync", sb.ctx, {})).toBe(0);
   expect(await pathExists(join(sb.home, ".a"))).toBe(false); // darwin section skipped on linux
   expect(await pathExists(join(sb.home, ".b"))).toBe(true);
 });
 
 test("section when.os accepts a list (any-of)", async () => {
-  const sb = await sandbox({ BOOM_OS: "linux" });
-  await writeFile(join(sb.repo, ".a"), "a");
-  await writeFile(join(sb.repo, ".b"), "b");
-  await writeFile(
-    join(sb.repo, "boomfile.toml"),
+  const sb = await sandbox(
     `[[section]]
 name = "mac only"
 when = { os = ["darwin"] }
@@ -69,7 +43,10 @@ name = "either"
 when = { os = ["darwin", "linux"] }
 link = [{ src = ".b", dst = "~/.b" }]
 `,
+    { BOOM_OS: "linux" },
   );
+  await sb.write(".a", "a");
+  await sb.write(".b", "b");
   expect(await reconcile("sync", sb.ctx, {})).toBe(0);
   expect(await pathExists(join(sb.home, ".a"))).toBe(false); // a one-element list still excludes
   expect(await pathExists(join(sb.home, ".b"))).toBe(true); // any-of within the axis
@@ -81,57 +58,59 @@ name = "gated"
 when = { os = ["linux"], profile = ["work", "home"] }
 link = [{ src = ".g", dst = "~/.g" }]
 `;
-  const noProfile = await sandbox({ BOOM_OS: "linux" });
-  await writeFile(join(noProfile.repo, ".g"), "g");
-  await writeFile(join(noProfile.repo, "boomfile.toml"), boomfile);
-  await reconcile("sync", noProfile.ctx, {});
-  expect(await pathExists(join(noProfile.home, ".g"))).toBe(false); // neither profile active
-
-  const oneProfile = await sandbox({ BOOM_OS: "linux" });
-  await writeFile(join(oneProfile.repo, ".g"), "g");
-  await writeFile(join(oneProfile.repo, "boomfile.toml"), boomfile);
-  await reconcile("sync", oneProfile.ctx, { profiles: ["home"] });
-  expect(await pathExists(join(oneProfile.home, ".g"))).toBe(true); // any-of satisfied
-
-  const wrongOs = await sandbox({ BOOM_OS: "darwin" });
-  await writeFile(join(wrongOs.repo, ".g"), "g");
-  await writeFile(join(wrongOs.repo, "boomfile.toml"), boomfile);
-  await reconcile("sync", wrongOs.ctx, { profiles: ["home"] });
-  expect(await pathExists(join(wrongOs.home, ".g"))).toBe(false); // axes still AND
+  const gated = async (os: string, profiles: string[]): Promise<boolean> => {
+    const sb = await sandbox(boomfile, { BOOM_OS: os });
+    await sb.write(".g", "g");
+    await reconcile("sync", sb.ctx, { profiles });
+    return pathExists(join(sb.home, ".g"));
+  };
+  expect(await gated("linux", [])).toBe(false); // neither profile active
+  expect(await gated("linux", ["home"])).toBe(true); // any-of satisfied
+  expect(await gated("darwin", ["home"])).toBe(false); // axes still AND
 });
 
 test("section when.profile runs only when --profile names it", async () => {
-  const base = `[[section]]
+  const boomfile = `[[section]]
 name = "work"
 when = { profile = "work" }
 link = [{ src = ".w", dst = "~/.w" }]
 `;
-  const off = await sandbox({});
-  await writeFile(join(off.repo, ".w"), "w");
-  await writeFile(join(off.repo, "boomfile.toml"), base);
+  const off = await sandbox(boomfile);
+  await off.write(".w", "w");
   await reconcile("sync", off.ctx, {});
   expect(await pathExists(join(off.home, ".w"))).toBe(false); // profile not active
 
-  const on = await sandbox({});
-  await writeFile(join(on.repo, ".w"), "w");
-  await writeFile(join(on.repo, "boomfile.toml"), base);
+  const on = await sandbox(boomfile);
+  await on.write(".w", "w");
   await reconcile("sync", on.ctx, { profiles: ["work"] });
   expect(await pathExists(join(on.home, ".w"))).toBe(true);
 });
 
 test("overlay file boomfile.<os>.toml is merged", async () => {
-  const sb = await sandbox({ BOOM_OS: "darwin" });
-  await writeFile(join(sb.repo, ".base"), "base");
-  await writeFile(join(sb.repo, ".mac"), "mac");
-  await writeFile(
-    join(sb.repo, "boomfile.toml"),
-    `[[section]]\nname = "base"\nlink = [{ src = ".base", dst = "~/.base" }]\n`,
-  );
-  await writeFile(
-    join(sb.repo, "boomfile.darwin.toml"),
+  const sb = await sandbox(`[[section]]\nname = "base"\nlink = [{ src = ".base", dst = "~/.base" }]\n`, {
+    BOOM_OS: "darwin",
+  });
+  await sb.write(".base", "base");
+  await sb.write(".mac", "mac");
+  await sb.write(
+    "boomfile.darwin.toml",
     `[[section]]\nname = "mac-overlay"\nlink = [{ src = ".mac", dst = "~/.mac" }]\n`,
   );
   expect(await reconcile("sync", sb.ctx, {})).toBe(0);
   expect(await pathExists(join(sb.home, ".base"))).toBe(true);
   expect(await pathExists(join(sb.home, ".mac"))).toBe(true); // from the darwin overlay
+});
+
+test("overlays: a vars-only overlay loads and its value wins over the base's", async () => {
+  const sb = await sandbox(
+    '[vars]\nEMAIL = "base"\n[[section]]\nname = "t"\ntmpl = [{ src = "gitconfig.tmpl", dst = "~/.gitconfig" }]\n',
+    { BOOM_HOST: "testhost" },
+  );
+  // Built as a template literal so it reads as data (see template.test.ts's `ph`).
+  await sb.write("gitconfig.tmpl", `email = \${EMAIL}\n`);
+  // No [[section]] at all — a hard schema failure before `section` became optional, and its
+  // [vars] were dropped on the floor before overlays merged anything but sections.
+  await sb.write("boomfile.testhost.toml", '[vars]\nEMAIL = "host"\n');
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  expect(await readFile(join(sb.home, ".gitconfig"), "utf8")).toContain("email = host");
 });

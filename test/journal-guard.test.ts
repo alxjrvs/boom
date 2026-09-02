@@ -5,8 +5,7 @@
 // contract itself: the undo record lands before the write, and `committed` lands after the
 // last phase that can fail.
 import { expect, test } from "bun:test";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { profileContext } from "../src/config/profile.ts";
 import { withDb } from "../src/engine/db.ts";
@@ -17,15 +16,16 @@ import { pathExists } from "../src/lib/fs.ts";
 import type { Env } from "../src/lib/paths.ts";
 import { Reporter } from "../src/lib/reporter.ts";
 import { makeSandbox, type Sandbox } from "./support/sandbox.ts";
+import { tmp } from "./support/tmp.ts";
 
-const sandbox = (boomfile: string): Promise<Sandbox> => makeSandbox(boomfile, { prefix: "boom-jrng-" });
+const sandbox = (boomfile: string): Promise<Sandbox> => makeSandbox(boomfile, { prefix: "jrn" });
 
 async function stateEnv(): Promise<{ XDG_STATE_HOME: string }> {
-  return { XDG_STATE_HOME: await mkdtemp(join(tmpdir(), "boom-jrn-")) };
+  return { XDG_STATE_HOME: await tmp("jrn") };
 }
 
 // Sandboxed $HOME + $XDG_STATE_HOME + config repo, driving reconcile() in-process (the shape
-// resources-new.test.ts uses). Nothing here touches the real machine.
+// the resource suites use). Nothing here touches the real machine.
 // The ONE place this file constructs a ReconcileCtx. Every field but `journal`/`backupRoot` is
 // required, so a bare literal per test would mean editing N of them the next time the interface
 // grows a field — and a `as unknown as ReconcileCtx` cast would erase the very type the
@@ -181,7 +181,7 @@ test("the skill write displaces the prior file into the backup tree the journal 
 
 test("journalWrite is a no-op with no journal", async () => {
   const env = await stateEnv();
-  const dir = await mkdtemp(join(tmpdir(), "boom-nojrn-"));
+  const dir = await tmp("nojrn");
   const file = join(dir, "keepme");
   await writeFile(file, "MINE");
 

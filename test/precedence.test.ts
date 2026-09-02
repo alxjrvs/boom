@@ -1,96 +1,22 @@
-// Cross-cutting feature surface: overlay `vars`, drift notifications, the `doctor --config` CI
-// gate through the CLI, and destination precedence end to end. Each is exercised against a
-// fully sandboxed $HOME + state dir (never the real machine), like engine.test.ts.
+// Duplicate destinations across composition layers resolve last-wins, end to end: the winner
+// converges instead of failing verify forever, the override is reported, and — the destructive
+// case Layer 5's gate exists for — a winner that declares nothing never gets the loser's file
+// reaped. Sandboxed $HOME + state dir, driving reconcile() directly.
 import { expect, test } from "bun:test";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { run } from "@stricli/core";
-import { app } from "../src/cli.ts";
-import type { BoomContext } from "../src/context.ts";
 import { reconcile } from "../src/engine/reconcile.ts";
 import { linkTarget, pathExists } from "../src/lib/fs.ts";
-import { notifyArgv } from "../src/lib/notify.ts";
 import { makeSandbox, type Sandbox } from "./support/sandbox.ts";
-
-const sandbox = (
-  boomfile: string,
-  opts: { emptyPath?: boolean; env?: Record<string, string> } = {},
-): Promise<Sandbox> =>
-  makeSandbox(boomfile, {
-    prefix: "boom-feat-",
-    emptyPath: opts.emptyPath ?? false,
-    env: { BOOM_HOST: "testhost", ...(opts.env ?? {}) },
-  });
-
-// --- overlays carry vars + [boom], not just sections ---------------------------------------
-
-test("overlays: a vars-only overlay loads and its value wins over the base's", async () => {
-  const sb = await sandbox(
-    '[vars]\nEMAIL = "base"\n[[section]]\nname = "t"\ntmpl = [{ src = "gitconfig.tmpl", dst = "~/.gitconfig" }]\n',
-  );
-  // Built as a template literal so it reads as data, matching resources-new.test.ts's `ph`.
-  await writeFile(join(sb.repo, "gitconfig.tmpl"), `email = \${EMAIL}\n`);
-  // No [[section]] at all — a hard schema failure before `section` became optional, and its
-  // [vars] were dropped on the floor before overlays merged anything but sections.
-  await writeFile(join(sb.repo, "boomfile.testhost.toml"), '[vars]\nEMAIL = "host"\n');
-  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
-  expect(await readFile(join(sb.home, ".gitconfig"), "utf8")).toContain("email = host");
-});
-
-// --- drift notifications ------------------------------------------------------------------
-
-test("notifyArgv: platform-correct commands, undefined where boom has no notifier", () => {
-  expect(notifyArgv("darwin", "boom", "drift")?.[0]).toBe("osascript");
-  expect(notifyArgv("linux", "boom", "drift")).toEqual(["notify-send", "boom", "drift"]);
-  expect(notifyArgv("unknown", "boom", "drift")).toBeUndefined();
-});
-
-// --- doctor --config (the config-repo CI gate, through the CLI) ----------------------------
-
-test("doctor --config passes (exit 0) on a valid boomfile without walking the machine", async () => {
-  const sb = await sandbox('[[section]]\nname = "x"\nlink = [{ src = "a", dst = "~/.a" }]\n');
-  await run(app, ["doctor", "--config"], sb.ctx);
-  expect(sb.ctx.process.exitCode).toBe(0);
-  // A CI gate schema-checks the config; it must not walk the machine. The validator reports
-  // one line per config file (the boomfile), never per resource/section drift.
-  expect(sb.out()).toContain("boomfile.toml");
-  expect(sb.out()).not.toContain("~/.a"); // no link-resource walk happened
-});
-
-test("doctor --config fails (exit 1) on a schema-invalid boomfile (unknown key)", async () => {
-  const sb = await sandbox('[[section]]\nname = "x"\nbogus = true\n');
-  await run(app, ["doctor", "--config"], sb.ctx);
-  expect(sb.ctx.process.exitCode).toBe(1);
-});
-
-test("doctor --config fails (exit 1) when no config repo resolves (strict gate)", async () => {
-  const sb = await sandbox('[[section]]\nname = "x"\n');
-  // Strip the config pointer and point cwd at an empty dir so nothing resolves.
-  const empty = join(sb.base, "empty");
-  await mkdir(empty, { recursive: true });
-  const env = { ...sb.env, BOOM_CONFIG: undefined };
-  const ctx = { process: { ...sb.ctx.process, env, exitCode: 0 }, env, cwd: empty } as unknown as BoomContext;
-  await run(app, ["doctor", "--config"], ctx);
-  expect(ctx.process.exitCode).toBe(1);
-});
-
-// Failing loudly, like `source --update` did: the parser rejects the flag (stricli reports it on
-// stderr) and the verify verb never runs, rather than quietly doing something other than asked.
-test("verify --ci is not a flag any more", async () => {
-  const sb = await sandbox('[[section]]\nname = "x"\n');
-  await run(app, ["verify", "--ci"], sb.ctx);
-  expect(sb.out()).toContain("--ci");
-  expect(sb.out()).not.toContain("VERIFY..."); // no verdict band: the verb was never entered
-});
-
-// --- precedence: duplicate destinations resolve last-wins, end to end -----------------------
 
 // Two composition layers fighting over one destination, weakest first: the base boomfile, then
 // an OS overlay, which composes AFTER the base — so the second argument is the winner.
 async function twoLayerSandbox(weakSection: string, strongSection: string): Promise<Sandbox> {
-  const sb = await sandbox(weakSection, { env: { BOOM_OS: "linux" } });
-  await writeFile(join(sb.repo, "boomfile.linux.toml"), strongSection);
-  await writeFile(join(sb.repo, "dotfile"), "from the base repo\n");
+  const sb = await makeSandbox(weakSection, {
+    prefix: "prec",
+    env: { BOOM_OS: "linux", BOOM_HOST: "testhost" },
+  });
+  await sb.write("boomfile.linux.toml", strongSection);
+  await sb.write("dotfile", "from the base repo\n");
   return sb;
 }
 
@@ -178,7 +104,7 @@ test("precedence: an off-darwin launchd never evicts the copy that owns the same
     `[[section]]\nname = "Mod"\ncopy = [{ src = "agent.plist", dst = "~/Library/LaunchAgents/agent.plist" }]\n`,
     `[[section]]\nname = "Base"\n`,
   );
-  await writeFile(join(sb.repo, "agent.plist"), "<plist/>\n");
+  await sb.write("agent.plist", "<plist/>\n");
   const dst = join(sb.home, "Library", "LaunchAgents", "agent.plist");
 
   expect(await reconcile("sync", sb.ctx, {})).toBe(0);
@@ -187,10 +113,7 @@ test("precedence: an off-darwin launchd never evicts the copy that owns the same
   // The stronger layer then declares a `launchd` resolving to the SAME destination — its `dst`
   // defaults to the LaunchAgents dir plus basename(src). BOOM_OS is linux in this sandbox, so
   // the launchd entry wins the key but declares nothing.
-  await writeFile(
-    join(sb.repo, "boomfile.linux.toml"),
-    `[[section]]\nname = "Base"\nlaunchd = [{ src = "agent.plist" }]\n`,
-  );
+  await sb.write("boomfile.linux.toml", `[[section]]\nname = "Base"\nlaunchd = [{ src = "agent.plist" }]\n`);
   expect(await reconcile("sync", sb.ctx, {})).toBe(0);
   expect(await pathExists(dst)).toBe(true);
   expect(sb.out()).not.toContain("reaped orphan");

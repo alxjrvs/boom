@@ -2,7 +2,7 @@
 // `lastLine` for package managers (long, templated, worst-line-last) and `failureDetail` for a
 // `run` step (somebody's own command, most specific complaint FIRST).
 import { expect, test } from "bun:test";
-import { failureDetail, lastLine, runShellAsync } from "../src/lib/proc.ts";
+import { failureDetail, hasCommand, lastLine, runShellAsync } from "../src/lib/proc.ts";
 
 // The regression this file exists for. A nine-line vault-audit failure was rendered as its LAST
 // line — an item that was present and correctly declared — while the actual finding sat in the
@@ -85,4 +85,10 @@ test("runShellAsync reports a child killed by the deadline as timedOut", async (
   expect(r.timedOut).toBe(true);
   expect(r.code).not.toBe(0);
   expect(performance.now() - t0).toBeLessThan(4000);
+});
+
+test("hasCommand resolves via PATH (Bun.which), not a shell", () => {
+  // `sh` is always on a sane PATH; a nonsense name never is.
+  expect(hasCommand("sh", process.env)).toBe(true);
+  expect(hasCommand("definitely-not-a-real-binary-xyz", process.env)).toBe(false);
 });

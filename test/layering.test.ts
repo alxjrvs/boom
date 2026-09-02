@@ -47,7 +47,7 @@ test("engine/ imports commands/ from exactly one file, by design", async () => {
 });
 
 // The regression for that cycle. Must stay a subprocess: `bun test` shares one module registry
-// across files and cli.test/cli-extra.test/docs-hygiene.test all sort earlier and statically
+// across files and cli.test/doctor.test/docs-hygiene.test all sort earlier and statically
 // import src/cli.ts, so an in-process import here would find cli.ts already evaluated and pass
 // whether or not the hazard exists.
 test("engine/settings.ts as the entry point still renders the skill doc (no TDZ)", () => {

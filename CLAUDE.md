@@ -32,9 +32,12 @@ of record.
 ## Conventions
 
 - Every `.ts` file must pass `biome check` (lint + format) and `tsc --noEmit`.
-- Tests are `bun test`; sandbox a throwaway `$HOME` + `$XDG_STATE_HOME` so they
-  never touch the real machine. Use `Bun.spawnSync` (not piped `Bun.spawn`) when a
-  test spawns the compiled binary (oven-sh/bun#24690).
+- Tests are `bun test`, one file per subject (`test/<subject>.test.ts`); sandbox a throwaway
+  `$HOME` + `$XDG_STATE_HOME` so they never touch the real machine. The helpers in
+  `test/support/` are the only sandbox (`makeSandbox`), fake context (`fakeCtx`), sandboxed git
+  (`git`/`gitRepo`/`gitEnv`) and tmp dir (`tmp`, swept at the end of the run by the `bunfig.toml`
+  preload) — never a per-file copy. Use `Bun.spawnSync` (not piped `Bun.spawn`) when a test
+  spawns the compiled binary (oven-sh/bun#24690).
 - Resources are handlers implementing the verb contract (`src/engine/resources/`);
   user **hooks** are `hooks/<name>.ts` modules exporting `sync`/`verify`/`uninstall` (+ `declare`)
   that receive a `HookApi` ( `with` inputs, `ok`/`warn`/`fail`, `dryRun`, `env`).
