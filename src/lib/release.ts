@@ -1,10 +1,6 @@
 // Reading boom's own GitHub releases — one function, one consumer: the `[boom]
-// upgrade_on_sync` nudge.
-//
-// This file used to carry a second, THROWING entry point (`latestRelease`) for `boom upgrade`,
-// and its header explained the split contract at length. The verb went in 0.36 and took that
-// consumer with it, so the split went too. What is left is the one contract that survives:
-// never throw. A sync must not fail because the network is flaky.
+// upgrade_on_sync` nudge. The one contract: never throw. A sync must not fail because the
+// network is flaky.
 const REPO = "alxjrvs/boom";
 
 // GitHub requires a User-Agent; Accept pins the v3 JSON media type.

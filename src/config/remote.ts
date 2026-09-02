@@ -67,10 +67,9 @@ export async function linkRemoteConfigRepo(env: Env, refInput: string): Promise<
   const { url, ref } = parseRemoteRef(refInput);
   const dest = configRepoCacheDir(env);
 
-  // configRepoCacheDir is state-dir-relative; state dir falls back to a *relative*
-  // path when neither XDG_STATE_HOME nor HOME is set (see engine/state.ts:stateHome).
-  // The rm below would then resolve against the process cwd — mirrors the same
-  // guard engine/code.ts's materializeAgentsFarm takes before its own rebuild-via-rm.
+  // configRepoCacheDir is state-dir-relative; the state dir falls back to a *relative* path
+  // when neither XDG_STATE_HOME nor HOME is set (lib/paths.ts `stateHome`), and the rm below
+  // would then resolve against the process cwd.
   if (!isAbsolute(dest)) {
     throw new BoomConfigError(
       "boom's state dir resolved to a relative path (HOME and XDG_STATE_HOME both unset) — refusing to clone/wipe there",

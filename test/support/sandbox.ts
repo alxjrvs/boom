@@ -1,17 +1,10 @@
-// The one sandboxed $HOME + $XDG_STATE_HOME + config repo every in-process suite drives
-// reconcile() through. Nothing here touches the real machine.
+// The one sandboxed $HOME + $XDG_STATE_HOME + config repo the in-process suites drive
+// reconcile() through. Nothing here touches the real machine. One definition means a hardening
+// applied here (GIT_CONFIG_NOSYSTEM, a private PATH) is applied everywhere — a per-suite copy
+// is how one of them quietly loses a variable and runs against the developer's real git config.
 //
-// This existed six times before, once per suite, as ~30 near-identical lines apiece. The copies
-// had already drifted in a way that mattered: transaction.test.ts omitted GIT_CONFIG_NOSYSTEM, so
-// the 700+ lines of journal and rollback coverage ran with git free to read the developer's (or
-// CI runner's) system-wide config — a global hook or commit template could change what those
-// tests observed, which is precisely what the other five sandboxed against. One definition means
-// a hardening applied here is applied everywhere, rather than in five places and forgotten in a
-// sixth.
-//
-// The returned shape is the UNION of what the six suites used (`base`, `env`, `clear`, `write`
-// are each needed by some and ignored by the rest), so each suite keeps a one-line adapter with
-// its original call signature and not one call site had to change.
+// The returned shape is the UNION of what the suites use (`base`, `env`, `clear`, `write` are
+// each needed by some and ignored by the rest), so each suite keeps a one-line adapter.
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

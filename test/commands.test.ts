@@ -59,8 +59,6 @@ function ctxFor(
   };
 }
 
-// The guard four now-removed `boom code` subcommands used to hand-copy. It is the *only* place that error
-// string lives now, so this pins its wording, its stream and the bail-out contract at once.
 test("runUserCommand dispatches a config-supplied command", async () => {
   const repo = await base();
   await writeFile(join(repo, "boomfile.toml"), `[[section]]\nname = "x"\n`);
@@ -88,7 +86,7 @@ test("linkRemoteConfigRepo clones into the managed cache dir and records the bre
 test("linkRemoteConfigRepo rejects a remote with no boomfile.toml", async () => {
   const origin = await gitFixture(false);
   const env = { XDG_STATE_HOME: await base() };
-  expect(linkRemoteConfigRepo(env, origin)).rejects.toBeInstanceOf(BoomConfigError);
+  await expect(linkRemoteConfigRepo(env, origin)).rejects.toBeInstanceOf(BoomConfigError);
 });
 
 test("linkRemoteConfigRepo refuses to clobber an unclean managed clone on re-link", async () => {
@@ -96,7 +94,7 @@ test("linkRemoteConfigRepo refuses to clobber an unclean managed clone on re-lin
   const env = { XDG_STATE_HOME: await base() };
   const dest = await linkRemoteConfigRepo(env, origin);
   await writeFile(join(dest, "dirty.txt"), "uncommitted\n");
-  expect(linkRemoteConfigRepo(env, origin)).rejects.toBeInstanceOf(BoomConfigError);
+  await expect(linkRemoteConfigRepo(env, origin)).rejects.toBeInstanceOf(BoomConfigError);
 });
 
 test("linkRemoteConfigRepo refuses to clobber a managed clone with committed-but-unpushed work", async () => {
@@ -110,7 +108,7 @@ test("linkRemoteConfigRepo refuses to clobber a managed clone with committed-but
   git("-c", "user.email=t@t.com", "-c", "user.name=t", "commit", "-q", "-m", "local work");
   // Working tree is clean once committed — `git status --porcelain` alone would miss
   // this. Re-linking must still refuse, or the commit is silently discarded on re-clone.
-  expect(linkRemoteConfigRepo(env, origin)).rejects.toBeInstanceOf(BoomConfigError);
+  await expect(linkRemoteConfigRepo(env, origin)).rejects.toBeInstanceOf(BoomConfigError);
 });
 
 test("linkRemoteConfigRepo refuses to clobber unpushed commits on a pinned (detached-HEAD) clone", async () => {
@@ -148,7 +146,7 @@ test("a failed re-link leaves the existing clone and breadcrumb untouched", asyn
 
 test("linkRemoteConfigRepo refuses a relative state dir (HOME and XDG_STATE_HOME both unset)", async () => {
   const origin = await gitFixture();
-  expect(linkRemoteConfigRepo({}, origin)).rejects.toBeInstanceOf(BoomConfigError);
+  await expect(linkRemoteConfigRepo({}, origin)).rejects.toBeInstanceOf(BoomConfigError);
 });
 
 test("runUserCommand returns undefined for an unknown command", async () => {

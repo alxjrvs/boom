@@ -1,0 +1,7 @@
+# Keep the action pins in .github/workflows current without a hand bump.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

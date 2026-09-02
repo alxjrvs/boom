@@ -1,11 +1,8 @@
-// Reporter: the engine's output surface + pass/fail tally. Mirrors the bash engine's
-// _ok/_warn/_fail and drives the verify exit code (0 ok / 2 warn / 1 fail). In JSON
-// mode it suppresses human output and only collects records (for `verify --json`).
+// Reporter: the engine's output surface + pass/fail tally. Drives the verify exit code
+// (0 ok / 2 warn / 1 fail). In JSON mode it suppresses human output and only collects
+// records (for `verify --json`).
 //
-// Two human presentations share this one tally + record stream — `ReportSurface`. (A third,
-// `classic` — `==> Header` with indented ✓/→/✗ lines — was the pre-bands surface. It became
-// unreachable once every construction went through `bandsReporter`, whose `surface` option only
-// ever offers bands or category, and was removed rather than left as a mode nothing can select.)
+// Two human presentations share this one tally + record stream — `ReportSurface`:
 //   • `bands` — the cosmic surface matching the site's design: a permanent `▎` bar per section in
 //     a cycling brand color, a trailing status glyph (a Kirby-krackle burst while working → ✓ done
 //     / ! attention), a grey setup band to open, and a `COMMAND...COMPLETE!` / `...FAILED!`
@@ -52,7 +49,6 @@ interface ReportRecord {
 const RECONCILE_CATEGORY_ORDER = [
   "CONFIG",
   "DOTFILES",
-  "SECRETS",
   "DIRECTORIES",
   "PACKAGES",
   "MACOS",
@@ -64,13 +60,10 @@ const RECONCILE_CATEGORY_ORDER = [
   "ORPHANS",
 ] as const;
 
-// Everything that distinguishes one leveled line from another, in one place. This used to be
-// spelled out twelve times — once per level in `writeSub`'s switch, once per level in the six
-// public methods — which is how `note` came to be dim on the bands surface and plain on the
-// classic one. `shape` is what keeps this a table rather than a formatter: the tallying levels
-// color only their glyph (`✓ msg`), `skip`/`plan` color glyph *and* message, `note` is a bare
-// 4-space-indented line. Preserved exactly, and asserted byte-for-byte by
-// test/reporter-surface.test.ts — this is a collapse, not a redesign.
+// Everything that distinguishes one leveled line from another, in one place. `shape` is what
+// keeps this a table rather than a formatter: the tallying levels color only their glyph
+// (`✓ msg`), `skip`/`plan` color glyph *and* message, `note` is a bare 4-space-indented line.
+// Asserted byte-for-byte by test/reporter-surface.test.ts.
 interface LevelStyle {
   readonly glyph: string;
   readonly hex: string;
@@ -103,7 +96,7 @@ function fmtElapsed(ms: number): string {
 // Version of the `--json` report envelope. Bump when its shape changes so a script consuming
 // `verify --json` / `doctor --json` / etc. can detect (and refuse) an unknown shape. v2 added
 // the per-record `category` field.
-export const REPORT_SCHEMA_VERSION = 2;
+const REPORT_SCHEMA_VERSION = 2;
 
 interface ReportEnvelope {
   readonly schemaVersion: number;
@@ -130,8 +123,8 @@ export class Reporter {
   failures = 0;
   readonly records: ReportRecord[] = [];
 
-  // The command name the verdict band echoes (`SOURCE...COMPLETE!`). Set by the reconcile
-  // entry after construction; bands mode falls back to nothing (a bare `...COMPLETE!`) if unset.
+  // The command name the verdict band echoes (`SOURCE...COMPLETE!`). Set by `bandsReporter`;
+  // bands mode falls back to nothing (a bare `...COMPLETE!`) if unset.
   command?: string;
 
   // The category the next emitted line belongs to (category mode only). The reconcile loop and
@@ -148,8 +141,8 @@ export class Reporter {
   // Wall-clock start, for the verdict's elapsed suffix — every command's Reporter times itself.
   private readonly startedAt = performance.now();
   // Whether any section band or detail line has been drawn since the setup band. Gates the blank
-  // line before the verdict: with no intermediate content (e.g. `upgrade` already-latest), the
-  // verdict hugs the setup band instead of floating a blank line between them.
+  // line before the verdict: with no intermediate content, the verdict hugs the setup band
+  // instead of floating a blank line between them.
   private bandsDrawn = false;
 
   private readonly out: OutStream;
@@ -204,8 +197,8 @@ export class Reporter {
   // silently. Three presentations of the same beat, by mode:
   //   • dense + interactive TTY → an in-place krackle line (`  ✸ <label>…`) that pulses while `work`
   //     runs and is erased on resolve (transient — never in the final output);
-  //   • verbose (streaming commands: push/reset/diff, or --verbose) → a persistent `  ◇ <label>…`
-  //     line, since verbose has no buffered band to hide it under and its own tool output follows;
+  //   • verbose (--verbose) → a persistent `  ◇ <label>…` line, since verbose has no buffered
+  //     band to hide it under and its own tool output follows;
   //   • JSON, or dense + non-interactive (piped/CI) → suppressed, so captured output stays clean.
   // Always awaits `work` and always clears the animation timer, even if `work` throws.
   //
@@ -261,9 +254,8 @@ export class Reporter {
     this.out.write(`    ${this.hx(COSMIC.dim, `▸ ${s}`)}\n`);
   }
 
-  // Render one leveled line from LEVEL_STYLE. Both remaining surfaces tint from the same `hex`,
-  // so this no longer branches on which one asked: the `band` parameter and the ANSI-named
-  // `color` it selected went with the classic surface.
+  // Render one leveled line from LEVEL_STYLE. Both surfaces tint from the same `hex`, so this
+  // never branches on which one asked.
   private line(level: EmitLevel, msg: string): string {
     const st = LEVEL_STYLE[level];
     const tint = (s: string): string => this.hx(st.hex, s);
@@ -337,9 +329,8 @@ export class Reporter {
 
   // The two-line verdict block both surfaces close on: the COMMAND...COMPLETE! /
   // …FAILED! band, then its outcome as a dim sub-line beneath. Reads the tally (never mutates
-  // it), so the 0/2/1 ladder matches finish()'s own. The elapsed suffix is appended here, once
-  // — before this collapse `verdict` appended it at the write and `categoryVerdict` folded it
-  // into `meta`, two spellings of one format that could drift apart.
+  // it), so the 0/2/1 ladder matches finish()'s own. The elapsed suffix is appended here, once,
+  // so the two surfaces cannot drift on its format.
   private drawVerdict(hasWarnTier: boolean, meta: string): number {
     const name = (this.command ?? "").toUpperCase();
     const failed = this.failures > 0;
@@ -347,7 +338,7 @@ export class Reporter {
     const color = failed ? COSMIC.crit : warned ? COSMIC.warn : COSMIC.ok;
     const verb = failed ? "FAILED" : "COMPLETE";
     // A blank line sets the verdict off from the section blocks — but only when some were drawn.
-    // With no intermediate content (e.g. `upgrade` already-latest) it hugs the setup band instead.
+    // With no intermediate content it hugs the setup band instead.
     const lead = this.bandsDrawn ? "\n" : "";
     this.out.write(`${lead}${this.hx(color, `▎ ${name}...${verb}!`)}\n`);
     this.out.write(
@@ -356,19 +347,13 @@ export class Reporter {
     return failed ? 1 : warned ? 2 : 0;
   }
 
-  // The bands-surface verdict. `metaOverride` lets a command state its own outcome (upgrade:
-  // "v0.14.0 → v0.15.0") in place of the auto count; ignored on a failure, where the count (and
-  // the ✗ lines above) tell the story.
-  private verdict(hasWarnTier: boolean, metaOverride?: string): number {
+  // The bands-surface verdict: the tally as its outcome line.
+  private verdict(hasWarnTier: boolean): number {
     const f = this.failures;
     const w = this.warnings;
-    const failed = f > 0;
-    const autoMeta = failed
-      ? `${f} failure(s)${w > 0 ? `, ${w} warning(s)` : ""}`
-      : w > 0
-        ? `${w} warning(s)`
-        : "all clear";
-    return this.drawVerdict(hasWarnTier, !failed && metaOverride ? metaOverride : autoMeta);
+    const meta =
+      f > 0 ? `${f} failure(s)${w > 0 ? `, ${w} warning(s)` : ""}` : w > 0 ? `${w} warning(s)` : "all clear";
+    return this.drawVerdict(hasWarnTier, meta);
   }
 
   // ---- category-surface rendering -----------------------------------------------------------
@@ -521,12 +506,7 @@ export class Reporter {
     ok: string;
     fail?: (failures: number, warnings: number) => string;
     warn?: (warnings: number) => string;
-    // Bands mode only: the verdict band's outcome text on success (e.g. "v0.14.0 → v0.15.0"),
-    // in place of the auto-generated count. Ignored on failure.
-    meta?: string;
   }): number {
-    const f = this.failures;
-    const w = this.warnings;
     // Category mode (dense reconcile default): draw the grouped category bands from the buffered
     // records, then the two-line verdict block.
     if (this.surface === "category" && !this.verbose && !this.json) {
@@ -534,29 +514,16 @@ export class Reporter {
       return this.categoryVerdict(msgs.warn !== undefined, touched);
     }
     // Bands mode: resolve the last section band, then draw the verdict band. `msgs.warn` presence
-    // marks a warning-tier command (verify), same as below. The `!json` is what `bands: !json`
-    // used to buy by construction: with the surface no longer derived from the JSON flag, a
-    // `--json` run would otherwise draw a verdict band into stdout ahead of the envelope.
+    // marks a warning-tier command (verify). Guarded on `!json` because the surface is not derived
+    // from the JSON flag: a `--json` run would otherwise draw a verdict band ahead of the envelope.
     if (!this.json) {
       this.closeBand();
-      return this.verdict(msgs.warn !== undefined, msgs.meta);
+      return this.verdict(msgs.warn !== undefined);
     }
     // Reached only under `--json`, and only defensively: every json-capable command branches to
-    // finishJson() first (module.ts, reconcile.ts), so nothing takes this path today. It stays
-    // because it is what makes finish() total — it computes the same 0/2/1 ladder the band
-    // verdicts do, so the two modes cannot disagree about an exit code. Its ok/warn/fail calls
-    // print nothing under json: emit() returns at the json guard before any surface renders.
-    this.out.write("\n");
-    if (f > 0) {
-      this.fail(msgs.fail ? msgs.fail(f, w) : `${f} failure(s)`);
-      return 1;
-    }
-    if (msgs.warn && w > 0) {
-      this.warn(msgs.warn(w));
-      return 2;
-    }
-    this.ok(msgs.ok);
-    return 0;
+    // finishJson() first. Kept so finish() is total, with the same 0/2/1 ladder, and nothing to
+    // print — emit() returns at the json guard before any surface renders anyway.
+    return this.failures > 0 ? 1 : msgs.warn && this.warnings > 0 ? 2 : 0;
   }
 
   // The one `--json` envelope shape, shared by every scriptable command so their reports
@@ -583,9 +550,8 @@ export class Reporter {
 // Build a bands-mode Reporter for a command — the cosmic output form (site's design): a grey
 // setup band, marked `▎` section bands with their detail below, and a `COMMAND...COMPLETE!` /
 // `...FAILED!` verdict from finish(). Interactive (TTY + color, non-JSON) enables the live in-place
-// krackle. `verbose` defaults false — the dense-by-default form; a command that streams raw output
-// with no section band to nest under (diff/push stream git verbatim) passes verbose:true so its
-// lines still show. Under --json, bands turn off and the structured envelope (finishJson) is used.
+// krackle. `verbose` defaults false — the dense-by-default form. Under --json, bands turn off and
+// the structured envelope (finishJson) is used.
 // `surface` picks between one band per section (the default) and reconcile's dense
 // distinct-category grouping. Under --json every surface renders nothing anyway (each emitter
 // returns at the json guard), so it is passed through unconditionally rather than derived.

@@ -2,8 +2,8 @@
 // `intent` then a `done` (with an undo token); a clean run marks the run `committed`.
 // `--resume` skips destinations already done, and every row names where the original it
 // displaced was put, so nothing an overwrite replaced is destroyed. Each row commits
-// atomically (WAL), so an interrupted run leaves whole rows — no torn-line recovery hazard
-// the old NDJSON log had.
+// atomically (WAL), so an interrupted run leaves whole rows and there is no torn-line
+// recovery hazard.
 import type { Database } from "bun:sqlite";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -14,9 +14,7 @@ import type { ReconcileCtx } from "./types.ts";
 
 // How to reverse one mutation: remove what we created, rmdir a directory we created, restore a
 // backed-up file, or — for the one non-file effect — re-apply a macOS default's prior value
-// (`prior: null` means the key was unset, so `uninstall` deletes it). Timer plists are undone as
-// ordinary file writes (the next reconcile re-settles their launchctl state), so they need no
-// dedicated kind.
+// (`prior: null` means the key was unset, so `uninstall` deletes it).
 //
 // `rmdir` exists because reversing a `mkdir` with `rm -rf` is the one undo that can destroy data
 // boom never touched: by undo time the user may have filled the directory boom created.
@@ -45,12 +43,12 @@ export async function displace(
 }
 
 // Record the whole undo for a file about to be written: intent, displace whatever is there,
-// then `done` — all BEFORE the write. It returns nothing on purpose. The old shape handed the
-// token back and let the caller write `done` *after* the write "succeeded", which sounds
-// careful and is the opposite: `displace` has already moved the prior file into the backup
-// tree, so a crash between the two orphans it with no row pointing at it — unrecoverable,
-// because the backup tree is only navigable through what the journal names. Undo-before-create is the invariant
-// filesystem.ts:84-88 states verbatim; this is the one helper every other writer routes through.
+// then `done` — all BEFORE the write. It returns nothing on purpose: handing the token back and
+// letting the caller write `done` *after* the write "succeeded" sounds careful and is the
+// opposite, because `displace` has already moved the prior file into the backup tree, and a
+// crash between the two orphans it with no row pointing at it — unrecoverable, since the backup
+// tree is only navigable through what the journal names. Undo-before-create is the invariant
+// `applyLink` (filesystem.ts) states; this is the one helper every other writer routes through.
 //
 // The no-journal guard lives HERE, not at the call sites: `displace` with an undefined
 // backupRoot falls back to `rm(dst, { force: true })`, so a caller that skipped the guard on a
@@ -65,9 +63,8 @@ function plannedUndo(dst: string, backupRoot: string | undefined): UndoToken {
 
 // `recursive` is passed through to `displace` for the callers whose conflicting destination
 // may be a directory (a link/copy/mkdir landing where a real directory used to be). It mirrors
-// journalRemove's parameter of the same name; without it those callers had to inline the
-// sequence to reach `displace`'s third argument, which is how six of them ended up recording a
-// null plan token.
+// journalRemove's parameter of the same name, so no caller has to inline the sequence to reach
+// `displace`'s third argument.
 export async function journalWrite(
   op: string,
   file: string,
@@ -76,9 +73,9 @@ export async function journalWrite(
 ): Promise<void> {
   if (!ctx.journal) return;
   const exists = await pathExists(file);
-  await ctx.journal.intent(op, file, exists ? plannedUndo(file, ctx.backupRoot) : { kind: "remove" });
+  ctx.journal.intent(op, file, exists ? plannedUndo(file, ctx.backupRoot) : { kind: "remove" });
   const undo: UndoToken = exists ? await displace(file, ctx.backupRoot, recursive) : { kind: "remove" };
-  await ctx.journal.done(op, file, undo);
+  ctx.journal.done(op, file, undo);
 }
 
 // The uninstall twin of journalWrite, and note the one structural difference: here the displace
@@ -99,8 +96,8 @@ export async function journalRemove(
     await rm(file, { recursive, force: true });
     return;
   }
-  await ctx.journal.intent(op, file, plannedUndo(file, ctx.backupRoot));
-  await ctx.journal.done(op, file, await displace(file, ctx.backupRoot, recursive));
+  ctx.journal.intent(op, file, plannedUndo(file, ctx.backupRoot));
+  ctx.journal.done(op, file, await displace(file, ctx.backupRoot, recursive));
 }
 
 interface DoneRecord {
@@ -144,27 +141,24 @@ export class Journal {
   // tree, and a crash before `done` left that file with no row naming where it went, so the
   // run read back as clean with the original unrecoverable. The token is knowable in advance
   // because `backupTo`'s destination is a pure `join(backupRoot, dst)`.
-  intent(op: string, dst: string, plan?: UndoToken): Promise<void> {
+  intent(op: string, dst: string, plan?: UndoToken): void {
     this.db.run("INSERT INTO ops (run_id, t, op, dst, undo) VALUES (?, 'intent', ?, ?, ?)", [
       this.runId,
       op,
       dst,
       plan ? JSON.stringify(plan) : null,
     ]);
-    return Promise.resolve();
   }
-  done(op: string, dst: string, undo: UndoToken): Promise<void> {
+  done(op: string, dst: string, undo: UndoToken): void {
     this.db.run("INSERT INTO ops (run_id, t, op, dst, undo) VALUES (?, 'done', ?, ?, ?)", [
       this.runId,
       op,
       dst,
       JSON.stringify(undo),
     ]);
-    return Promise.resolve();
   }
-  side(op: string, label: string): Promise<void> {
+  side(op: string, label: string): void {
     this.db.run("INSERT INTO sides (run_id, op, label) VALUES (?, ?, ?)", [this.runId, op, label]);
-    return Promise.resolve();
   }
   // Mark the run cleanly committed. Split from close() so the caller only sets this when the
   // run actually succeeded (zero failures) — a run that reached the end with failed items
@@ -291,9 +285,8 @@ export async function readRun(
       }[]
     ).map((r) => ({ op: r.op, dst: r.dst, undo: JSON.parse(r.undo) as UndoToken }));
     // Intents with no matching `done` — the run died in the window between "original displaced
-    // into the backup tree" and "row written that says where it went". These used to be
-    // invisible (every reader filtered `t = 'done'`), so an interrupted run reported zero ops
-    // and the displaced original was silently unaccounted for.
+    // into the backup tree" and "row written that says where it went". Surfaced so an
+    // interrupted run never reports zero ops while a displaced original sits unaccounted for.
     //
     // The completing `done` must come AFTER the intent (`d.id > i.id`), not merely share its
     // (op, dst). Without that, a destination touched twice in one run has its second, genuinely

@@ -1,4 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { reconcileSection } from "../src/engine/registry.ts";
 import { failureDetail, redactSecrets } from "../src/lib/proc.ts";
 
 describe("redactSecrets", () => {
@@ -30,10 +34,6 @@ describe("redactSecrets", () => {
 // A dry run changes nothing and cannot install, so a missing CLI is machine state, not a config
 // defect. Before this, `boom source --dry-run` exited 1 on any box without brew — which is every
 // CI runner, and exactly where previewing a boomfile is most useful.
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { reconcileSection } from "../src/engine/registry.ts";
 
 function ctxFor(dryRun: boolean, repo: string) {
   const lines: string[] = [];

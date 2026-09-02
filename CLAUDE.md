@@ -13,12 +13,12 @@ of record.
 ## North stars
 
 1. **Native over special.** Stock tools and Bun built-ins over dependencies
-   (`Bun.$`/`Bun.spawn`, `node:fs`, `Bun.color`, `bun:sqlite` if ever needed).
+   (`Bun.$`/`Bun.spawn`, `node:fs`, `Bun.color`, `bun:sqlite`).
    Minimal ceremony; deleting custom code in favor of a built-in is the
    highest-value change.
 2. **One TypeScript binary, zero runtime deps on the user's machine.** boom
    compiles via `bun build --compile` to a standalone executable (macOS/Linux).
-   The ~62 MB embedded-runtime floor is an accepted tradeoff for type safety,
+   The 60–85 MB embedded-runtime floor (per target; macOS arm64 is the smallest) is an accepted tradeoff for type safety,
    testability, and a frictionless install. Config is **typed, validated TOML**
    (`boomfile.toml`), parsed once into the schema in `src/config/schema.ts`.
 3. **Legible showpiece.** Small, exemplary, senior-engineer quality. Comments
@@ -56,8 +56,9 @@ of record.
 ## Merge policy (enforced by branch protection + CI)
 
 - **Every change lands via PR; direct pushes to `main` are blocked.**
-- **CI must be green before merge** — the required checks are `check` on Linux + macOS
-  (biome + tsc + bun test + binary/generator smoke), `cross-compile`, and `version-guard`.
+- **CI must be green before merge** — the single required check is `ci-gate`, which fails if
+  `check` on Linux + macOS (biome + tsc + bun test + binary/generator smoke), `cross-compile`,
+  or `version-guard` fails.
 - **One merge, at most one release.** Each PR must move `package.json`'s version exactly
   one semver step from `main` — patch (`x.y.z+1`), minor (`x.y+1.0`), or major
   (`x+1.0.0`) — or leave it unchanged. Never skip (`0.0.1`→`0.0.3`) or jump
@@ -66,7 +67,7 @@ of record.
 ## Don't
 
 - Don't reach for bash for the core reconcile path — the engine is TypeScript;
-  use `Bun.$`/`Bun.spawnSync` only for genuinely external tools (brew/mise/claude).
+  use `Bun.$`/`Bun.spawnSync` only for genuinely external tools (git/brew/mise/gh/launchctl/defaults).
 - Don't add a hardcoded subcommand case — built-ins go in the route map, everything
   else is command discovery.
 - Don't let `sync`/`verify`/`uninstall` drift into separate code paths —

@@ -53,9 +53,9 @@ jobs:
 
       # Gate the release on the same checks ci enforces — never ship a red tree.
       - name: Lint + format (biome)
-        run: bunx biome check .
+        run: bun run lint
       - name: Typecheck (tsc)
-        run: bunx tsc --noEmit
+        run: bun run typecheck
       - name: Test (bun test)
         run: bun test
 
@@ -78,11 +78,7 @@ jobs:
       # src/index.ts. Matches ci's compile step and the shipped binary.
       - name: Compile the target matrix
         if: steps.v.outputs.new == 'true'
-        run: |
-          mkdir -p dist
-          for t in bun-darwin-arm64 bun-darwin-x64 bun-linux-x64 bun-linux-arm64; do
-            bun build src/index.ts --compile --target="$t" --outfile "dist/boom-$t"
-          done
+        run: mkdir -p dist && BOOM_OUT=dist bun run build:all
 
       - name: Upload unsigned binaries
         if: steps.v.outputs.new == 'true'
@@ -170,19 +166,20 @@ jobs:
           name: boom-darwin-signed
           path: dist
 
-      # Checksums must cover the *final* (signed) binaries — `boom upgrade` and install.sh
-      # verify against this manifest, so it has to match exactly what ships.
+      # Checksums must cover the *final* (signed) binaries — install.sh verifies against this
+      # manifest, so it has to match exactly what ships.
       - name: Checksums
         run: cd dist && sha256sum boom-* > SHA256SUMS
 
+      # Stock `gh` (already used by the formula job below) instead of a third-party action.
+      # The tag is created from the commit that ran this workflow, not whatever main has moved to.
       - name: Tag + release with the binaries attached
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: ${{ needs.build.outputs.tag }}
-          name: ${{ needs.build.outputs.tag }}
-          files: |
-            dist/boom-*
-            dist/SHA256SUMS
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ needs.build.outputs.tag }}" dist/boom-* dist/SHA256SUMS \
+            -R "${{ github.repository }}" --target "$GITHUB_SHA" \
+            --title "${{ needs.build.outputs.tag }}" --notes ""
 
   # The repo doubles as its own Homebrew tap, so Formula/boom.rb on main must carry the
   # shipped version + the sha256 of each released binary. main is protected (no direct

@@ -1,12 +1,9 @@
 // The `absent` resource: a path that must NOT exist. Sync removes it, verify fails while it
 // is there, uninstall leaves it alone.
 //
-// The inverse of every other resource here, and the gap they leave. `link`, `copy`, `tmpl` and
-// `secret` all converge a file *to* a desired content; `check` asserts things *about* a file
-// that exists, and its `missing_file` key exists precisely because an absent file is the case
-// it cannot express — `missing_file = "pass"` says "absent is acceptable", never "absent is
-// required". So the one shape nobody could declare was the one where the file itself is the
-// drift.
+// The inverse of every other resource here: `link`, `copy` and `tmpl` converge a file *to* a
+// desired content; this one requires that there be none. It is the shape where the file itself
+// is the drift.
 //
 // WHY THAT SHAPE IS WORTH A RESOURCE. A tool that writes its own config behind your back
 // produces exactly it. Claude Code writes `settings.local.json` on an "always allow" click;
@@ -24,8 +21,10 @@
 // UNINSTALL IS A NO-OP, deliberately. boom did not create this file and does not own it;
 // removing someone else's file during teardown would be boom taking a parting shot at a
 // machine it is being removed from.
+
+import { lstat } from "node:fs/promises";
 import type { Absent } from "../../config/schema.ts";
-import { displayPath, expandTilde, lstat } from "../../lib/fs.ts";
+import { displayPath, expandTilde } from "../../lib/fs.ts";
 import { journalRemove } from "../journal.ts";
 import type { ReconcileCtx } from "../types.ts";
 

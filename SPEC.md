@@ -11,23 +11,10 @@ It began as a bash prototype (extracted from `alxjrvs/dotFiles`) and was rewritt
 to TypeScript; this document is the design of record for that engine.
 
 This document describes the **current** design, not how it got here. When a release changes
-behavior a running machine depends on, the upgrade path is a migration note beside it:
+behavior a running machine depends on, the upgrade path is recorded in
+[`CHANGELOG.md`](https://github.com/alxjrvs/boom/blob/main/CHANGELOG.md), one entry per release.
 
-- [`docs/MIGRATING-0.33.md`](https://github.com/alxjrvs/boom/blob/main/docs/MIGRATING-0.33.md) —
-  the four config-repo git subcommands (`source status|diff|push|reset`) removed in favor of
-  running git against the clone directly. No config edit is required.
-- [`docs/MIGRATING-0.32.md`](https://github.com/alxjrvs/boom/blob/main/docs/MIGRATING-0.32.md) —
-  `systemd`, seven package managers and three secret backends removed. Unlike 0.31 these ARE
-  load-time errors: a boomfile naming one fails to parse until it is edited.
-- [`docs/MIGRATING-0.31.md`](https://github.com/alxjrvs/boom/blob/main/docs/MIGRATING-0.31.md) —
-  ten verbs removed and `[boom] schedule` retired. No config edit is required, but a machine that
-  had `schedule` keeps its LaunchAgents loaded, because the reaper went with the generator.
-- [`docs/MIGRATING-0.23.md`](https://github.com/alxjrvs/boom/blob/main/docs/MIGRATING-0.23.md) —
-  the retirement of `copy.expand`, the two new load-time errors, and the behavior changes to
-  `secret`, `rollback`, `uninstall` and glob placement. Written while `rollback` still existed.
-
-*(Absolute links, not repo-relative ones: this file is read on GitHub and from the installed
-binary's own help, where a relative path into `docs/` would not resolve.)*
+*(An absolute link, not a repo-relative one, so it resolves wherever this file is read.)*
 
 ## The model (decided — don't relitigate)
 
@@ -39,7 +26,8 @@ A `boom` invocation does one of two things:
    - `boom source` / `boom source sync` — reconcile the machine to the boomfile, running the `sync` verb (`--fix` repairs drift by overwriting conflicts). No verb upgrades a package — see "Reconciling never upgrades" below
    - `boom verify` — check drift, exit 0 ok / 2 warn / 1 fail (`--json` for a report; `--ci`
      narrows to a non-interactive schema-check gate, 0/1, no machine walk)
-   - `boom uninstall`
+   - `boom uninstall` — prompts on a terminal and refuses on a non-TTY without `--yes`
+     (a `--json` run is machine-driven, so it counts as consent)
    These share **one verb-parameterized loop** (`src/engine/reconcile.ts`) over a
    resource-type registry — siblings, not separate scripts. `source --resume` continues an
    interrupted one. A
@@ -67,20 +55,18 @@ A `boom` invocation does one of two things:
    decides built-in-vs-discovered by asking the route map itself
    (`getRoutingTargetForInput`), and `src/commands/catalog.ts` *derives* command names +
    briefs from that same route map for `boom skill` — one source of truth, no parallel table
-   to keep in sync. That is why removing a verb is a one-line edit here: the shell completions
-   and man page it also fed were derived, and were deleted with their commands.
+   to keep in sync. That is why removing a verb is a one-line edit here.
 
-### The journal, without an undo verb
+### The journal has no undo verb
 
-Every mutation is still journaled, and an overwrite still **displaces** the original into
-`backups/<run-id>/` at 0700 rather than destroying it. What is gone is `boom rollback`: nothing
-replays those records automatically any more. Two consumers keep the journal load-bearing —
+Every mutation is journaled, and an overwrite **displaces** the original into
+`backups/<run-id>/` at 0700 rather than destroying it. Nothing replays those records
+automatically. Two consumers keep the journal load-bearing —
 `displace()` is what makes `source --fix` non-destructive, and `--resume` reads the last
 uncommitted run to continue it rather than opening a second.
 
-So a bad sync is recovered by hand, from a backup tree that is still written for exactly that
-purpose. That is the trade: the records cost what they always did, and reading them is now a
-person's job.
+So a bad sync is recovered by hand, from a backup tree written for exactly that purpose. That
+is the trade: the records are cheap, and reading them is a person's job.
 
 ### Config source is a git remote (repo-only)
 
@@ -114,11 +100,10 @@ drift. Auth is whatever git/SSH already works in the user's shell — no boom-si
 credential handling.
 
 Operating that clone is git's job. boom clones it, reconciles from it, and *reports* its
-drift (`verify` must, to answer "am I in sync?"), but it does not wrap git: the
-`boom source status|diff|push|reset` verbs were removed in 0.33 because each was a
-second, weaker spelling of a command the user already has, against a path `boom doctor`
-already prints — `git -C <dir> status -sb`, `diff HEAD`, `reset --hard origin/<branch>`,
-`commit && push`. See `docs/MIGRATING-0.33.md`.
+drift (`verify` must, to answer "am I in sync?"), but it does not wrap git: a wrapper is a
+second, weaker spelling of a command the user already has. `boom doctor` prints the clone's
+path, and `git -C <dir> status -sb`, `diff HEAD`, `reset --hard origin/<branch>`,
+`commit && push` do the rest (the wrappers boom once shipped went in `CHANGELOG.md#0330`).
 
 `linkRemoteConfigRepo` still refuses to wipe a managed clone that has either uncommitted
 changes or commits not yet pushed (checked separately — `git status --porcelain` never
@@ -147,18 +132,12 @@ Resources:
 - `secret` — **RETIRED at 0.37**, and still parsed so an old boomfile keeps loading. It rendered
   a vault value to a file at sync time. Nothing reads it now; reconcile warns once per run with a
   count of the ignored declarations (never their paths). Resolve a secret at point of use instead
-  — `op run --env-file=F -- CMD` — or render it from a `run` step you own. See MIGRATING-0.37.
-  Secrets stay
-  out of the owned-destinations manifest, so orphan reaping never auto-deletes one. boom never
-  journals or backs up the plaintext **it** renders (a fresh render's undo is a plain remove); a
-  pre-existing file at `dst` is the user's, so it is **left alone** — replacing it takes
-  `boom source --fix`, which displaces it into the run's backup tree first so the original
-  can put it back
+  — `op run --env-file=F -- CMD` — or render it from a `run` step you own. See `CHANGELOG.md#0370`
 - `dir = [{ path, mode?, remove_on_uninstall? }]` — ensure a standalone directory exists
   (declarative `mkdir -p`/`chmod`); `remove_on_uninstall = true` removes it on uninstall *only
   if empty*
-- `pkg = [{ manager, file?, remove_on_uninstall? }]` — satisfy a package manager. `brew` runs
-  `brew bundle` over `file` (default `Brewfile`); `mise` runs `mise install`; `gh` installs `gh`
+- `pkg = [{ manager, file?, remove_on_uninstall?, cleanup? }]` — satisfy a package manager. `brew`
+  runs `brew bundle --no-upgrade` over `file` (default `Brewfile`); `mise` runs `mise install`; `gh` installs `gh`
   CLI extensions from a newline-separated `file` list, one owner-qualified `owner/repo` per line
   (four forks answer to `gh-stack`, so the owner is the identity) — `gh extension install`,
   verify diffs `gh extension list`, uninstall removes by bare name; declare it *after* the
@@ -169,7 +148,9 @@ Resources:
   what it installed; `= false` opts it out. It is a load-time error on `brew`/`mise`: their
   declared set lives in a Brewfile / the repo's mise config and neither has a "remove exactly
   what this file declares" verb (`brew bundle cleanup` does the opposite) — tear those down with
-  a `run` step bound to `on = "uninstall"`
+  a `run` step bound to `on = "uninstall"`. `cleanup` is that opposite, brew-only: `"check"` makes
+  every verb name the installed-but-undeclared set (a warning, never a removal); `"uninstall"`
+  lets `sync` run `brew bundle cleanup --force` over it
 - `osx_default = [{ domain, key, value, type? }]` — a `defaults write`; `type` is inferred
   from the TOML value (`bool`/`int`/`float`/`string`) and only stated to override an edge
   case. The prior value is journaled, so it can be recovered by hand (including a key boom
@@ -190,8 +171,8 @@ Resources:
   that it couldn't tell
 - `absent = [{ path, message?, recursive? }]` — a path that must **not** exist: `sync` removes
   it, `verify` fails while it is there, `uninstall` leaves it alone (boom did not create it).
-  The inverse of `check`, and the shape `check` cannot express — `missing_file = "pass"` says
-  absent is *acceptable*, never *required*. For files a tool re-creates behind your back: an
+  The inverse of every other resource: they converge a path *to* a content; this one requires
+  that there be none. For files a tool re-creates behind your back: an
   editor's local override, a credential cache, a `settings.local.json` an agent writes on an
   "always allow" click. Removal goes through the journal, so the file lands in the run's backup
   tree and is recoverable from there — the difference between this and a `run` step calling
@@ -220,8 +201,8 @@ keyed on their expanded `dst` alone (a module `link` and a base `copy` to the sa
 conflict, not two declarations), the loser is dropped at compose time rather than run and then
 fought over, and each override is reported as a `CONFIG` note. A `launchd` off macOS is keyed per
 kind instead, so it still beats a duplicate of *itself* but never overrides a kind of a different
-name. (`secret` was the other such kind until 0.37; the partition remains because a darwin
-`launchd` does own its destination, so the answer depends on the run and not only on the kind.) Both gates exist for the same reason: only a kind that takes ownership of
+name. (The partition is per run, not per kind, because a darwin `launchd` does own its
+destination.) Both gates exist for the same reason: only a kind that takes ownership of
 the destination may take it away from another, because a winner that declares nothing leaves the
 file declared by nobody — and orphan reaping deletes exactly that. A winner hidden behind `when`
 would do the same, which is why gating is resolved before keying.
@@ -236,17 +217,16 @@ boom already runs, so a consumer stops hand-rolling `run`/plist boilerplate for 
 field is opt-in; an absent (or all-off) table changes nothing. The behaviors are work items
 run through the *same* guarded loop as section resources (`runWorkItems`,
 `src/engine/settings.ts`) — so skill writes are journaled and recoverable —
-verb-aware (sync installs/refreshes, verify reports drift, uninstall tears the timers down):
+verb-aware (sync installs/refreshes, verify reports drift; uninstall leaves the skill alone):
 
 - `skill_on_sync = true` — regenerate `~/.claude/skills/boom/SKILL.md` from the running
   binary each sync, so the self-describing skill can't lag a release.
 - `upgrade_on_sync = "check"` — after a sync, warn when a newer release ships (offline-safe,
   never fails the sync). Taking the upgrade is your package manager's job. `"auto"` is retired
-  with the `boom upgrade` verb it called and now behaves as `"check"`; see MIGRATING-0.36.
-- `schedule` — **RETIRED.** boom used to generate and reap `com.boomtube.*` launchd timers
-  from this array. The key is still *accepted* (parsed, ignored) rather than rejected, because
-  `[boom]` is a strict table and failing a whole boomfile over a key that used to work is the
-  worse outcome. To run boom on a timer now, author a plist and link it with the `launchd`
+  with the `boom upgrade` verb it called and now behaves as `"check"`; see `CHANGELOG.md#0360`.
+- `schedule` — **retired**, and still *accepted* (parsed, ignored) rather than rejected:
+  `[boom]` is a strict table, and failing a whole boomfile over a key that used to work is the
+  worse outcome. To run boom on a timer, author a plist and link it with the `launchd`
   resource, which owns the load/unload lifecycle.
 - `notify = true` — when `boom verify` finds drift, raise a desktop notification (macOS
   `osascript` / Linux `notify-send`) so the signal doesn't die in a log. Verb-driven, not
@@ -261,7 +241,7 @@ installed?", never "is what is installed current?"; a merely-outdated package is
 reconcile that closes your browser is not a reconcile. Upgrading is each tool's own verb —
 `brew upgrade --formula`, `mise upgrade` — with the blast radius that tool defines.
 `boom source --update` opted into Bundle's upgrade and was removed in 0.38
-(`docs/MIGRATING-0.38.md`).
+(`CHANGELOG.md#0380`).
 
 ### Escalation, and why there is no askpass key
 
@@ -282,13 +262,10 @@ pipes the step's stdout and relays only Homebrew's `==>` headlines as live lines
 band. Piping also costs the tool its tty, which conveniently drops its colors and progress bars;
 the prompt is unaffected, since `/dev/tty` is not stdout.
 
-There was a vault-backed key here for the unattended case (a launchd timer, CI), and a matching
-`boom askpass` command. **The command is gone; the key is retired.** The command printed a
-resolved secret to stdout, which is a second way to read a vault value under a program name a
-machine's own controls are unlikely to have denied. Its own documentation argued the verb needed no
-fence because "anyone who can run `boom askpass op://…` can run `op read op://…` directly" — false
-on any machine that restricts the vault CLI, which is exactly the machine that most needs the
-guarantee. No configured user was found; the feature was carrying that exposure for nobody.
+boom has no askpass key of its own. A vault-backed `sudo_askpass` once filled the unattended
+case (a launchd timer, CI), paired with a command that printed the resolved secret to stdout — a
+second way to read a vault value under a program name a machine's controls are unlikely to have
+denied, carried for no configured user. Both are gone.
 
 `sudo_askpass` is still **accepted and ignored**, so a boomfile carrying it keeps loading. That is
 deliberate, and it is a different call from `copy.expand`, which is declared `v.never` so the
@@ -314,9 +291,8 @@ optional `declare` run on *every* verb — receiving a `HookApi`:
   declare(entry), journalWrite(op, file) }       // the two capabilities
 ```
 
-Loaded by runtime `import()` (works inside the compiled binary). This replaces the
-bash `_NAME_<verb>` hooks and is the public extension point. What a hook gets is what a
-built-in resource gets:
+Loaded by runtime `import()` (works inside the compiled binary). This is the public extension
+point. What a hook gets is what a built-in resource gets:
 
 - **Ownership** — `declare({ kind: "link" | "copy", dst, src })` puts a destination in the
   manifest, so orphan reaping treats it exactly like a link boom placed. It means *boom owns
@@ -380,7 +356,7 @@ breadcrumb records the config repo (path + remote).
 | Shell / process | `Bun.$` / `Bun.spawnSync`; `node:fs/promises` for symlink/copy/mode |
 | Output | `Bun.color` palette + a tally Reporter (drives exit codes) |
 | Quality gates | Biome (lint + format), `tsc --noEmit`, `bun test` |
-| Distribution | `bun build --compile` matrix (macOS arm64/x64, Linux x64) |
+| Distribution | `bun build --compile` matrix (macOS arm64/x64, Linux x64/arm64) |
 
 ## Layout
 
@@ -399,17 +375,20 @@ src/
     sync.ts                pre-reconcile config-repo fetch/pull(--rebase --autostash)-and-report
                            (+ the `--commit` half: commit local edits instead of autostashing)
     registry.ts            data-driven resource table (phase order) + finalize hooks
-    resources/             link · copy · tmpl · dir · pkg · osx · launchd · run · hook
+    resources/             link · copy · tmpl · dir · pkg · osx · launchd · run · absent · hook
     db.ts journal.ts       bun:sqlite store: transaction journal
     state.ts               the owned-destinations manifest (layout lives in lib/paths.ts)
-    skill.ts               renders the Claude SKILL.md (commands/skill.ts is the CLI wrapper)
-    settings.ts            the `[boom]` self-wiring table (skill install/refresh)
+    skill.ts               renders + installs the Claude SKILL.md (commands/skill.ts is the CLI wrapper)
+    settings.ts            the `[boom]` self-wiring table (skill refresh, release check, drift notify)
     doctor.ts validate.ts types.ts discovery.ts
   config/  schema.ts load.ts compose.ts remote.ts profile.ts
   lib/     reporter.ts color.ts fs.ts paths.ts proc.ts git.ts release.ts version.ts
+           lock.ts launchd.ts notify.ts keychain.ts confirm.ts toml.ts
 test/                       bun test (unit + sandboxed integration)
-examples/dotfiles/          a runnable boomfile.toml example
-.github/workflows/          ci.yml (check + cross-compile smoke), release.yml (tag → matrix → attach)
+examples/dotfiles/          a runnable boomfile.toml example (+ a discovered `publish` command)
+examples/github-action/     a composite action wrapping `boom verify --ci`
+.github/workflows/          ci.yml (check + version-guard + cross-compile, gated by ci-gate),
+                            release.yml (tag → matrix → sign → attach → formula PR)
 ```
 
 ## Distribution
@@ -420,5 +399,6 @@ matrix on Linux, then **signs the macOS binaries on a real macOS runner** before
 assembling the release and computing checksums over the final binaries. Signing is
 ad-hoc by default (valid on Apple Silicon); add the `MACOS_*`/`APPLE_*` repo secrets to
 switch on Developer ID signing + notarization (see the header of `release.yml`).
-`install.sh` only re-signs ad-hoc when a download fails verification, so a
-notarized binary is never clobbered.
+`install.sh` only re-signs ad-hoc when the downloaded binary's existing code signature fails
+`codesign --verify` (a checksum failure aborts the install instead), so a notarized binary is
+never clobbered.

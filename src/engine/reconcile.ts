@@ -15,13 +15,13 @@ import { bandsReporter } from "../lib/reporter.ts";
 import { Journal, journalRemove, newRunId, pruneRuns, readRun } from "./journal.ts";
 import { finalizeResources, reconcileSection } from "./registry.ts";
 import { applyBoomSettings } from "./settings.ts";
-import { type ManifestEntry, readManifest, writeManifest } from "./state.ts";
+import { byDst, type ManifestEntry, readManifest, writeManifest } from "./state.ts";
 import { syncConfigRepo } from "./sync.ts";
 import type { LinkMode, ReconcileCtx, Verb } from "./types.ts";
 
 // The grey opening band, per verb — the bombastic "we're getting to work" splash the cosmic-bands
-// output opens on (site voice: high-energy, no comic-lore proper nouns). Keyed by verb; the
-// verdict band's label comes from the command name instead (SOURCE/VERIFY/…).
+// output opens on (high-energy, no comic-lore proper nouns). Keyed by verb; the verdict band's
+// label comes from the command name instead (SOURCE/VERIFY/…).
 const SETUP_COPY: Record<Verb, string> = {
   sync: "PREPARING FOR THE WORLD THAT'S COMING…",
   verify: "SCANNING THE MACHINE FOR DRIFT…",
@@ -41,7 +41,7 @@ interface ReconcileOptions {
   readonly verbose?: boolean;
   // The command name the verdict band echoes (`SOURCE...COMPLETE!`) — the user-facing spelling
   // of the invocation, which can differ from the verb (`boom source` runs the sync verb).
-  // Defaults to the verb when unset.
+  // Every CLI caller passes it; the engine tests lean on the verb.
   readonly command?: string;
   // Only consulted for verb "sync": commit local config-repo changes before
   // pulling, instead of the default autostash.
@@ -54,10 +54,7 @@ interface ReconcileOptions {
 // sections, or a hook couldn't be loaded to state what it owns — so the un-redeclared
 // ownership is preserved rather than dropped (and silently reaped on a later run).
 function mergeManifest(prior: readonly ManifestEntry[], declared: readonly ManifestEntry[]): ManifestEntry[] {
-  const byDst = new Map<string, ManifestEntry>();
-  for (const e of prior) byDst.set(e.dst, e);
-  for (const e of declared) byDst.set(e.dst, e);
-  return [...byDst.values()];
+  return byDst([...prior, ...declared]);
 }
 
 async function reapOrphans(ctx: ReconcileCtx, prior: readonly ManifestEntry[]): Promise<void> {
@@ -71,7 +68,7 @@ async function reapOrphans(ctx: ReconcileCtx, prior: readonly ManifestEntry[]): 
   };
   const reap = async (dst: string, disp: string, why: string): Promise<void> => {
     head();
-    if (ctx.verb === "verify") ctx.report.warn(`${disp} ${why} — boom source --fix to reap`);
+    if (ctx.verb === "verify") ctx.report.warn(`${disp} ${why} — boom source reaps it`);
     else if (ctx.dryRun) ctx.report.note(`would reap ${disp}`);
     else {
       // Same transaction as every other mutation here: journaled with a backup, so a reaped
@@ -100,11 +97,8 @@ async function reapOrphans(ctx: ReconcileCtx, prior: readonly ManifestEntry[]): 
     }
     const target = await linkTarget(entry.dst);
     if (target === undefined) continue; // not a symlink — nothing to reap
-    // Match against the source the manifest recorded: precise AND origin-independent, so a link a
-    // *module* shipped (whose target points into the module's own dir, not the config repo) is
-    // still reaped when that module leaves `use`. The `startsWith(repo)` fallback that used to sit
-    // here served pre-TSV rows carrying `src: ""`; readManifest can no longer produce one (see
-    // state.ts), so every entry has a real `src` and the fallback was unreachable.
+    // Match against the exact source the manifest recorded — never a `startsWith(repo)` test,
+    // which would claim any symlink into the repo, including ones boom did not place.
     if (target !== entry.src) continue;
     await reap(entry.dst, disp, `→ ${target} (no longer declared)`);
   }
@@ -190,13 +184,9 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
       return finish();
     }
     let backupRoot: string | undefined;
-    // `writes`, not `mutating`: uninstall is the most destructive verb boom has and it used to
-    // run with NO journal and NO backup tree, so every removal was unrecorded and permanent —
-    // the only run on record afterwards was the previous *sync's*, which could not name, let
-    // alone recover, anything the teardown deleted. Nothing about the machinery is sync-specific;
-    // it was only ever gated that way. Resources that already journal their removals (systemd's
-    // uninstall arm writes intent/displace/done verbatim) start working the moment the envelope
-    // exists — their `ctx.journal?.` calls were silently no-oping.
+    // `writes`, not `mutating`: uninstall is the most destructive verb boom has, so it gets the
+    // journal and the backup tree too — every removal is recorded and recoverable, not permanent.
+    // Nothing about the machinery is sync-specific.
     if (writes) {
       let runId = newRunId();
       // --resume continues INTO the interrupted run — reuse its id and backup dir — rather
@@ -221,15 +211,15 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
       // does not exist yet throws ENOENT inside a try/finally that has no catch, taking every
       // mutating sync down with it. Create-then-own or nothing — so if you ever do add an eager
       // mkdir here it must carry `{ recursive: true, mode: 0o700 }`; the tree can hold a
-      // displaced secret's plaintext.
+      // displaced 0600 file.
       backupRoot = join(backupsDir(ctx.env), runId);
     }
     const priorManifest = await readManifest(ctx.env);
 
-    // Compose `use` modules + the base repo + the overlay files that match this machine into ONE
-    // ordered, origin-stamped section list plus the merged `[vars]`/`[boom]` tables. Above the
-    // rctx literal deliberately: it reads from the composition, so `vars` carries the
-    // overlay's per-machine values.
+    // Compose the base boomfile + the overlay files that match this machine into ONE ordered,
+    // source-stamped section list plus the merged `[vars]`/`[boom]` tables. Above the rctx
+    // literal deliberately: it reads from the composition, so `vars` carries the overlay's
+    // per-machine values.
     const pc = profileContext(ctx.env, opts.profiles ?? []);
     let composition: Composition;
     try {
@@ -263,11 +253,9 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
       report.warn(
         `${retiredSecrets} \`secret\` declaration(s) are retired and ignored — boom no longer ` +
           "renders a vault value to a file. Resolve it at point of use instead (`op run " +
-          "--env-file=F -- CMD`), or render it with a `run` step you own. See MIGRATING-0.37.",
+          "--env-file=F -- CMD`), or render it with a `run` step you own. See CHANGELOG.md#0370.",
       );
     }
-
-    const childEnv = ctx.env;
 
     const rctx: ReconcileCtx = {
       repo,
@@ -278,7 +266,7 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
       // "overwrite" to repair drift; `boom source set` (no linkMode) inherits this skip.
       linkMode: opts.linkMode ?? "skip",
       verbose,
-      env: childEnv,
+      env: ctx.env,
       vars: composition.vars,
       // The same `pc` the section gate below keys on — carried, not recomputed, so a resource
       // never has to re-derive the run's os/host/profiles (and lose --profile doing it).
@@ -295,8 +283,8 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
     // outright that nothing changed — print it even when quiet mode holds section headers back.
     if (dryRun) report.header(`${verb} — dry run (no changes)`, true);
     const only = opts.only && opts.only.length > 0 ? new Set(opts.only) : undefined;
-    // Composed order is precedence order (modules → base → overlays); each section still gates on
-    // its own `when` (host/OS/profile) and the --only filter.
+    // Composed order is precedence order (base → overlays); each section still gates on its own
+    // `when` (host/OS/profile) and the --only filter.
     for (const section of composition.sections) {
       if (!sectionApplies(section, pc)) continue;
       if (only && !only.has(section.name)) continue;
@@ -330,8 +318,8 @@ export async function reconcile(verb: Verb, ctx: BoomContext, opts: ReconcileOpt
       await writeManifest(ctx.env, []); // uninstall clears the manifest
     }
 
-    // The top-level `[boom]` table: machine-global self-wiring (skill refresh, scheduled
-    // timers, upgrade check) folded into the reconcile. Skipped for a `--only` scoped run —
+    // The top-level `[boom]` table: machine-global self-wiring (skill refresh, release check,
+    // drift notify) folded into the reconcile. Skipped for a `--only` scoped run —
     // it targets named sections, and these global behaviors aren't a section. Guarded like a
     // resource: an unexpected throw becomes a reported failure, never an unwound run.
     if (!only) {

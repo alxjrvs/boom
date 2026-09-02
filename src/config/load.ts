@@ -1,6 +1,5 @@
-// Resolve, parse, and validate a boomfile.toml. Resolution order mirrors the bash
-// engine: $BOOM_CONFIG → breadcrumb (from `boom source set`) → cwd; first dir
-// with a boomfile.toml wins. Parsing is Bun's own TOML (lib/toml.ts); validation is the
+// Resolve, parse, and validate a boomfile.toml. Resolution order: $BOOM_CONFIG → breadcrumb
+// (from `boom source set`) → cwd; first dir with a boomfile.toml wins. Parsing is Bun's own TOML (lib/toml.ts); validation is the
 // valibot schema.
 //
 // Config is repo-only: the breadcrumb always names a boom-managed clone of a git
@@ -9,7 +8,6 @@
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import * as v from "valibot";
-import type { BoomContext } from "../context.ts";
 import { type Env, stateHome } from "../lib/paths.ts";
 import { parseToml } from "../lib/toml.ts";
 import { type Boomfile, BoomfileSchema, type Overlay, OverlaySchema } from "./schema.ts";
@@ -17,10 +15,8 @@ import { type Boomfile, BoomfileSchema, type Overlay, OverlaySchema } from "./sc
 export const CONFIG_FILE = "boomfile.toml";
 
 // The one canonical "you haven't linked a config repo yet" message, so every command that
-// resolves the config (reconcile, validate, where, doctor) — and requireConfigBreadcrumb —
-// points the user at the same next step with identical wording instead of a near-copy that
-// can drift. Reported verbatim through the Reporter; requireConfigBreadcrumb prefixes `boom:`
-// for its raw-stderr path.
+// resolves the config (reconcile, doctor) points the user at the same next step with identical
+// wording instead of a near-copy that can drift.
 export const NO_CONFIG_REPO_MSG = "no config repo linked — run `boom source set <owner/repo>`";
 
 export class BoomConfigError extends Error {}
@@ -64,18 +60,6 @@ export async function readConfigBreadcrumb(env: Env): Promise<ConfigBreadcrumb |
   } catch {
     return undefined;
   }
-}
-
-// The one linked-config guard shared by every `boom source` subcommand (and any command
-// that operates the managed clone): resolve the breadcrumb or print the single canonical
-// "not linked" error. Returns undefined so callers can `return 1` uniformly.
-export async function requireConfigBreadcrumb(ctx: BoomContext): Promise<ConfigBreadcrumb | undefined> {
-  const breadcrumb = await readConfigBreadcrumb(ctx.env);
-  if (!breadcrumb) {
-    ctx.process.stderr.write(`boom: ${NO_CONFIG_REPO_MSG}\n`);
-    return undefined;
-  }
-  return breadcrumb;
 }
 
 export async function writeConfigBreadcrumb(env: Env, breadcrumb: ConfigBreadcrumb): Promise<void> {

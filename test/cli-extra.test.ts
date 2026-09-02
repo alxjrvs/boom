@@ -5,8 +5,8 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "@stricli/core";
-import { app } from "../src/cli.ts";
-import { commandList, commandNames, subcommandGroups } from "../src/commands/catalog.ts";
+import { app, routes } from "../src/cli.ts";
+import { commandList, commandNames } from "../src/commands/catalog.ts";
 import type { BoomContext } from "../src/context.ts";
 import { doctor } from "../src/engine/doctor.ts";
 import { skillDoc } from "../src/engine/skill.ts";
@@ -28,38 +28,25 @@ function ctxFor(env: Record<string, string | undefined>, cwd: string): { ctx: Bo
 
 // ---- catalog ----------------------------------------------------------------
 
-test("command list (derived from the route map) is unique and includes the core verbs", () => {
-  const names = commandNames();
-  expect(new Set(names).size).toBe(names.length);
-  for (const v of ["verify", "uninstall", "source", "doctor"]) {
-    expect(names).toContain(v);
-  }
-  // `validate` was folded into `doctor --config`; it must not resurface as a command.
-  expect(names).not.toContain("watchtower");
-  expect(names).not.toContain("validate");
-  // Removed verbs, asserted absent rather than merely un-mentioned: the catalog DERIVES this
-  // list from the route map, so a re-added route would silently reappear in every derived
-  // surface (the skill most of all) with nothing to catch it.
-  for (const gone of ["code", "mcp", "completions", "man", "edit", "plan"]) {
-    expect(names).not.toContain(gone);
-  }
+// The exact set, not a contains-list: the catalog DERIVES this from the route map, so a route
+// added or re-added by accident would otherwise reappear in every derived surface (the skill
+// most of all) with nothing to catch it.
+test("command list (derived from the route map) is exactly the five built-ins", () => {
+  expect([...commandNames()].sort()).toEqual(["doctor", "skill", "source", "uninstall", "verify"]);
 });
 
-// ---- completions ------------------------------------------------------------
-
-test("subcommandGroups derives nested routes from the route map", () => {
-  const groups = subcommandGroups();
-  const source = groups.find((g) => g.parent === "source");
-  const names = source?.children.map((c) => c.name) ?? [];
-  for (const sub of ["sync", "set"]) expect(names).toContain(sub);
-  // The git-operation verbs removed in 0.33, asserted absent for the same reason the
-  // top-level list above is: completions DERIVE from the route map, so a re-added route
-  // would silently reappear in every derived surface with nothing to catch it.
-  for (const gone of ["status", "diff", "push", "reset"]) expect(names).not.toContain(gone);
-  // `code` is gone, so its group must be too. Asserted rather than merely deleted:
-  // this is the case that catches the route map and a derived surface drifting
-  // apart, and it has to hold in the absence direction as well as the presence one.
-  expect(groups.find((g) => g.parent === "code")).toBeUndefined();
+test("`source` is the one nested route map, and it routes exactly sync + set", () => {
+  const nested = routes
+    .getAllEntries()
+    .filter((e) => !e.hidden && "getAllEntries" in e.target)
+    .map((e) => ({
+      parent: e.name.original,
+      children: (e.target as typeof routes)
+        .getAllEntries()
+        .map((c) => c.name.original)
+        .sort(),
+    }));
+  expect(nested).toEqual([{ parent: "source", children: ["set", "sync"] }]);
 });
 
 // ---- color / command detection ----------------------------------------------
@@ -92,15 +79,9 @@ test("skill doc is a SKILL.md with frontmatter naming every command", () => {
   expect(s).toContain("boom uninstall");
 });
 
-// The inverse of the case above, and the one that was missing. skill.ts's own header says the
-// command reference "is generated from the catalog so it can never document a command that
-// doesn't exist" — but adds that "the guidance around it is hand-written", and the hand-written
-// half is exactly where a dead verb survives.
-//
-// It did. After `rollback` was removed, the guidance still told agents that `boom uninstall` is
-// journaled "so `boom rollback` can replay it", and the frontmatter description — billed to
-// every session that loads the skill — still offered "rolling back a boom change". The generated
-// half was correct the whole time, which is why nothing caught it.
+// The inverse of the case above. skill.ts's command reference is generated from the catalog and
+// cannot name a dead verb; the hand-written guidance around it can, and has — so every `boom X`
+// the doc mentions is checked against the route map.
 test("the skill names no command that isn't a route", () => {
   const s = skillDoc("9.9.9");
   const real = new Set(commandNames());
@@ -160,35 +141,36 @@ test("doctor --config fails when no dotfiles repo resolves (strict CI gate)", as
 
 // ---- doctor ------------------------------------------------------------------
 
+// An empty PATH so no tool resolves: every probe warns, and the exit code is a fixed 2 rather
+// than whatever the host machine happens to have installed. BOOM_OS=linux skips the macOS
+// keychain probe for the same reason.
 test("doctor reports a parseable config and a writable state dir", async () => {
   const repo = await base();
   await writeFile(join(repo, "boomfile.toml"), `[[section]]\nname = "x"\n`);
   const state = await base();
-  // BOOM_OS=linux skips the macOS keychain probe so the result is deterministic.
   const { ctx, out } = ctxFor(
-    { BOOM_CONFIG: repo, XDG_STATE_HOME: state, BOOM_OS: "linux", NO_COLOR: "1" },
+    { BOOM_CONFIG: repo, XDG_STATE_HOME: state, BOOM_OS: "linux", NO_COLOR: "1", PATH: await base() },
     repo,
   );
-  const rc = await doctor(ctx);
+  expect(await doctor(ctx)).toBe(2);
   expect(out()).toContain("boomfile.toml — 1 section(s)");
   expect(out()).toContain("state dir writable");
-  // No failures possible here (config valid, state writable); tool warnings may bump to 2.
-  expect([0, 2]).toContain(rc);
+  expect(out()).toContain("brew not on PATH");
 });
 
 test("doctor --json emits a versioned report envelope", async () => {
   const repo = await base();
   await writeFile(join(repo, "boomfile.toml"), `[[section]]\nname = "x"\n`);
   const { ctx, out } = ctxFor(
-    { BOOM_CONFIG: repo, XDG_STATE_HOME: await base(), BOOM_OS: "linux", NO_COLOR: "1" },
+    { BOOM_CONFIG: repo, XDG_STATE_HOME: await base(), BOOM_OS: "linux", NO_COLOR: "1", PATH: await base() },
     repo,
   );
-  const rc = await doctor(ctx, true);
+  expect(await doctor(ctx, true)).toBe(2);
   const env = JSON.parse(out());
   expect(env.schemaVersion).toBe(2);
-  expect(typeof env.ok).toBe("boolean");
+  expect(env.ok).toBe(true); // warnings, no failures
+  expect(env.warnings).toBeGreaterThan(0);
   expect(Array.isArray(env.records)).toBe(true);
-  expect([0, 2]).toContain(rc); // valid config + writable state; tool warnings may bump to 2
 });
 
 test("doctor fails (exit 1) on an unparseable boomfile", async () => {

@@ -1,9 +1,8 @@
 // launchd helpers — the one place the "manage a macOS LaunchAgent" incantation lives, used by
-// the `launchd` resource to link and drive the lifecycle of a USER-AUTHORED plist. boom no
-// longer generates plists of its own: `[boom] schedule` was removed, and with it the renderer,
-// the interval parser and the PATH-snapshot comparison that only a generated plist needed.
-// Every launchctl call is darwin-only; callers OS-gate before reaching here.
-import { join } from "node:path";
+// the `launchd` resource to link and drive the lifecycle of a USER-AUTHORED plist. boom
+// generates no plists of its own. Every launchctl call is darwin-only; callers OS-gate before
+// reaching here.
+import { basename, join } from "node:path";
 import type { Env } from "./paths.ts";
 import { captureArgv } from "./proc.ts";
 
@@ -11,6 +10,13 @@ import { captureArgv } from "./proc.ts";
 // without HOME, so a caller can refuse rather than write to a relative path.
 export function launchAgentsDir(env: Env): string | undefined {
   return env.HOME ? join(env.HOME, "Library", "LaunchAgents") : undefined;
+}
+
+// Where a `launchd` entry with no `dst` lands: `~/Library/LaunchAgents/<basename(src)>`. Shared
+// by the resource and the composer, which keys duplicate destinations on the same answer.
+export function defaultPlistDst(src: string, env: Env): string | undefined {
+  const agents = launchAgentsDir(env);
+  return agents ? join(agents, basename(src)) : undefined;
 }
 
 // Pull the <key>Label</key><string>…</string> value out of a plist's text, so verify can ask
@@ -44,15 +50,9 @@ export function agentLoaded(label: string, env: Env): boolean {
 // The exit status of the agent's last completed run, or undefined if it is not loaded, has
 // never run, or launchctl said something we don't recognize.
 //
-// This exists because "loaded" and "working" are different questions, and boom only ever asked
-// the first. An agent can be installed, loaded, firing and failing every single time, reporting
-// only into its own log — which is exactly what a since-removed fetch timer did for a month.
-//
-// Worth stating plainly now that `schedule` is gone: this is a weaker check than it was. It
-// covers whatever hand-authored agents a boomfile links, and those are typically RunAtLoad
-// rather than timers, so "last exit" says much less about them than it did about a job firing
-// on an interval with nobody watching. Kept because it costs one launchctl call and still
-// answers the question for any agent that does fail.
+// This exists because "loaded" and "working" are different questions. An agent can be installed,
+// loaded, firing and failing every single time, reporting only into its own log — which nobody
+// watches, by definition of the job being scheduled. One launchctl call answers it.
 export function agentLastExit(label: string, env: Env): number | undefined {
   const r = captureArgv(["launchctl", "list", label], env);
   if (r.code !== 0) return undefined;

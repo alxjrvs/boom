@@ -34,8 +34,7 @@ type CommitOutcome =
 
 // The `--commit` half: stage and commit whatever is loose in the managed clone before the
 // pull, so local edits land as a real commit replayed on top of the rebase rather than as an
-// autostash. Lived in its own module while `boom source push` shared it; with that verb gone
-// this is its only caller, so it sits next to the pull it modifies.
+// autostash. Sits next to the pull it modifies, its only caller.
 function commitLocalChanges(dir: string, env: Env, message?: string): CommitOutcome {
   if (isClean(dir, env)) return { kind: "clean" };
   addAll(dir, env);

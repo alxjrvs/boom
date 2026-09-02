@@ -1,7 +1,7 @@
-// The `run` resource: an inline shell step bound to one or more verbs. Ports engine/run's
-// `on` primitive — `sync` fires on the sync verb (bare or `--fix`); `verify` on verify;
-// `uninstall` on uninstall (the teardown direction, symmetric with hooks). `on` accepts a
-// list, so a step that fires on both sync and uninstall is one entry, not a duplicated pair.
+// The `run` resource: an inline shell step bound to one or more verbs — `sync` fires on the
+// sync verb (bare or `--fix`); `verify` on verify; `uninstall` on uninstall (the teardown
+// direction, symmetric with hooks). `on` accepts a list, so a step that fires on both sync
+// and uninstall is one entry, not a duplicated pair.
 //
 // Guard contract: `creates` (a path) and `unless` (a shell predicate) make a step idempotent
 // declaratively. Either one satisfied skips the step; they gate every verb the step binds to.
@@ -60,8 +60,8 @@ export async function reconcileRun(entry: Run, ctx: ReconcileCtx): Promise<void>
 
   if ((ctx.verb === "sync" || ctx.verb === "uninstall") && ctx.dryRun) {
     // `unless` is arbitrary user shell, so a preview must never be the first thing that runs
-    // it — same refusal check.ts makes for `repair`. Report the uncertainty rather than either
-    // lying about the verdict or mutating to find it out.
+    // it. Report the uncertainty rather than either lying about the verdict or mutating to
+    // find it out.
     ctx.report.plan(
       entry.unless
         ? `would run: ${entry.cmd} (unless \`${entry.unless}\` — not evaluated in a dry run)`
@@ -79,7 +79,7 @@ export async function reconcileRun(entry: Run, ctx: ReconcileCtx): Promise<void>
   // undoing its file mutations would NOT undo. Only a mutating sync carries a journal — and only the
   // mutation: a guard that skipped the step is a condition, not a side effect, so it records
   // nothing (both guards return above this line).
-  if (ctx.verb === "sync") await ctx.journal?.side("run", entry.cmd);
+  if (ctx.verb === "sync") ctx.journal?.side("run", entry.cmd);
   // Run from the dotfiles repo, not the invocation cwd, so sync is cwd-independent:
   // a step like `lefthook install` targets the repo's `.git`, not whatever directory
   // `boom` was called from. Steps that name absolute / `~`-anchored paths are unaffected.

@@ -1,8 +1,6 @@
 // Repo-only config: ref parsing, the clone/fetch/pull-and-report sync step, and the
 // doctor config-repo section. Fixtures are local git repos — `git clone`/`fetch` treat a
 // local path exactly like any other remote, so none of this needs real network access.
-// (The `boom source push|status|diff|reset` cases lived here too, and went with those verbs
-// in 0.33; what remains is the pull/clone path `boom source` still depends on.)
 import { expect, test } from "bun:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -332,8 +330,8 @@ test("doctor warns when no remote config is linked", async () => {
 // ---- captureArgv hardening --------------------------------------------------
 
 test("captureArgv reports a missing executable or cwd as a failed result, not a throw", () => {
-  // Bun.spawnSync throws for both; sync/push/reset rely on getting a code back so a
-  // missing git (or a stale breadcrumb path) degrades to their reported-error paths.
+  // Bun.spawnSync throws for both; the config-repo sync relies on getting a code back so a
+  // missing git (or a stale breadcrumb path) degrades to its reported-error path.
   expect(captureArgv(["boom-definitely-not-a-real-tool"], {}).code).toBe(-1);
   expect(captureArgv(["git", "status"], {}, { cwd: join(tmpdir(), "boom-no-such-dir") }).code).toBe(-1);
 });

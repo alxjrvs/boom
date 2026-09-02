@@ -104,14 +104,13 @@ dst = "~/rendered.txt"
 `;
 
 // The structural guard behind this whole invariant. `intent(op, dst, plan)` takes the undo token
-// the mutation is ABOUT to become, and BOTH orphan readers filter `AND undo IS NOT NULL` — so an
-// intent row without one is invisible to `rollback` and counts as 0 in `rollback --list`. Seven
-// sites used to hand-inline intent→displace→done and omit the token, leaving exactly that hole
-// for any crash between the displace and the `done`.
+// the mutation is ABOUT to become, and BOTH orphan readers (readRun, listRuns) filter
+// `AND undo IS NOT NULL` — so an intent row without one is invisible to `--resume` and counts
+// as 0 in a run listing, leaving a hole for any crash between the displace and the `done`.
 //
 // Asserted over the whole ops table rather than per-site on purpose: this fails for a NEW writer
-// that inlines the sequence too, which is the failure mode that produced the original seven.
-test("every intent row names its own undo (rollback cannot see one that does not)", async () => {
+// that inlines intent→displace→done and omits the token.
+test("every intent row names its own undo (readRun/--resume cannot see one that does not)", async () => {
   const sb = await sandbox(WRITERS);
   await writeFile(join(sb.repo, "src.txt"), "hello");
   await writeFile(join(sb.repo, "t.tmpl"), "value={{ host }}\n");
@@ -162,8 +161,7 @@ test("a run whose self-wiring failed is not marked committed", async () => {
   await blockSkillWrite(sb.home);
 
   expect(await reconcile("sync", sb.ctx, {})).toBe(1);
-  // markCommitted used to be decided before applyBoomSettings ran, so this returned true and
-  // `rollback --list` called a half-applied run clean.
+  // committed is decided AFTER applyBoomSettings runs, or a half-applied run would read as clean.
   expect((await listRuns(sb.env))[0]?.committed).toBe(false);
 });
 

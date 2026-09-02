@@ -1,8 +1,7 @@
 // The resource registry: a data-driven, phase-ordered table of resource types — the
-// executable form of the phase order that used to live only in a comment above a hand-written
-// dispatch sequence. Adding a resource is one table entry, not an edit to the section loop.
-// The order below is the one SPEC.md and config/schema.ts state:
-//   link → copy → tmpl → dir → pkg → osx_default → launchd → run → hook
+// executable form of the phase order. Adding a resource is one table entry, not an edit to
+// the section loop. The order below is the one SPEC.md and config/schema.ts state:
+//   link → copy → tmpl → dir → pkg → osx_default → launchd → run → absent → hook
 //
 // Each resource declares how to turn a Section into labelled work units (so the per-item
 // error boundary can name what failed) and, optionally, a `finalize` hook that runs once at
@@ -113,7 +112,7 @@ const RESOURCES: readonly ResourceType[] = [
 export async function reconcileSection(section: ComposedSection, ctx: ReconcileCtx): Promise<void> {
   for (const res of RESOURCES) {
     // Stamp the category before running the resource's items so every line they emit is grouped
-    // under the right band in the dense default (a no-op on the classic/verbose surfaces).
+    // under the right band in the dense default (a no-op when verbose streams live).
     ctx.report.category = res.category;
     await runWorkItems(res.items(section), ctx);
   }

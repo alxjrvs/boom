@@ -4,59 +4,55 @@
 // PATH, is the agent's 1Password token in the keychain, is the state dir writable.
 // Exit code mirrors verify: 0 ok / 2 warnings / 1 failures.
 import { mkdir } from "node:fs/promises";
-import { dirname } from "node:path";
 import { NO_CONFIG_REPO_MSG, readConfigBreadcrumb, resolveConfigDir } from "../config/load.ts";
 import { detectOs } from "../config/profile.ts";
 import type { BoomContext } from "../context.ts";
-import { pathExists } from "../lib/fs.ts";
+import { displayPath } from "../lib/fs.ts";
 import { remoteReachableAsync } from "../lib/git.ts";
 import { agentKeychainItem, agentTokenPresent } from "../lib/keychain.ts";
 import { boomStateDir } from "../lib/paths.ts";
 import { hasCommand } from "../lib/proc.ts";
 import { bandsReporter, type Reporter } from "../lib/reporter.ts";
 import { VERSION } from "../lib/version.ts";
-import { skillDoc, skillInstallPath } from "./skill.ts";
+import { installSkill, skillState, skillStatusLabel } from "./skill.ts";
 import { validateConfigFiles } from "./validate.ts";
 
-// The external tools boom's resources / commands shell out to, and what needs each.
-// None are required for boom itself to run (it's a self-contained binary), so a missing
-// tool is a warning, not a failure — it only bites if a boomfile uses that resource.
-// (git is the one exception: repo-only config means it's load-bearing the moment a
-// remote config is linked — the Config repo section below fails on that specifically.)
+// The external tools boom's resources shell out to, and what needs each. None are required for
+// boom itself to run (it's a self-contained binary), so a missing tool is a warning, not a
+// failure — it only bites if a boomfile uses that resource. (git is the one exception:
+// repo-only config means it's load-bearing the moment a remote config is linked — the Config
+// repo section below fails on that specifically.)
 const TOOLS: ReadonlyArray<{ cmd: string; why: string }> = [
-  { cmd: "git", why: "config repo sync, code crawl + agent git" },
+  { cmd: "git", why: "config repo sync" },
   { cmd: "brew", why: "pkg resource (brew)" },
   { cmd: "mise", why: "pkg resource (mise)" },
-  { cmd: "op", why: "1Password secrets (hooks/mcp)" },
-  { cmd: "claude", why: "code + mcp commands" },
+  { cmd: "gh", why: "pkg resource (gh extensions)" },
 ];
 
-// `configOnly` (the `--config` flag) is the folded-in `boom validate`: parse + schema-check
-// the boomfile and overlays alone, as a read-only CI gate — no tools/keychain/state checks,
-// pass/fail 0/1 (no warning tier), and a missing config repo is a *failure*, not a warning.
 // The boom Claude skill, checked and (under --fix) installed by doctor.
 async function checkSkill(ctx: BoomContext, report: Reporter, fix: boolean): Promise<void> {
-  const file = skillInstallPath(ctx.env);
-  if (!file) {
+  const state = await skillState(ctx.env);
+  if (!state) {
     report.skip("can't resolve the Claude config dir (HOME unset)");
     return;
   }
-  const doc = skillDoc(VERSION);
-  const current = (await pathExists(file)) ? await Bun.file(file).text() : undefined;
-  if (current === doc) {
+  if (state.status === "current") {
     report.ok(`boom skill installed + current (v${VERSION})`);
     return;
   }
-  const state = current === undefined ? "not installed" : "stale";
   if (!fix) {
-    report.warn(`boom skill ${state} — run \`boom skill --install\` (or \`boom doctor --fix\`)`);
+    report.warn(
+      `boom skill ${skillStatusLabel(state.status)} — run \`boom skill --install\` (or \`boom doctor --fix\`)`,
+    );
     return;
   }
-  await mkdir(dirname(file), { recursive: true });
-  await Bun.write(file, doc);
-  report.ok(`installed boom skill → ${file} (v${VERSION})`);
+  await installSkill(state);
+  report.ok(`installed boom skill → ${state.file} (v${VERSION})`);
 }
 
+// `configOnly` (the `--config` flag): parse + schema-check the boomfile and overlays alone, as
+// a read-only CI gate — no tools/keychain/state checks, pass/fail 0/1 (no warning tier), and a
+// missing config repo is a *failure*, not a warning.
 export async function doctor(
   ctx: BoomContext,
   json = false,
@@ -108,6 +104,9 @@ export async function doctor(
   } else {
     report.ok(`${breadcrumb.remote.url} reachable`);
   }
+  // The clone's path is what `git -C <dir> …` needs: boom does not wrap git, so this is the
+  // handle it hands over.
+  if (breadcrumb) report.note(`clone: ${displayPath(breadcrumb.path, ctx.env)}`);
 
   report.header("Tools on PATH");
   for (const { cmd, why } of TOOLS) {
@@ -116,28 +115,15 @@ export async function doctor(
     else report.warn(`${cmd} not on PATH — needed for ${why}`);
   }
 
-  // Only when the token is actually there. This used to run on every macOS machine, so a
-  // brand-new user's first `boom doctor` — the command whose whole job is "is boom set up to do
-  // its job" — warned about a 1Password service-account item they had never heard of, and told
-  // them to run `op-agent provision`, which boom neither ships nor installs. A false positive on
-  // first run with an unactionable remedy.
-  if (detectOs(ctx.env) === "darwin") {
-    const item = agentKeychainItem(ctx.env);
-    // PRESENCE IS THE WHOLE SIGNAL, and it is the one this check was already arguing for. It
-    // used to also count declared `secret` entries and warn when the item was missing while some
-    // existed. That gate had regressed once by being the ONLY gate: a config resolving every
-    // credential at runtime and declaring zero secrets — the setup most likely to depend on the
-    // item — silenced the check completely. `secret` is gone (0.37), so the count is always zero
-    // and the fallback added to fix that regression is now the only path. Which is correct: the
-    // token backs `headersHelper`, `*_COMMAND` resolvers and any hook shelling out to `op`, none
-    // of which ever appeared in a boomfile. If the item is there, something put it there.
-    if (agentTokenPresent(ctx.env)) {
-      report.header("1Password agent");
-      report.ok(`${item} service-account token present in keychain`);
-    }
-    // Neither present nor needed → stay silent. That is the case this gate was narrowed for:
-    // a new user on macOS with no op-backed anything should not be told to provision a
-    // 1Password service account they have never heard of.
+  // PRESENCE IS THE WHOLE SIGNAL. The token backs `headersHelper`, `*_COMMAND` resolvers and
+  // any hook shelling out to `op`, none of which appear in a boomfile, so nothing in the config
+  // can say whether a machine needs it: if the item is there, something put it there. Absent →
+  // stay silent: a new user on macOS with no op-backed anything must not be told to provision a
+  // 1Password service account they have never heard of (a false positive on first run, with an
+  // unactionable remedy).
+  if (detectOs(ctx.env) === "darwin" && agentTokenPresent(ctx.env)) {
+    report.header("1Password agent");
+    report.ok(`${agentKeychainItem(ctx.env)} service-account token present in keychain`);
   }
 
   report.header("State");

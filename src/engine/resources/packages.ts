@@ -3,9 +3,8 @@
 // top-level section key + registry row. Three are supported, and the schema's picklist
 // (`brew|mise|gh`, config/schema.ts) is the list: `brew bundle`, `mise install`, and
 // `gh extension`. Shells out to the stock tools ("native over special"); an absent tool is
-// reported, not fatal — matching engine/run.
+// reported, not fatal.
 import { join } from "node:path";
-import { detectOs } from "../../config/profile.ts";
 import type { Pkg } from "../../config/schema.ts";
 import type { Env } from "../../lib/paths.ts";
 import { captureArgv, hasCommand, lastLine, runArgvAsync, toolIo } from "../../lib/proc.ts";
@@ -69,7 +68,7 @@ function relayProgress(ctx: ReconcileCtx): ((line: string) => void) | undefined 
 // Parsed rather than trusted to exit code: `brew bundle cleanup` exits 0 whether or not it found
 // anything, so the presence of output is the signal. Lines look like "Would uninstall formulae:"
 // followed by names, so anything non-empty means drift.
-async function brewCleanupList(path: string, env: Env): Promise<string[]> {
+function brewCleanupList(path: string, env: Env): string[] {
   const r = captureArgv(["brew", "bundle", "cleanup", `--file=${path}`], env);
   if (r.code !== 0) return [];
   return r.stdout
@@ -103,18 +102,15 @@ async function reconcileBrew(
   // ALWAYS `--no-upgrade`, on every verb. Homebrew Bundle upgrades outdated packages by default,
   // and that governs *casks* as well as formulae: observed on Homebrew 6.0.12, dropping the flag
   // had Bundle run `brew upgrade --cask` on an outdated cask that set no `greedy: true` in the
-  // Brewfile and is `auto_updates: true` — so `greedy` is not the opt-out it reads as (this
-  // comment used to claim it was, and that cost a ten-minute mystery hang). Upgrading a cask
-  // replaces the `.app`, so Homebrew quits the running program to do it. **A reconcile that
-  // closes your browser is not a reconcile**, so boom no longer has a way to ask for one:
-  // `boom source --update` opted into exactly this and is gone in 0.38. Upgrading is
-  // `brew upgrade --formula` and `mise upgrade` — each its own tool's verb, with a blast radius
-  // that tool defines, and neither one boom has to hold a second opinion about.
-  // See docs/MIGRATING-0.38.md.
+  // Brewfile and is `auto_updates: true` — so `greedy` is not the opt-out it reads as. Upgrading
+  // a cask replaces the `.app`, so Homebrew quits the running program to do it. **A reconcile
+  // that closes your browser is not a reconcile**, so boom has no flag to ask for one: upgrading
+  // is `brew upgrade --formula` and `mise upgrade`, each its own tool's verb with the blast
+  // radius that tool defines. See CHANGELOG.md#0380.
   //
   // Cask *installation* still escalates — a `launchctl`/`pkgutil` stanza reaches for `sudo` the
-  // first time a cask lands, which is why the prompt machinery below is not going anywhere. See
-  // `withAskpass` for what happens when the caller has exported SUDO_ASKPASS.
+  // first time a cask lands — which is why the prompt machinery below stays; `mayPrompt` is what
+  // turns it off when the caller has exported SUDO_ASKPASS.
   switch (ctx.verb) {
     case "sync": {
       if (ctx.dryRun) {
@@ -145,7 +141,7 @@ async function reconcileBrew(
         else report.fail(`brew bundle failed${lastLine(r.stderr) ? `: ${lastLine(r.stderr)}` : ""}`);
       }
       if (cleanup) {
-        const extra = await brewCleanupList(path, ctx.env);
+        const extra = brewCleanupList(path, ctx.env);
         if (extra.length === 0) {
           report.skip("brew bundle cleanup: nothing undeclared");
         } else if (cleanup === "check") {
@@ -186,7 +182,7 @@ async function reconcileBrew(
       // machine minus that package — which is the drift that only shows up when you need the box
       // you no longer have.
       if (cleanup) {
-        const extra = await brewCleanupList(path, ctx.env);
+        const extra = brewCleanupList(path, ctx.env);
         if (extra.length === 0) report.skip("brew bundle cleanup: nothing undeclared");
         else if (cleanup === "uninstall")
           report.warn(`${extra.length} installed but undeclared — boom source removes: ${extra.join(", ")}`);
@@ -195,7 +191,7 @@ async function reconcileBrew(
       return;
     }
     case "uninstall":
-      return; // brew packages survive uninstall (matches the bash engine)
+      return; // brew packages survive uninstall: a Brewfile has no "remove exactly this" verb
   }
 }
 
@@ -247,22 +243,17 @@ async function readPackages(file: string, ctx: ReconcileCtx): Promise<string[]> 
 // The user-scoped managers: they read a newline package list and install into the *user*
 // toolchain (no sudo, not the OS package set). `gh` is the only one today; the table shape is
 // kept because it is what makes adding a second one a data change rather than a code change.
-// Two query disciplines are supported: a per-package "is it installed" probe whose exit code is
-// the answer, or — for a tool with no such probe — one list command parsed into an installed set
-// and membership-tested. `gh extension list` is the list-parsing kind.
+// "Is it installed" is answered by one list command parsed into an installed set and
+// membership-tested (`gh extension list`); `parse` returns the set of installed package names.
 type UserMgrName = "gh";
 
-// A per-package probe (its exit code is the answer) vs. a one-shot list parsed into an installed
-// set (for tools with no per-package query). `parse` returns the set of installed package names.
-type PkgQuery =
-  | { readonly each: (p: string) => string[] }
-  | { readonly list: string[]; readonly parse: (out: string) => Set<string> };
+interface PkgQuery {
+  readonly list: string[];
+  readonly parse: (out: string) => Set<string>;
+}
 
 interface UserMgr {
   readonly cli: string;
-  // A manager that only exists on Linux is a reported no-op on mac rather than a failure. No
-  // current entry sets it; it is the hook a Linux-only manager would need.
-  readonly linuxOnly?: boolean;
   readonly install: string[]; // base argv; the package name is appended
   readonly uninstall: string[]; // base argv; the package name is appended
   // How a declared entry is spelled in the query set. `gh` lowercases: GitHub treats `owner/repo`
@@ -310,11 +301,6 @@ async function reconcileUserPkgs(mgr: UserMgrName, entry: Pkg, ctx: ReconcileCtx
   const { file } = entry;
   const spec = USER_MGR[mgr];
 
-  // A Linux-only manager on a mac is a reported no-op, not a fail.
-  if (spec.linuxOnly && detectOs(ctx.env) !== "linux") {
-    if (ctx.verb === "verify") report.skip(`${mgr} — Linux-only`);
-    return;
-  }
   if (!file) {
     report.fail(`${mgr} pkg requires a \`file\` listing packages`);
     return;
@@ -341,17 +327,11 @@ async function reconcileUserPkgs(mgr: UserMgrName, entry: Pkg, ctx: ReconcileCtx
     return;
   }
 
-  // Resolve "is this package installed" once per run: a list-query manager parses one command's
-  // output into a set (this is `gh`'s discipline); an `each` manager probes each name's exit code.
-  const q = spec.query;
-  const installed = "list" in q ? q.parse(captureArgv([...q.list], ctx.env).stdout) : undefined;
+  // Resolve "is this package installed" once per run: one list command parsed into a set.
   // `key` normalizes a declared entry into the spelling the parsed set uses (gh: case-folded).
-  // Only the list discipline needs it — the `each` probes hand the name straight to the tool.
+  const installed = spec.query.parse(captureArgv([...spec.query.list], ctx.env).stdout);
   const norm = spec.key ?? ((p: string) => p);
-  const isInstalled = (p: string): boolean =>
-    installed
-      ? installed.has(norm(p))
-      : captureArgv((q as { each: (p: string) => string[] }).each(p), ctx.env).code === 0;
+  const isInstalled = (p: string): boolean => installed.has(norm(p));
 
   switch (ctx.verb) {
     case "sync": {

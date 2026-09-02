@@ -3,8 +3,8 @@
 **BoomTube** is **declarative dev-machine setup** — it converges your machine
 to a state you declare once: dotfiles, packages, and tools from a single
 `boomfile.toml`, with drift detection. Its executable, **`boom`**,
-runs the reconcile loop — `sync` / `verify` — journaling every change it makes so
-`uninstall` can tear it back down. One self-contained binary, compiled from
+runs the reconcile loop — `sync` / `verify` — journaling whatever it displaces so a bad
+run is recoverable, and `uninstall` tears it back down. One self-contained binary, compiled from
 **TypeScript on [Bun](https://bun.com)**, with zero runtime dependencies on your
 machine.
 
@@ -13,8 +13,7 @@ portal to your machine's ideal state.
 
 📐 Design of record → [`SPEC.md`](SPEC.md)
 
-> Status: **early** — a TypeScript rewrite of the original bash engine, extracted
-> from [`alxjrvs/dotFiles`](https://github.com/alxjrvs/dotFiles).
+> Status: **early**, pre-1.0 — extracted from [`alxjrvs/dotFiles`](https://github.com/alxjrvs/dotFiles).
 
 ## Install
 
@@ -38,9 +37,9 @@ tap "alxjrvs/boom", "https://github.com/alxjrvs/boom", trusted: { formula: "boom
 brew "alxjrvs/boom/boom"
 ```
 
-One self-contained executable (macOS arm64/x64, Linux x64); the binary embeds the
+One self-contained executable (macOS arm64/x64, Linux x64/arm64); the binary embeds the
 Bun runtime, so nothing else is required. Override the install prefix with
-`BOOM_PREFIX`.
+`BOOM_PREFIX`, or pin a release with `BOOM_VERSION` (`v0.38.1` or `0.38.1`).
 
 ## Bootstrap a machine
 
@@ -70,6 +69,9 @@ boom source --resume    # continue an interrupted sync (skips completed steps)
 boom verify             # check for drift — exit 0 ok / 2 warn / 1 fail
 boom verify --json      # …as a structured drift report
 boom verify --ci        # non-interactive config gate for CI (schema-check only; exit 0/1)
+
+boom uninstall          # tear down what boom installed — prompts on a TTY, refuses on a pipe
+boom uninstall --yes    # …consent for scripts and CI (`--json` implies it)
 ```
 
 **No verb upgrades.** Reconciling is "what is declared is installed", never "what is installed
@@ -78,7 +80,7 @@ reaches casks whatever `greedy` says, and upgrading a cask replaces the `.app`, 
 running program: a reconcile that closes your browser is not a reconcile. Upgrading is each
 tool's own verb — `brew upgrade --formula`, `mise upgrade` — with the blast radius that tool
 defines. `boom source --update` did this and was removed in 0.38
-([migration](docs/MIGRATING-0.38.md)).
+([changelog](CHANGELOG.md#0380)).
 
 A shippable GitHub Action wrapping `verify --ci` lives in
 [`examples/github-action/`](examples/github-action/) so a config repo can gate its own PRs.
@@ -100,7 +102,7 @@ the drift.
 boom clones your config repo into a managed cache dir and reconciles from it. Operating
 that clone is git's job, not boom's — `boom doctor` prints the path, and `git -C <dir> …`
 does the rest. The `boom source status|diff|push|reset` wrappers were removed in 0.33
-(see [docs/MIGRATING-0.33.md](docs/MIGRATING-0.33.md)); boom still *reports* config-repo
+(see [CHANGELOG.md](CHANGELOG.md#0330)); boom still *reports* config-repo
 drift, because `verify` has to.
 
 ### Publishing local edits back
@@ -146,7 +148,7 @@ boom skill              # emit a Claude Code SKILL.md (--install writes it to ~/
 
 Your dotfiles repo's config is a typed, validated TOML document, grouped into
 sections that run in phase order
-(`link → copy → tmpl → dir → pkg → osx_default → launchd → run → hook`):
+(`link → copy → tmpl → dir → pkg → osx_default → launchd → run → absent → hook`):
 
 ```toml
 # Optional: named values `tmpl` templates interpolate as ${NAME} (per-machine via overlays).
@@ -166,14 +168,13 @@ tmpl = [{ src = "gitconfig.tmpl", dst = "~/.gitconfig" }]
 
 [[section]]
 name = "Packages"
-# `remove_on_uninstall` picks what `boom uninstall` reclaims, per entry: omit it for today's
-# behavior (user-scoped managers remove what they installed, apt/dnf never do), `= true` to opt
-# apt/dnf in, `= false` to keep a global boom installed. Rejected on brew/mise.
+# `cleanup` (brew only) names installed-but-undeclared packages on every verb ("check") or lets
+# sync remove them ("uninstall"). `remove_on_uninstall = false` keeps what `gh` installed; it is
+# rejected on brew/mise, whose declared set lives in the Brewfile / mise config.
 pkg = [
-  { manager = "brew", file = "Brewfile" },          # brew bundle over the Brewfile
-  { manager = "mise" },                             # mise install (reads the repo's mise config)
-  { manager = "cargo", file = "cargo.txt" },        # also: apt, dnf, npm (-g), pipx, gem, flatpak, gh (extensions)
-  { manager = "apt", file = "apt.txt", remove_on_uninstall = true },
+  { manager = "brew", file = "Brewfile", cleanup = "check" },   # brew bundle --no-upgrade over the Brewfile
+  { manager = "mise" },                                          # mise install (reads the repo's mise config)
+  { manager = "gh", file = "gh-extensions.txt" },                # gh CLI extensions, one owner/repo per line
 ]
 
 [[section]]
@@ -183,26 +184,20 @@ osx_default = [{ domain = "com.apple.dock", key = "autohide", value = true }]
 launchd = [{ src = "launchd/com.me.agent.plist" }]   # link + launchctl load -w, idempotent
 
 [[section]]
-name = "Linux services"
-when = { os = "linux" }
-# A generated systemd *user* unit (the Linux twin of launchd) + an optional OnCalendar timer.
-systemd = [{ name = "nightly-backup", exec = "/usr/local/bin/backup", timer = "daily" }]
-
-[[section]]
 name = "Guardrails"
-# A path that must NOT exist: a path that must NOT exist. Sync removes it (into the backup tree, so
-# it is recoverable from the run's backup tree), verify fails while it is there. For files a tool re-creates
-# behind your back — an agent writing settings.local.json on an "always allow" click.
+# A path that must NOT exist. Sync removes it into the run's backup tree (so it is recoverable),
+# verify fails while it is there. For files a tool re-creates behind your back — an agent writing
+# settings.local.json on an "always allow" click.
 absent = [{ path = "~/.claude/settings.local.json", message = "machine-local override" }]
 
 [[section]]
 name = "Custom"
-hook = [{ name = "op-agent", with = { vault = "claude-agent" } }]   # → hooks/op-agent.ts
+hook = [{ name = "vault-setup", with = { vault = "claude-agent" } }]   # → hooks/vault-setup.ts
 ```
 
 Imperative escapes are `run` steps (a shell command) or a **hook** — a
-`hooks/<name>.ts` module exporting `sync`/`verify`/`uninstall` that receives a typed
-`HookApi`. That's the extension point for anything the declarative resources can't
+`hooks/<name>.ts` module exporting `sync`/`verify`/`uninstall` (and optionally `declare`) that
+receives a typed `HookApi`. That's the extension point for anything the declarative resources can't
 express. Multi-machine setups gate sections with `when` or layer overlay files
 (`boomfile.<os|host|profile>.toml`). An overlay may carry `[vars]` and `[boom]` as well as
 sections — they merge over the base last-wins per key, and a `[vars]`-only overlay is the
@@ -254,10 +249,11 @@ is the single explicit opt-out.
 ## Develop
 
 ```sh
-make check   # biome (lint + format) + tsc --noEmit + bun test  (what CI runs)
-make test    # just the bun test suite
-make build   # compile a standalone binary for the host → build/boom
-make fmt     # biome autofix + format
+bun run check       # biome (lint + format) + tsc --noEmit + bun test — the lanes CI runs before its binary smokes
+bun test            # just the test suite
+bun run build       # compile a standalone binary for the host → build/boom
+bun run build:all   # cross-compile the release matrix → build/boom-<target>
+bun run lint:fix    # biome autofix + format
 ```
 
 Built with [`@stricli/core`](https://github.com/bloomberg/stricli) (CLI),

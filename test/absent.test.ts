@@ -5,8 +5,8 @@
 // reconcile function would have to fake.
 //
 // The load-bearing cases are the ones that assert absent DOES something: `removes a file on
-// sync`, `verify fails`, and `rollback restores`. A stub that did nothing at all would pass
-// the four "leaves it alone" cases, so those are not evidence on their own.
+// sync` and `verify fails`. A stub that did nothing at all would pass the "leaves it alone"
+// cases, so those are not evidence on their own.
 import { expect, test } from "bun:test";
 import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";

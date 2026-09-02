@@ -1,10 +1,10 @@
 name: ci
 
-# The checks `make check` runs locally, on every push and PR. Runs on Linux and
+# The checks `bun run check` runs locally, on every push and PR. Runs on Linux and
 # macOS: boom targets both, and the compiled binary must boot on each.
 on:
   push:
-    branches: [main, v2/typescript]
+    branches: [main]
   pull_request:
 
 jobs:
@@ -22,24 +22,22 @@ jobs:
       - run: bun install --frozen-lockfile
 
       - name: Lint + format (biome)
-        run: bunx biome check .
+        run: bun run lint
 
       - name: Typecheck (tsc)
-        run: bunx tsc --noEmit
+        run: bun run typecheck
 
       - name: Test (bun test)
         run: bun test
 
       - name: Compile host binary
-        run: bun build src/index.ts --compile --outfile build/boom
+        run: bun run build
 
       - name: Smoke — binary boots
         run: ./build/boom --version
 
-      # Smoke the config-free generator so a broken catalog/route fails CI, not a user.
-      # This used to also run `completions` (bash/zsh/fish) and `man`; both verbs are gone.
-      # `skill` is the one that remains and the one that matters most — it derives from the
-      # same route map, and it is what an agent reads to learn what boom can do.
+      # Smoke the config-free generator so a broken catalog/route fails CI, not a user: `skill`
+      # derives from the route map, and it is what an agent reads to learn what boom can do.
       - name: Smoke — skill generator
         run: ./build/boom skill > /dev/null
 
@@ -115,10 +113,7 @@ jobs:
           bun-version-file: .bun-version
       - run: bun install --frozen-lockfile
       - name: Cross-compile release matrix
-        run: |
-          for t in bun-darwin-arm64 bun-darwin-x64 bun-linux-x64 bun-linux-arm64; do
-            bun build src/index.ts --compile --target="$t" --outfile "build/boom-$t"
-          done
+        run: bun run build:all
 
   ci-gate:
     # The single required check. Branch protection points here and nowhere else:

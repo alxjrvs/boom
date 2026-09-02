@@ -1,4 +1,4 @@
-// Process helpers. Bun.spawnSync (not Bun.$) so the engine controls exit codes
+// Process helpers. Bun.spawn/spawnSync (not Bun.$) so the engine controls exit codes
 // without throw semantics; `sh -c` so boomfile `run` strings expand ~ and globs.
 // `Env` lives in ./paths.ts and is deliberately NOT re-exported here: with
 // `verbatimModuleSyntax` on, a re-export would let a consumer keep spelling the process
@@ -11,11 +11,10 @@ export function cleanEnv(env: Env): Record<string, string> {
   return out;
 }
 
-export interface ShellResult {
+interface ShellResult {
   readonly code: number;
   // True when the child was killed by the RunOptions.timeoutMs deadline (rather than
-  // exiting on its own). runShell surfaces this so a hung `run` step reads as a timeout,
-  // not a generic failure.
+  // exiting on its own), so a hung `run` step reads as a timeout, not a generic failure.
   readonly timedOut?: boolean;
   // The child's stderr, captured only under RunOptions.silent (where it's the sole surviving
   // channel) so a failing step can surface *why* it failed even though its chatter was hidden.
@@ -43,18 +42,12 @@ interface RunOptions {
   // `brew bundle` to explain a failure would trade a real memory cost for output whose useful
   // part is the tail anyway. A `run` step is a short, purpose-written command whose entire job
   // may be to print one diagnostic, and it is free to print it on stdout.
-  //
-  // Honored by the ASYNC paths only (runShellAsync / runArgvAsync), which is where every caller
-  // that silences a child already lives. Named here rather than left to be discovered: a option
-  // that silently does nothing on half its callers is the failure shape this codebase keeps
-  // finding, so if a sync caller ever needs it, wire it there rather than assuming it works.
   readonly captureStdout?: boolean;
   // Working directory for the child. Default: inherit the parent's cwd. The engine
   // sets this to the dotfiles repo so a `run` step (or `mise install`) operates on
   // the configured machine, not on wherever `boom` happened to be invoked from.
   readonly cwd?: string;
-  // Wall-clock cap in ms; Bun.spawnSync kills the child (SIGTERM) when it's exceeded.
-  // Omit / 0 for no limit.
+  // Wall-clock cap in ms; the child is killed (SIGTERM) when it's exceeded. Omit / 0 for no limit.
   readonly timeoutMs?: number;
   // Watch the child's stdout line by line while it runs, instead of discarding it. The one caller
   // that needs this is a step that can trigger a `sudo` prompt: the tool's own progress output is
@@ -105,44 +98,19 @@ function exitOf(p: { exitCode: number | null }): number {
   return p.exitCode ?? 1;
 }
 
-export function runShell(cmd: string, env: Env, opts?: RunOptions): ShellResult {
-  const timeout = opts?.timeoutMs && opts.timeoutMs > 0 ? opts.timeoutMs : undefined;
-  const p = Bun.spawnSync(["sh", "-c", cmd], {
-    env: cleanEnv(env),
-    cwd: opts?.cwd,
-    ...stdioFor(opts),
-    timeout,
-  });
-  // exitCode is null when the child was signalled — with a timeout set that's the deadline
-  // firing. (A signal without a timeout still maps to a non-zero code via exitOf.)
-  return {
-    code: exitOf(p),
-    timedOut: timeout !== undefined && p.exitCode === null,
-    ...(opts?.silent ? { stderr: p.stderr?.toString().trim() ?? "" } : {}),
-  };
-}
+// Drain a piped child stream to text. Bun types a subprocess's streams from its options, and
+// `stdioFor` returns a union, so the channel is narrowed here at the read; a channel that was
+// not piped (inherited, ignored, an fd) reads as empty.
+const readAll = (s: ReadableStream | number | undefined): Promise<string> =>
+  s instanceof ReadableStream ? s.text() : Promise.resolve("");
 
-// Run a tool by argv (no shell). Preferred for the engine's own invocations
-// (brew/mise/defaults) — passing a path as an argument needs no quoting and can't be
-// re-parsed by sh, unlike interpolating it into a `runShell` string. `runShell` stays
-// for user `run` strings, which deliberately want shell ~/glob expansion.
-export function runArgv(args: string[], env: Env, opts?: RunOptions): ShellResult {
-  const p = Bun.spawnSync(args, {
-    env: cleanEnv(env),
-    cwd: opts?.cwd,
-    ...stdioFor(opts),
-  });
-  return {
-    code: exitOf(p),
-    ...(opts?.silent ? { stderr: p.stderr?.toString().trim() ?? "" } : {}),
-  };
-}
-
-// Async twins of runShell/runArgv/captureArgv, backing the animated active-work spinner: a slow
-// tool (brew/mise/git/a `run` step) is spawned with `Bun.spawn` and awaited, so the event loop
-// stays free to redraw the spinner while it works — `Bun.spawnSync` would block the loop and freeze
-// the animation. Same stdio disciplines, timeout, and ShellResult shape as the sync versions; the
-// sync ones stay for the fast, non-awaited callers (defaults writes, launchctl, git plumbing).
+// The awaited spawners back the animated active-work spinner: a slow tool (brew/mise/git/a `run`
+// step) is spawned with `Bun.spawn` and awaited, so the event loop stays free to redraw the
+// spinner while it works — `Bun.spawnSync` would block the loop and freeze the animation.
+// `runShellAsync` runs a user `run` string under `sh -c` (which deliberately wants shell ~/glob
+// expansion); `runArgvAsync` runs a tool by argv, so a path is an argument that sh never re-parses.
+// The synchronous `captureArgv` below stays for the fast, non-awaited callers (git plumbing,
+// launchctl, defaults).
 export async function runShellAsync(cmd: string, env: Env, opts?: RunOptions): Promise<ShellResult> {
   const io = stdioFor(opts);
   const proc = Bun.spawn(["sh", "-c", cmd], { env: cleanEnv(env), cwd: opts?.cwd, ...io });
@@ -160,8 +128,8 @@ export async function runShellAsync(cmd: string, env: Env, opts?: RunOptions): P
   // first would stall on a full pipe for a command chatty on the other — the same deadlock the
   // argv path documents. With captureStdout unset this is the single-stream read it always was.
   const [stderr, stdout] = await Promise.all([
-    opts?.silent ? new Response(proc.stderr as ReadableStream).text() : undefined,
-    opts?.silent && opts.captureStdout ? new Response(proc.stdout as ReadableStream).text() : undefined,
+    opts?.silent ? readAll(proc.stderr) : undefined,
+    opts?.silent && opts.captureStdout ? readAll(proc.stdout) : undefined,
   ]);
   await proc.exited;
   if (timer) clearTimeout(timer);
@@ -177,10 +145,8 @@ export async function runArgvAsync(args: string[], env: Env, opts?: RunOptions):
   const io = stdioFor(opts);
   const proc = Bun.spawn(args, { env: cleanEnv(env), cwd: opts?.cwd, ...io });
   const watch = opts?.onStdoutLine ? pumpLines(proc.stdout as ReadableStream, opts.onStdoutLine) : undefined;
-  // Same deadline discipline as runShellAsync. This used to ignore `timeoutMs` outright, which
-  // made the documented cap a lie for every engine-owned argv invocation (brew/mise/apt) — the
-  // exact callers most able to block forever. No caller passes one today; the point is that the
-  // next one gets the behavior RunOptions advertises instead of an unbounded wait.
+  // Same deadline discipline as runShellAsync, so the documented cap holds for every engine-owned
+  // argv invocation — the callers most able to block forever.
   const timeout = opts?.timeoutMs && opts.timeoutMs > 0 ? opts.timeoutMs : undefined;
   let timedOut = false;
   const timer = timeout
@@ -192,10 +158,7 @@ export async function runArgvAsync(args: string[], env: Env, opts?: RunOptions):
   // Drain stderr and the watched stdout concurrently, and only then await the exit. Reading one to
   // completion first would stall on a full pipe for a chatty tool — the deadlock this narration
   // exists to avoid, not cause.
-  const [stderr] = await Promise.all([
-    opts?.silent ? new Response(proc.stderr as ReadableStream).text() : undefined,
-    watch,
-  ]);
+  const [stderr] = await Promise.all([opts?.silent ? readAll(proc.stderr) : undefined, watch]);
   await proc.exited;
   if (timer) clearTimeout(timer);
   return { code: exitOf(proc), timedOut, ...(opts?.silent ? { stderr: stderr?.trim() ?? "" } : {}) };
@@ -206,10 +169,7 @@ export async function captureArgvAsync(args: string[], env: Env, opts?: RunOptio
   // rather than crashing its caller.
   try {
     const proc = Bun.spawn(args, { env: cleanEnv(env), cwd: opts?.cwd, stdout: "pipe", stderr: "pipe" });
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout as ReadableStream).text(),
-      new Response(proc.stderr as ReadableStream).text(),
-    ]);
+    const [stdout, stderr] = await Promise.all([proc.stdout.text(), proc.stderr.text()]);
     await proc.exited;
     return { code: exitOf(proc), stdout: stdout.trim(), stderr: stderr.trim() };
   } catch (e) {
@@ -236,19 +196,6 @@ export function lastLine(s?: string): string {
   return s?.trim().split("\n").filter(Boolean).at(-1) ?? "";
 }
 
-// Every line a failing command emitted, indented under the fail message.
-//
-// WHY NOT lastLine HERE. A `run` step is somebody's own script, and a script states its most
-// specific complaint FIRST and then adds context — the opposite shape to a package manager. Taking
-// the last line therefore keeps the least useful one, systematically.
-//
-// Measured, on a nine-line vault-audit failure: the reported line was `- gninety`, naming an item
-// that was present and correctly declared, while the finding — an undeclared item in a vault an
-// agent can read — sat in the eight lines that were dropped. The check was right and the report
-// was worse than useless, because it sent the operator to look at the wrong thing.
-//
-// stdout is included because a script is free to explain itself there, and under `silent` it is
-// hidden too; a step reporting on stdout used to fail with a bare "(exit N)" and no reason at all.
 // Env var NAMES whose VALUES must never survive into a report. Matched on the name, not on
 // the value's shape: a token that happens to look like a word is still a token, and a
 // value-shape heuristic would both miss those and mangle innocent output.
@@ -271,11 +218,26 @@ export function redactSecrets(text: string, env: Env): string {
   let out = text;
   for (const [name, value] of Object.entries(env)) {
     if (!value || value.length < MIN_REDACT_LEN || !SECRET_NAME_RE.test(name)) continue;
-    out = out.split(value).join(`«redacted:${name}»`);
+    // A function replacer: a string replacement is subject to `$&`/`$$` expansion, and this is
+    // the one path where re-inserting the match would put the secret back.
+    out = out.replaceAll(value, () => `«redacted:${name}»`);
   }
   return out;
 }
 
+// Every line a failing command emitted, indented under the fail message.
+//
+// WHY NOT lastLine HERE. A `run` step is somebody's own script, and a script states its most
+// specific complaint FIRST and then adds context — the opposite shape to a package manager. Taking
+// the last line therefore keeps the least useful one, systematically.
+//
+// Measured, on a nine-line vault-audit failure: the reported line was `- gninety`, naming an item
+// that was present and correctly declared, while the finding — an undeclared item in a vault an
+// agent can read — sat in the eight lines that were dropped. The check was right and the report
+// was worse than useless, because it sent the operator to look at the wrong thing.
+//
+// stdout is included because a script is free to explain itself there, and under `silent` it is
+// hidden too; a step reporting only on stdout would otherwise fail with a bare "(exit N)".
 export function failureDetail(stderr?: string, stdout?: string, env?: Env): string {
   const body = [stderr, stdout]
     .map((s) => s?.trim())
@@ -302,39 +264,12 @@ export interface CaptureResult extends ShellResult {
   readonly stderr: string;
 }
 
-// Like runArgv, but captures output instead of streaming it — for callers that need
-// the text (git plumbing: remote URLs, commit counts, changed-file lists), not just a
-// pass/fail exit code.
-// captureArgv's shell-string sibling, for a user-authored command that wants the shell's
-// expansion (the `check` resource's `cmd`, which is written in a boomfile the way it would be
-// typed). Honors `timeoutMs`, because a `cmd` check runs inside `verify` and a command that
-// hangs would hang the drift report.
-export function captureShell(cmd: string, env: Env, opts?: RunOptions): CaptureResult {
-  const timeout = opts?.timeoutMs && opts.timeoutMs > 0 ? opts.timeoutMs : undefined;
-  try {
-    const p = Bun.spawnSync(["sh", "-c", cmd], {
-      env: cleanEnv(env),
-      cwd: opts?.cwd,
-      stdout: "pipe",
-      stderr: "pipe",
-      timeout,
-    });
-    return {
-      code: exitOf(p),
-      timedOut: timeout !== undefined && p.exitCode === null,
-      stdout: p.stdout.toString().trim(),
-      stderr: p.stderr.toString().trim(),
-    };
-  } catch (e) {
-    return { code: -1, stdout: "", stderr: e instanceof Error ? e.message : String(e) };
-  }
-}
-
+// Run a tool by argv and capture its output — for callers that need the text (git plumbing:
+// remote URLs, commit counts, changed-file lists), not just a pass/fail exit code.
 export function captureArgv(args: string[], env: Env, opts?: RunOptions): CaptureResult {
-  // Bun.spawnSync throws (missing executable, nonexistent cwd) rather than returning
-  // a failed result. Callers treat the tool as a black box with exit codes — sync
-  // must degrade to "reconcile from the local clone", push/reset to a clean exit 1 —
-  // so map the throw onto that contract instead of crashing them.
+  // Bun.spawnSync throws (missing executable, nonexistent cwd) rather than returning a failed
+  // result. Callers treat the tool as a black box with exit codes — sync must degrade to
+  // "reconcile from the local clone" — so map the throw onto that contract instead of crashing.
   try {
     const p = Bun.spawnSync(args, { env: cleanEnv(env), cwd: opts?.cwd, stdout: "pipe", stderr: "pipe" });
     return { code: exitOf(p), stdout: p.stdout.toString().trim(), stderr: p.stderr.toString().trim() };

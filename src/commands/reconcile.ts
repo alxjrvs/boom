@@ -24,7 +24,7 @@ type SyncFlags = {
 };
 
 // skip is the default — sync never clobbers a file boom doesn't own. --fix opts into
-// overwriting conflicting targets (the drift-repair that used to be `boom fix`).
+// overwriting conflicting targets: that is drift repair, and it is a flag, not a verb.
 function linkModeOf(flags: { fix?: boolean }): LinkMode {
   return flags.fix ? "overwrite" : "skip";
 }

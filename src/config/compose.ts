@@ -1,16 +1,11 @@
-// Composition: turn `[modules…, base, overlays…]` into ONE ordered section list plus the
-// merged `[vars]` / `[boom]` tables. Before this seam existed, reconcile concatenated the three
-// sources inline and kept only their `[[section]]` arrays — so a module could not ship the files
-// its own sections referenced (repo-relative `src` resolved against the *base* repo) and an
-// overlay's `[vars]`/`[boom]` were silently dropped on the floor.
+// Composition: turn `[base, overlays…]` into ONE ordered section list plus the merged
+// `[vars]` / `[boom]` tables, so an overlay's `[vars]`/`[boom]` are never silently dropped.
 //
 // LAYERING INVARIANT: this module may import from `src/lib/**` and `src/config/**` only —
-// never from `src/engine/**`. The single `Env` import below is the one exception, and it is
-// the same one every sibling in this directory takes today (load.ts, modules.ts, profile.ts,
-// remote.ts); it moves to `src/lib/paths.ts` when that module exists.
-import { basename, join } from "node:path";
+// never from `src/engine/**`.
+import { join } from "node:path";
 import { displayPath, expandTilde, isGlobPattern } from "../lib/fs.ts";
-import { launchAgentsDir } from "../lib/launchd.ts";
+import { defaultPlistDst } from "../lib/launchd.ts";
 import type { Env } from "../lib/paths.ts";
 import { CONFIG_FILE, loadOverlayFile } from "./load.ts";
 import { overlayFiles, type ProfileContext, sectionApplies } from "./profile.ts";
@@ -19,17 +14,10 @@ import type { Boomfile, BoomSettings, Section } from "./schema.ts";
 // A section plus which FILE declared it — the human label used by the duplicate-destination
 // note below.
 //
-// There used to be an `origin` directory here too, so a MODULE could ship the files its own
-// sections declared: `reconcileSection` swapped `ctx.repo` for it before running any resource.
-// The module system was deleted in 0.30.0 and nothing has set `origin` to anything but the base
-// repo since, so that branch could never be taken — along with the GOTCHA comment beside it
-// warning that the swap narrowed the repo-self-link guard for a case that can no longer occur.
-// Both are gone.
-//
 // Deliberately NOT part of `SectionSchema`: that is a `v.strictObject`, so a `source` key there
 // would let a boomfile forge its own provenance. This is a compose-time derived fact, not input.
 export interface ComposedSection extends Section {
-  readonly source?: string;
+  readonly source: string;
 }
 
 export interface Composition {
@@ -45,9 +33,9 @@ export interface ComposeNotifier {
   note(msg: string): void;
 }
 
-// Compose in precedence order: modules (weakest) → the base boomfile → each overlay file that
-// matches this machine (strongest). `notify` is structurally satisfied by `Reporter`, so
-// reconcile passes its reporter straight through and tests pass a two-line stub.
+// Compose in precedence order: the base boomfile (weakest) → each overlay file that matches
+// this machine (strongest). `notify` is structurally satisfied by `Reporter`, so reconcile
+// passes its reporter straight through and tests pass a two-line stub.
 export async function composeConfig(
   env: Env,
   repo: string,
@@ -69,9 +57,8 @@ export async function composeConfig(
     if (!overlay) continue;
     sections.push(...overlay.section.map((s) => ({ ...s, source: name })));
     vars = { ...vars, ...(overlay.vars ?? {}) };
-    // `[boom]` is a flat table, so it merges shallowly, last-wins PER KEY. The gotcha:
-    // `schedule` is an array, and a shallow merge REPLACES an array rather than appending — an
-    // overlay that declares any schedule owns the whole timer list for that machine.
+    // `[boom]` is a flat table, so it merges shallowly, last-wins PER KEY. The gotcha: a shallow
+    // merge REPLACES an array-valued key rather than appending to it.
     if (overlay.boom) boom = { ...boom, ...overlay.boom };
   }
 
@@ -85,15 +72,13 @@ const KEYED_FIELDS = ["link", "copy", "tmpl", "launchd"] as const;
 type KeyedField = (typeof KEYED_FIELDS)[number];
 
 // Whether this kind takes OWNERSHIP of its destination — i.e. pushes it to `ctx.declared`, which
-// is what the owned-destinations manifest is rebuilt from. `launchd` is now the only kind that
-// can fail to: it returns before its push when the machine isn't darwin. `pc.os` is the same
-// `detectOs(env)` the resource itself calls (BOOM_OS override included), so the two cannot
-// disagree about which run that is.
+// is what the owned-destinations manifest is rebuilt from. `launchd` is the only kind that can
+// fail to: it returns before its push when the machine isn't darwin. `pc.os` is the same
+// profile the resource itself reads (BOOM_OS override included), so the two cannot disagree
+// about which run that is.
 //
-// STILL A PREDICATE, not an inlined `field !== "launchd"`, and one kind is enough to need it: a
-// darwin `launchd` DOES own its destination, so the answer depends on the run and not only on
-// the kind. `secret` was the second case until 0.37 — it never declared, so that reaping could
-// not auto-delete a rendered secret — and its removal narrows this without simplifying it away.
+// A PREDICATE, not an inlined `field !== "launchd"`: a darwin `launchd` DOES own its
+// destination, so the answer depends on the run and not only on the kind.
 //
 // This partitions the dedupe keyspace below, and it is load-bearing rather than tidy: a winner
 // that declares nothing would evict a loser that declares, leaving the destination owned by
@@ -127,20 +112,17 @@ function destinationOf(field: KeyedField, entry: Keyable, env: Env): string | un
   // own origin), so these stay unkeyed and `writeManifest`'s collapse is the second line.
   if (entry.src !== undefined && isGlobPattern(entry.src)) return undefined;
   if (entry.dst !== undefined) return expandTilde(entry.dst, env);
-  // launchd is the one kind whose `dst` is optional; it defaults to the LaunchAgents dir. This
-  // replicates `resources/launchd.ts`'s derivation rather than sharing a helper, which would drag
-  // `lib/launchd.ts`'s launchctl surface into `config/` — keep the two spellings in sync. HOME
-  // unset leaves it unkeyed, exactly as the resource itself skips the entry.
+  // launchd is the one kind whose `dst` is optional; it defaults to the LaunchAgents dir, by the
+  // same helper the resource uses. HOME unset leaves it unkeyed, exactly as the resource itself
+  // skips the entry.
   if (field !== "launchd" || entry.src === undefined) return undefined;
-  const agents = launchAgentsDir(env);
-  return agents ? join(agents, basename(entry.src)) : undefined;
+  return defaultPlistDst(entry.src, env);
 }
 
-// Last-wins across `[modules…, base, overlays…]`: when two declarations target one destination,
-// only the last one runs. Before this, `link` was first-wins (the second placement found a
-// foreign file at `dst` and skipped it — a verify failure no `boom source` could ever converge)
-// while `copy`/`tmpl` were last-wins by accident of both running, and the duplicate `dst` threw a
-// raw SQLiteError out of the manifest write.
+// Last-wins across `[base, overlays…]`: when two declarations target one destination, only the
+// last one runs. Without this, `link` is first-wins (the second placement finds a foreign file
+// at `dst` and skips it — a verify failure no `boom source` could ever converge) while
+// `copy`/`tmpl` are last-wins by accident of both running.
 //
 // GOTCHA, and the reason `pc` is a parameter twice over: a winner that does not actually own the
 // destination this run must never evict a loser that does, or the file ends up declared by nobody
@@ -166,7 +148,7 @@ function resolveDuplicates(
       for (const [index, entry] of entries.entries()) {
         const dst = destinationOf(field, entry, env);
         if (dst === undefined) continue;
-        // Kinds that take ownership share ONE keyspace (a module `link` and a base `copy` at one
+        // Kinds that take ownership share ONE keyspace (a base `link` and an overlay `copy` at one
         // path are a single conflict). A kind that does not gets its own, so it can still beat a
         // duplicate of itself — launchd-vs-launchd off darwin, the real duplicate case —
         // without ever evicting the declaration that keeps the file out of the orphan sweep.
@@ -191,7 +173,7 @@ function resolveDuplicates(
     byField.set(o.field, idxs);
     idxs.add(o.index);
     notify.note(
-      `${displayPath(o.dst, env)} — ${o.field} from ${o.section.source ?? CONFIG_FILE} overridden by ${win.field} in ${win.section.source ?? CONFIG_FILE}`,
+      `${displayPath(o.dst, env)} — ${o.field} from ${o.section.source} overridden by ${win.field} in ${win.section.source}`,
     );
   }
   if (losers.size === 0) return sections;
