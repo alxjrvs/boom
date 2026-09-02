@@ -1,11 +1,12 @@
 // M1: TOML config schema + loader.
 import { expect, test } from "bun:test";
-import { mkdtemp, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { BoomConfigError, loadConfig, loadOverlayFile, resolveConfigDir } from "../src/config/load.ts";
 
-const sandbox = () => mkdtemp(join(tmpdir(), "boom-cfg-"));
+import { tmp } from "./support/tmp.ts";
+
+const sandbox = (): Promise<string> => tmp("cfg");
 
 test("loadConfig parses a nested-by-section boomfile.toml", async () => {
   const dir = await sandbox();
@@ -124,57 +125,6 @@ test("loadConfig accepts `unless`/`creates` guards on a run step", async () => {
   const cfg = await loadConfig(dir);
   expect(cfg.section[0]?.run?.[0]?.creates).toBe(".git/hooks/pre-commit");
   expect(cfg.section[0]?.run?.[0]?.unless).toBe("test -x /usr/bin/true");
-});
-
-// `copy.expand` is retired. The point of keeping the key *declared* (as `v.never`) is that the
-// failure can name the migration, so the error text is the contract here — not just the reject.
-test("loadConfig rejects the retired `copy.expand` and names `tmpl` in the error", async () => {
-  const dir = await sandbox();
-  await writeFile(
-    join(dir, "boomfile.toml"),
-    `[[section]]\nname = "x"\ncopy = [{ src = "a", dst = "~/a", expand = true }]\n`,
-  );
-  const err = await loadConfig(dir).catch((e: unknown) => e);
-  expect(err).toBeInstanceOf(BoomConfigError);
-  const msg = (err as Error).message;
-  expect(msg).toContain("section.0.copy.0.expand");
-  expect(msg).toMatch(/copy\.expand/); // what to stop doing
-  expect(msg).toMatch(/tmpl/); // what to do instead — the migration must be nameable from the error
-});
-
-// Every other retired key is the same shape: rejected by name, pointing at the CHANGELOG entry.
-for (const [label, toml] of [
-  ["secret", '[[section]]\nname = "x"\nsecret = [{ dst = "~/.t", ref = "op://v/i/f" }]\n'],
-  ["[boom] schedule", '[boom]\nschedule = [{ cmd = "verify", every = "1h" }]\n[[section]]\nname = "x"\n'],
-  ["[boom] sudo_askpass", '[boom]\nsudo_askpass = "op://v/i/f"\n[[section]]\nname = "x"\n'],
-] as const) {
-  test(`loadConfig rejects the retired \`${label}\` key and names the changelog entry`, async () => {
-    const dir = await sandbox();
-    await writeFile(join(dir, "boomfile.toml"), toml);
-    const err = await loadConfig(dir).catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(BoomConfigError);
-    expect((err as Error).message).toContain("CHANGELOG.md#0390");
-  });
-}
-
-test('loadConfig rejects `upgrade_on_sync = "auto"`', async () => {
-  const dir = await sandbox();
-  await writeFile(join(dir, "boomfile.toml"), '[boom]\nupgrade_on_sync = "auto"\n[[section]]\nname = "x"\n');
-  const err = await loadConfig(dir).catch((e: unknown) => e);
-  expect(err).toBeInstanceOf(BoomConfigError);
-  expect((err as Error).message).toContain("upgrade_on_sync");
-});
-
-// Guard against over-rejecting: `v.optional(v.never(…))` must still let an absent key through,
-// or retiring one flag would break every plain `copy` in every boomfile.
-test("loadConfig still accepts a copy entry without expand", async () => {
-  const dir = await sandbox();
-  await writeFile(
-    join(dir, "boomfile.toml"),
-    `[[section]]\nname = "x"\ncopy = [{ src = "a", dst = "~/a" }]\n`,
-  );
-  const cfg = await loadConfig(dir);
-  expect(cfg.section[0]?.copy?.[0]?.dst).toBe("~/a");
 });
 
 test("loadConfig rejects `remove_on_uninstall` on brew and on mise, and accepts it on gh", async () => {

@@ -4,44 +4,34 @@
 // symlinks point at, and the post-merge realign drops only commits whose content is already
 // upstream. Imported directly (not through the compiled binary) so a failure points at a line.
 import { expect, test } from "bun:test";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import publish from "../examples/dotfiles/commands/publish.ts";
-import type { BoomContext } from "../src/context.ts";
-
-function git(dir: string, ...args: string[]): string {
-  const r = Bun.spawnSync(["git", "-C", dir, ...args], { stdout: "pipe", stderr: "pipe" });
-  return new TextDecoder().decode(r.stdout).trim();
-}
+import { type FakeCtx, fakeCtx } from "./support/ctx.ts";
+import { commitAll, git, gitEnv } from "./support/git.ts";
+import { tmp } from "./support/tmp.ts";
 
 // A bare origin plus a clone standing in for the boom-managed config repo. Bare so the clone can
-// push to it, and identity is set per-repo so the test doesn't depend on an ambient git identity
-// (CI runners have none).
+// push to it. The clone carries a repo-local identity: publish runs git with the *process*
+// environment (it is loaded by the compiled binary and has no ctx env to thread through), so the
+// git sandbox's identity never reaches its `git commit` — and a CI runner has no ambient one.
 async function fixture(): Promise<{ origin: string; clone: string }> {
-  const origin = await mkdtemp(join(tmpdir(), "boom-pub-origin-"));
-  const clone = await mkdtemp(join(tmpdir(), "boom-pub-clone-"));
+  const origin = await tmp("pub-origin");
+  const clone = await tmp("pub-clone");
   git(origin, "init", "-q", "--bare", "-b", "main");
-  Bun.spawnSync(["git", "clone", "-q", origin, clone], { stdout: "ignore", stderr: "ignore" });
+  git(clone, "clone", "-q", origin, clone);
   git(clone, "config", "user.email", "t@t.com");
   git(clone, "config", "user.name", "t");
   await writeFile(join(clone, "boomfile.toml"), `[[section]]\nname = "x"\n`);
   await writeFile(join(clone, "zshrc"), "export A=1\n");
-  git(clone, "add", "-A");
-  git(clone, "commit", "-qm", "init");
+  commitAll(clone, "init");
   git(clone, "push", "-q", "-u", "origin", "main");
   return { origin, clone };
 }
 
-function ctxFor(clone: string): { ctx: BoomContext; out(): string } {
-  const buf = { out: "" };
-  const write = (s: string) => {
-    buf.out += s;
-  };
-  const env = { BOOM_CONFIG: clone, BOOM_HOST: "testbox" };
-  const proc = { stdout: { write }, stderr: { write }, env, exitCode: 0 };
-  return { ctx: { process: proc, env, cwd: clone } as unknown as BoomContext, out: () => buf.out };
-}
+// The ctx env still carries the git sandbox for the paths that do read it (configRepo, BOOM_HOST).
+const ctxFor = (clone: string): FakeCtx =>
+  fakeCtx({ ...gitEnv, BOOM_CONFIG: clone, BOOM_HOST: "testbox" }, clone);
 
 test("publish pushes a branch without checking it out — the working tree is untouched", async () => {
   const { clone } = await fixture();
@@ -80,14 +70,11 @@ test("publish realigns after a squash merge, and refuses to while the work is un
 
   // Land it the way GitHub's "Squash and merge" does — a NEW commit carrying the same content —
   // via a scratch clone, alongside an unrelated commit so the realign can't just be a fast-forward.
-  const lander = await mkdtemp(join(tmpdir(), "boom-pub-land-"));
-  Bun.spawnSync(["git", "clone", "-q", origin, lander], { stdout: "ignore", stderr: "ignore" });
-  git(lander, "config", "user.email", "t@t.com");
-  git(lander, "config", "user.name", "t");
+  const lander = await tmp("pub-land");
+  git(lander, "clone", "-q", origin, lander);
   await writeFile(join(lander, "README.md"), "hi\n");
   await writeFile(join(lander, "zshrc"), "export A=1\nexport B=2\n");
-  git(lander, "add", "-A");
-  git(lander, "commit", "-qm", "Squash merge: zsh + docs");
+  commitAll(lander, "Squash merge: zsh + docs");
   git(lander, "push", "-q", "origin", "main");
 
   const landed = ctxFor(clone);

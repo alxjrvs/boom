@@ -1,14 +1,14 @@
 // The mutating-run lock (lib/lock.ts): one holder at a time, a stale lock from a crashed
 // run is reclaimed, and a live holder is a clean LockHeldError.
 import { expect, test } from "bun:test";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { acquireLock, LockHeldError } from "../src/lib/lock.ts";
 import { boomStateDir } from "../src/lib/paths.ts";
+import { tmp } from "./support/tmp.ts";
 
 async function stateEnv(): Promise<Record<string, string>> {
-  const env = { XDG_STATE_HOME: await mkdtemp(join(tmpdir(), "boom-lock-")) };
+  const env = { XDG_STATE_HOME: await tmp("lock") };
   await mkdir(boomStateDir(env), { recursive: true });
   return env;
 }

@@ -1,8 +1,7 @@
 // The sync transaction — journal, backups, --resume, verify --json, and orphan reaping. Each
 // test drives the engine against a fully sandboxed $HOME + repo.
 import { expect, test } from "bun:test";
-import { mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readdir, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Journal, listRuns, newRunId, readRun } from "../src/engine/journal.ts";
 import { reconcile } from "../src/engine/reconcile.ts";
@@ -11,7 +10,7 @@ import { linkTarget, pathExists } from "../src/lib/fs.ts";
 import { backupsDir } from "../src/lib/paths.ts";
 import { makeSandbox, type Sandbox } from "./support/sandbox.ts";
 
-const sandbox = (boomfile: string): Promise<Sandbox> => makeSandbox(boomfile, { prefix: "boom-tx-" });
+const sandbox = (boomfile: string): Promise<Sandbox> => makeSandbox(boomfile, { prefix: "tx" });
 
 // Snapshot every entry under `dir` (path → bytes, or a `symlink:` marker), NOT following
 // symlinks. Used to assert the config repo comes out of a sync byte-identical: the `**` bug
@@ -201,24 +200,11 @@ test("sync --json emits a parseable structured report", async () => {
 // Subprocess (not in-process): a `run` step's stdout uses real OS fds, so only a real
 // child can prove --json keeps stdout pure. Must be Bun.spawnSync (oven-sh/bun#24690).
 test("sync --json keeps run-step output off stdout (routes it to stderr)", async () => {
-  const base = await mkdtemp(join(tmpdir(), "boom-json-"));
-  const home = join(base, "home");
-  const repo = join(base, "repo");
-  await mkdir(home, { recursive: true });
-  await mkdir(repo, { recursive: true });
-  await writeFile(
-    join(repo, "boomfile.toml"),
+  const sb = await sandbox(
     `[[section]]\nname = "S"\nrun = [{ on = "sync", cmd = "echo POLLUTION_ON_STDOUT" }]\n`,
   );
   const index = join(import.meta.dir, "../src/index.ts");
-  const env = {
-    HOME: home,
-    XDG_STATE_HOME: join(base, "state"),
-    BOOM_CONFIG: repo,
-    NO_COLOR: "1",
-    PATH: process.env.PATH ?? "",
-  };
-  const p = Bun.spawnSync(["bun", index, "source", "--json"], { cwd: repo, env });
+  const p = Bun.spawnSync(["bun", index, "source", "--json"], { cwd: sb.repo, env: sb.env });
   const stdout = p.stdout.toString();
   const stderr = p.stderr.toString();
   // stdout is exactly the JSON envelope — no leaked child output.

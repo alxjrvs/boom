@@ -14,7 +14,7 @@ import { reconcile } from "../src/engine/reconcile.ts";
 import { pathExists } from "../src/lib/fs.ts";
 import { makeSandbox, type Sandbox } from "./support/sandbox.ts";
 
-const sandbox = (boomfile: string): Promise<Sandbox> => makeSandbox(boomfile, { prefix: "boom-absent-" });
+const sandbox = (boomfile: string): Promise<Sandbox> => makeSandbox(boomfile, { prefix: "absent" });
 
 const ONE = `[[section]]
 name = "Hygiene"

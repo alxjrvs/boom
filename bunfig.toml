@@ -1,0 +1,3 @@
+[test]
+# Registers the end-of-run sweep of every tmp dir the suites create (test/support/tmp.ts).
+preload = ["./test/support/tmp.ts"]

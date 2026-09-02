@@ -2,12 +2,12 @@
 // origin-stamped section list plus the merged `[vars]` / `[boom]` tables. Asserted on the
 // returned Composition, so no reconcile runs and no self-wiring executes.
 import { expect, test } from "bun:test";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { type ComposeNotifier, composeConfig } from "../src/config/compose.ts";
 import { loadConfig } from "../src/config/load.ts";
 import { profileContext } from "../src/config/profile.ts";
+import { tmp } from "./support/tmp.ts";
 
 // Both overlay names are pinned (BOOM_OS + BOOM_HOST) so overlayFiles is deterministic on any
 // machine the suite runs on: boomfile.linux.toml then boomfile.testhost.toml, in that order.
@@ -26,7 +26,7 @@ function notifier(): { notify: ComposeNotifier; warns: string[]; notes: string[]
 }
 
 async function repoWith(files: Record<string, string>): Promise<string> {
-  const repo = await mkdtemp(join(tmpdir(), "boom-compose-"));
+  const repo = await tmp("compose");
   for (const [name, body] of Object.entries(files)) {
     await mkdir(join(repo, name, ".."), { recursive: true });
     await writeFile(join(repo, name), body);
