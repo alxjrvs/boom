@@ -27,7 +27,7 @@ function anyConfigured(s: BoomSettings): boolean {
 function boomWorkItems(settings: BoomSettings): WorkItem[] {
   const items: WorkItem[] = [];
   if (settings.skill_on_sync) items.push({ label: "skill", run: applySkill });
-  if (settings.upgrade_on_sync) items.push({ label: "upgrade", run: (ctx) => applyUpgrade(settings, ctx) });
+  if (settings.upgrade_on_sync) items.push({ label: "upgrade", run: applyUpgrade });
   // Notify runs LAST, so its drift tally also counts any drift the earlier self-wiring items
   // surfaced (a stale skill), not just section drift.
   if (settings.notify) items.push({ label: "notify", run: applyNotify });
@@ -102,7 +102,7 @@ async function applySkill(ctx: ReconcileCtx): Promise<void> {
 
 // Fold a release check into sync. Best-effort and offline-safe: a network hiccup surfaces
 // nothing and never fails the sync. Sync-only.
-async function applyUpgrade(settings: BoomSettings, ctx: ReconcileCtx): Promise<void> {
+async function applyUpgrade(ctx: ReconcileCtx): Promise<void> {
   const { report } = ctx;
   if (ctx.verb !== "sync") return;
   if (ctx.dryRun) {
@@ -117,14 +117,6 @@ async function applyUpgrade(settings: BoomSettings, ctx: ReconcileCtx): Promise<
   if (compareVersions(latest, VERSION) <= 0) {
     report.skip(`boom is current (v${VERSION})`);
     return;
-  }
-  // `auto` used to call `boom upgrade`, which rewrote the binary in place. That verb is gone
-  // (0.36): boom is installed by a package manager, and a binary that overwrites itself under
-  // a managed prefix desynchronises that manager's manifest from what is on disk — the next
-  // `brew upgrade` silently reverts it. Accepted, degraded to `check`, and said out loud so a
-  // boomfile still carrying it is not quietly doing something other than what it asks for.
-  if (settings.upgrade_on_sync === "auto") {
-    report.note('`upgrade_on_sync = "auto"` is retired — treating it as "check" (see CHANGELOG.md#0360)');
   }
   report.warn(
     `newer boom v${latest} available (you have v${VERSION}) — upgrade it the way you installed it ` +

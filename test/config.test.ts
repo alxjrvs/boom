@@ -142,6 +142,29 @@ test("loadConfig rejects the retired `copy.expand` and names `tmpl` in the error
   expect(msg).toMatch(/tmpl/); // what to do instead — the migration must be nameable from the error
 });
 
+// Every other retired key is the same shape: rejected by name, pointing at the CHANGELOG entry.
+for (const [label, toml] of [
+  ["secret", '[[section]]\nname = "x"\nsecret = [{ dst = "~/.t", ref = "op://v/i/f" }]\n'],
+  ["[boom] schedule", '[boom]\nschedule = [{ cmd = "verify", every = "1h" }]\n[[section]]\nname = "x"\n'],
+  ["[boom] sudo_askpass", '[boom]\nsudo_askpass = "op://v/i/f"\n[[section]]\nname = "x"\n'],
+] as const) {
+  test(`loadConfig rejects the retired \`${label}\` key and names the changelog entry`, async () => {
+    const dir = await sandbox();
+    await writeFile(join(dir, "boomfile.toml"), toml);
+    const err = await loadConfig(dir).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(BoomConfigError);
+    expect((err as Error).message).toContain("CHANGELOG.md#0390");
+  });
+}
+
+test('loadConfig rejects `upgrade_on_sync = "auto"`', async () => {
+  const dir = await sandbox();
+  await writeFile(join(dir, "boomfile.toml"), '[boom]\nupgrade_on_sync = "auto"\n[[section]]\nname = "x"\n');
+  const err = await loadConfig(dir).catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(BoomConfigError);
+  expect((err as Error).message).toContain("upgrade_on_sync");
+});
+
 // Guard against over-rejecting: `v.optional(v.never(…))` must still let an absent key through,
 // or retiring one flag would break every plain `copy` in every boomfile.
 test("loadConfig still accepts a copy entry without expand", async () => {

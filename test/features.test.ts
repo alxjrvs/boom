@@ -1,11 +1,6 @@
-// Cross-cutting feature surface: overlay `vars`, drift notifications, `verify --ci`, and
-// destination precedence end to end. Each is exercised against a fully sandboxed $HOME +
-// state dir (never the real machine), like engine.test.ts.
-//
-// The `secret` resource's own suite lived here and went with it at 0.37. What stayed is the
-// precedence coverage it happened to carry: `secret` was one of two kinds that could win a
-// destination without owning it, and those tests are about THAT rule, not about secrets.
-// They are ported to `launchd`, the remaining such kind — see the note above them.
+// Cross-cutting feature surface: overlay `vars`, drift notifications, the `doctor --config` CI
+// gate through the CLI, and destination precedence end to end. Each is exercised against a
+// fully sandboxed $HOME + state dir (never the real machine), like engine.test.ts.
 import { expect, test } from "bun:test";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -50,11 +45,11 @@ test("notifyArgv: platform-correct commands, undefined where boom has no notifie
   expect(notifyArgv("unknown", "boom", "drift")).toBeUndefined();
 });
 
-// --- verify --ci (config-repo CI gate; wraps `doctor --config`) -----------------------------
+// --- doctor --config (the config-repo CI gate, through the CLI) ----------------------------
 
-test("verify --ci passes (exit 0) on a valid boomfile without walking the machine", async () => {
+test("doctor --config passes (exit 0) on a valid boomfile without walking the machine", async () => {
   const sb = await sandbox('[[section]]\nname = "x"\nlink = [{ src = "a", dst = "~/.a" }]\n');
-  await run(app, ["verify", "--ci"], sb.ctx);
+  await run(app, ["doctor", "--config"], sb.ctx);
   expect(sb.ctx.process.exitCode).toBe(0);
   // A CI gate schema-checks the config; it must not walk the machine. The validator reports
   // one line per config file (the boomfile), never per resource/section drift.
@@ -62,21 +57,30 @@ test("verify --ci passes (exit 0) on a valid boomfile without walking the machin
   expect(sb.out()).not.toContain("~/.a"); // no link-resource walk happened
 });
 
-test("verify --ci fails (exit 1) on a schema-invalid boomfile (unknown key)", async () => {
+test("doctor --config fails (exit 1) on a schema-invalid boomfile (unknown key)", async () => {
   const sb = await sandbox('[[section]]\nname = "x"\nbogus = true\n');
-  await run(app, ["verify", "--ci"], sb.ctx);
+  await run(app, ["doctor", "--config"], sb.ctx);
   expect(sb.ctx.process.exitCode).toBe(1);
 });
 
-test("verify --ci fails (exit 1) when no config repo resolves (strict gate)", async () => {
+test("doctor --config fails (exit 1) when no config repo resolves (strict gate)", async () => {
   const sb = await sandbox('[[section]]\nname = "x"\n');
   // Strip the config pointer and point cwd at an empty dir so nothing resolves.
   const empty = join(sb.base, "empty");
   await mkdir(empty, { recursive: true });
   const env = { ...sb.env, BOOM_CONFIG: undefined };
   const ctx = { process: { ...sb.ctx.process, env, exitCode: 0 }, env, cwd: empty } as unknown as BoomContext;
-  await run(app, ["verify", "--ci"], ctx);
+  await run(app, ["doctor", "--config"], ctx);
   expect(ctx.process.exitCode).toBe(1);
+});
+
+// Failing loudly, like `source --update` did: the parser rejects the flag (stricli reports it on
+// stderr) and the verify verb never runs, rather than quietly doing something other than asked.
+test("verify --ci is not a flag any more", async () => {
+  const sb = await sandbox('[[section]]\nname = "x"\n');
+  await run(app, ["verify", "--ci"], sb.ctx);
+  expect(sb.out()).toContain("--ci");
+  expect(sb.out()).not.toContain("VERIFY..."); // no verdict band: the verb was never entered
 });
 
 // --- precedence: duplicate destinations resolve last-wins, end to end -----------------------
@@ -190,40 +194,4 @@ test("precedence: an off-darwin launchd never evicts the copy that owns the same
   expect(await reconcile("sync", sb.ctx, {})).toBe(0);
   expect(await pathExists(dst)).toBe(true);
   expect(sb.out()).not.toContain("reaped orphan");
-});
-
-// --- `secret` is retired, and an ignored declaration is never silent ------------------------
-// The key still parses (a hard schema failure on a formerly-valid key turns an upgrade into an
-// outage), so the only thing standing between a stale declaration and a file nobody renders any
-// more is this warning. It fires on EVERY verb, including verify: a `verify` reporting all-clear
-// while ignoring a declared secret is the more dangerous half.
-test("secret: a retired declaration still loads, and warns on both sync and verify", async () => {
-  const sb = await sandbox('[[section]]\nname = "s"\nsecret = [{ dst = "~/.token", ref = "op://v/i/f" }]\n');
-  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
-  expect(sb.out()).toContain("retired and ignored");
-  expect(await pathExists(join(sb.home, ".token"))).toBe(false); // nothing was rendered
-
-  // And on verify, where it lands in the ATTENTION tier — exit 2, not 0 and not a failure.
-  // Pinned because it is a real consequence for anyone gating CI on `boom verify`: a stale key
-  // turns a green gate amber until it is deleted. That is the intended trade (a verify reporting
-  // all-clear while ignoring a declared secret would be worse), so it is asserted here rather
-  // than left to be discovered.
-  const sb2 = await sandbox('[[section]]\nname = "s"\nsecret = [{ dst = "~/.token", ref = "op://v/i/f" }]\n');
-  expect(await reconcile("verify", sb2.ctx, {})).toBe(2);
-  expect(sb2.out()).toContain("retired and ignored");
-});
-
-// The count is reported, never the paths: a `dst` for secret material is exactly what must not
-// be echoed into a transcript.
-test("secret: the retirement warning counts declarations and never prints their paths", async () => {
-  const sb = await sandbox(
-    '[[section]]\nname = "s"\nsecret = [\n' +
-      '  { dst = "~/.aws-creds-do-not-log", ref = "op://v/i/f" },\n' +
-      '  { dst = "~/.npmrc-secret", ref = "op://v/i/g" },\n' +
-      "]\n",
-  );
-  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
-  expect(sb.out()).toContain("2 `secret` declaration(s) are retired");
-  expect(sb.out()).not.toContain("aws-creds-do-not-log");
-  expect(sb.out()).not.toContain("npmrc-secret");
 });

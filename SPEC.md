@@ -24,8 +24,8 @@ A `boom` invocation does one of two things:
    the bare `boom source` command (and its explicit `boom source sync` spelling); the
    rest are their own top-level commands:
    - `boom source` / `boom source sync` — reconcile the machine to the boomfile, running the `sync` verb (`--fix` repairs drift by overwriting conflicts). No verb upgrades a package — see "Reconciling never upgrades" below
-   - `boom verify` — check drift, exit 0 ok / 2 warn / 1 fail (`--json` for a report; `--ci`
-     narrows to a non-interactive schema-check gate, 0/1, no machine walk)
+   - `boom verify` — check drift, exit 0 ok / 2 warn / 1 fail (`--json` for a report). The
+     non-interactive schema-only gate for CI is `boom doctor --config`, 0/1, no machine walk
    - `boom uninstall` — prompts on a terminal and refuses on a non-TTY without `--yes`
      (a `--json` run is machine-driven, so it counts as consent)
    These share **one verb-parameterized loop** (`src/engine/reconcile.ts`) over a
@@ -124,15 +124,9 @@ Resources:
   descendants, and a placement whose destination resolves inside the config repo is refused —
   boom never links the repo into itself. Neither form renders content — that is `tmpl`
 - `tmpl = [{ src, dst, mode? }]` — render `src` to `dst`, interpolating `${NAME}` from the
-  top-level `[vars]` table, plus `${env:VAR}`/`${host}`/`${os}`. The replacement for the
-  retired `copy.expand` and a strict superset of it: one template with per-machine `[vars]`
-  replaces N near-identical overlay files. An unknown `${NAME}` is a hard failure (never a
-  dangling write). A boomfile still carrying `expand` fails at **load**, with a message naming
-  the two-line migration
-- `secret` — **RETIRED at 0.37**, and still parsed so an old boomfile keeps loading. It rendered
-  a vault value to a file at sync time. Nothing reads it now; reconcile warns once per run with a
-  count of the ignored declarations (never their paths). Resolve a secret at point of use instead
-  — `op run --env-file=F -- CMD` — or render it from a `run` step you own. See `CHANGELOG.md#0370`
+  top-level `[vars]` table, plus `${env:VAR}`/`${host}`/`${os}`: one template with per-machine
+  `[vars]` replaces N near-identical overlay files. An unknown `${NAME}` is a hard failure
+  (never a dangling write)
 - `dir = [{ path, mode?, remove_on_uninstall? }]` — ensure a standalone directory exists
   (declarative `mkdir -p`/`chmod`); `remove_on_uninstall = true` removes it on uninstall *only
   if empty*
@@ -222,12 +216,9 @@ verb-aware (sync installs/refreshes, verify reports drift; uninstall leaves the 
 - `skill_on_sync = true` — regenerate `~/.claude/skills/boom/SKILL.md` from the running
   binary each sync, so the self-describing skill can't lag a release.
 - `upgrade_on_sync = "check"` — after a sync, warn when a newer release ships (offline-safe,
-  never fails the sync). Taking the upgrade is your package manager's job. `"auto"` is retired
-  with the `boom upgrade` verb it called and now behaves as `"check"`; see `CHANGELOG.md#0360`.
-- `schedule` — **retired**, and still *accepted* (parsed, ignored) rather than rejected:
-  `[boom]` is a strict table, and failing a whole boomfile over a key that used to work is the
-  worse outcome. To run boom on a timer, author a plist and link it with the `launchd`
-  resource, which owns the load/unload lifecycle.
+  never fails the sync). Taking the upgrade is your package manager's job. To run boom on a
+  timer, author a plist and link it with the `launchd` resource, which owns the load/unload
+  lifecycle.
 - `notify = true` — when `boom verify` finds drift, raise a desktop notification (macOS
   `osascript` / Linux `notify-send`) so the signal doesn't die in a log. Verb-driven, not
   schedule-gated: a hand-run verify notifies the same way. Best-effort; a platform with no
@@ -267,13 +258,8 @@ case (a launchd timer, CI), paired with a command that printed the resolved secr
 second way to read a vault value under a program name a machine's controls are unlikely to have
 denied, carried for no configured user. Both are gone.
 
-`sudo_askpass` is still **accepted and ignored**, so a boomfile carrying it keeps loading. That is
-deliberate, and it is a different call from `copy.expand`, which is declared `v.never` so the
-failure can name its replacement. That pattern fits when the migration is another config key — the
-error names it and you edit one line. Here the migration is an *environment* action, which no
-config edit expresses, so failing the whole boomfile would strand a machine over a key whose
-replacement isn't in the file at all. A mutating sync warns when the key is set; the key is deleted
-at 1.0.
+A boomfile still carrying `sudo_askpass` fails at load with a message naming the replacement,
+as every retired key does (`CHANGELOG.md#0390`).
 
 If you need an unattended escalating sync, export `SUDO_ASKPASS` yourself — it is sudo's variable,
 not boom's, and boom still honors one it inherits: it skips the prompt label and the header relay
@@ -386,7 +372,7 @@ src/
            lock.ts launchd.ts notify.ts keychain.ts confirm.ts toml.ts
 test/                       bun test (unit + sandboxed integration)
 examples/dotfiles/          a runnable boomfile.toml example (+ a discovered `publish` command)
-examples/github-action/     a composite action wrapping `boom verify --ci`
+examples/github-action/     a composite action wrapping `boom doctor --config`
 .github/workflows/          ci.yml (check + version-guard + cross-compile, gated by ci-gate),
                             release.yml (tag → matrix → sign → attach → formula PR)
 ```

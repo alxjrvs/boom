@@ -57,8 +57,7 @@ export async function composeConfig(
     if (!overlay) continue;
     sections.push(...overlay.section.map((s) => ({ ...s, source: name })));
     vars = { ...vars, ...(overlay.vars ?? {}) };
-    // `[boom]` is a flat table, so it merges shallowly, last-wins PER KEY. The gotcha: a shallow
-    // merge REPLACES an array-valued key rather than appending to it.
+    // `[boom]` is a flat table of scalars, so it merges shallowly, last-wins PER KEY.
     if (overlay.boom) boom = { ...boom, ...overlay.boom };
   }
 
