@@ -48,11 +48,11 @@ export function osxMatches(type: OsxType, current: string, value: OsxValue): boo
   return current.trim() === want;
 }
 
-// Gotcha for the uninstall arm below: it *reads* the recorded prior (the durable `meta` stash,
-// via firstOsxUndo) rather than writing a fresh undo row — the machine's pre-boom value is the
-// only thing worth restoring, and the stash outlives journal pruning where an `ops` row would
-// not. Every `defaults` call goes through captureArgv with the run's env, which is what lets a
-// sandboxed test intercept it on PATH.
+// The uninstall arm below restores the machine's pre-boom value from the durable `meta` stash
+// (firstOsxUndo), which outlives journal pruning where an `ops` row would not; its own write is
+// then journaled like every other removal, under a distinct op so the sync arm's earliest-row
+// fallback can never mistake it for the pre-boom prior. Every `defaults` call goes through
+// captureArgv with the run's env, which is what lets a sandboxed test intercept it on PATH.
 export async function reconcileOsxDefault(entry: OsxDefault, ctx: ReconcileCtx): Promise<void> {
   if (ctx.profile.os !== "darwin") return;
   const { report } = ctx;
@@ -135,9 +135,21 @@ export async function reconcileOsxDefault(entry: OsxDefault, ctx: ReconcileCtx):
       }
       const verb = undo.prior === null ? "delete" : "restore";
       if (ctx.dryRun) {
-        report.note(`would ${verb} ${disp}`);
+        report.plan(`would ${verb} ${disp}`);
         return;
       }
+      // The teardown's own undo: what the key holds right now (boom's value, or null if it is
+      // already gone), recorded before the write like every other mutation.
+      const now = readCurrent();
+      const teardown: Extract<UndoToken, { kind: "osx" }> = {
+        kind: "osx",
+        domain,
+        key,
+        type: undo.type,
+        prior: now.ok ? now.cur : null,
+      };
+      ctx.journal?.intent("osx-restore", disp, teardown);
+      ctx.journal?.done("osx-restore", disp, teardown);
       const argv =
         undo.prior === null
           ? ["defaults", "delete", domain, key]

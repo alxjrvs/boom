@@ -21,13 +21,9 @@ export function openDb(env: Env): Database {
   // Individual statements (not one multi-statement string) — bun:sqlite's run() prepares a
   // single statement. All idempotent (IF NOT EXISTS), so this is a no-op after first open.
   db.run("CREATE TABLE IF NOT EXISTS manifest (dst TEXT PRIMARY KEY, kind TEXT NOT NULL, src TEXT NOT NULL)");
+  // An existing state.db may carry a `runs.label` column from a since-removed verb; nothing
+  // reads or writes it, and CREATE TABLE IF NOT EXISTS leaves an existing table alone.
   db.run("CREATE TABLE IF NOT EXISTS runs (run_id TEXT PRIMARY KEY, committed INTEGER NOT NULL DEFAULT 0)");
-  // A `label` exempts a run from pruning. Nothing writes one any more — the verbs that did were
-  // removed at 0.31 — but the column stays: dropping it would rewrite the `runs` table on every
-  // existing user's state.db to reclaim nothing. Added by migration because CREATE TABLE IF NOT
-  // EXISTS never alters an existing table — a state.db from before the column has the old shape,
-  // so add it when it's missing (ALTER twice would throw on the duplicate).
-  if (!columnExists(db, "runs", "label")) db.run("ALTER TABLE runs ADD COLUMN label TEXT");
   // ops.t is 'intent' | 'done'; undo is a JSON UndoToken, present for 'done' rows.
   db.run(
     "CREATE TABLE IF NOT EXISTS ops (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, t TEXT NOT NULL, op TEXT NOT NULL, dst TEXT NOT NULL, undo TEXT)",
@@ -35,19 +31,11 @@ export function openDb(env: Env): Database {
   db.run(
     "CREATE TABLE IF NOT EXISTS sides (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, op TEXT NOT NULL, label TEXT NOT NULL)",
   );
-  // Facts about history that must outlive the rows they describe: how far pruning has destroyed
-  // (`prune_horizon`) and each macOS default's true pre-boom prior (`osx:<domain> <key>`). Both
-  // answer questions a caller asks precisely *because* the `ops` rows are gone, so they can't
-  // live in `ops`. Run-scoped data does not belong here — that's what `ops`/`sides` are for.
+  // Facts that must outlive the `ops` rows they describe: each macOS default's true pre-boom
+  // prior (`osx:<domain> <key>`), read by `uninstall` precisely when pruning has taken the rows.
+  // Run-scoped data does not belong here — that's what `ops`/`sides` are for.
   db.run("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
   return db;
-}
-
-// Does a table already have a column? Drives the idempotent ADD COLUMN migrations above —
-// PRAGMA table_info returns one row per column, so a missing name means the migration must run.
-function columnExists(db: Database, table: string, column: string): boolean {
-  const cols = db.query(`PRAGMA table_info(${table})`).all() as { name: string }[];
-  return cols.some((c) => c.name === column);
 }
 
 // Open, run, close — for the one-shot readers/writers (manifest, readRun, listRuns, prune).

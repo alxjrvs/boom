@@ -4,7 +4,7 @@
 import { expect, test } from "bun:test";
 import { chmod, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { pruneRuns } from "../src/engine/journal.ts";
+import { pruneRuns, readRun } from "../src/engine/journal.ts";
 import { reconcile } from "../src/engine/reconcile.ts";
 import { pathExists } from "../src/lib/fs.ts";
 import type { Env } from "../src/lib/paths.ts";
@@ -52,6 +52,20 @@ test("dir: an un-owned dir is left on uninstall; a non-empty remove_on_uninstall
 
 // The mkdir undo is `rmdir`, not `rm -rf` — reversing a directory boom created must never take
 // data boom never touched with it. These three pin the arm's whole ladder: kept, removed, gone.
+
+test("dir: uninstall previews with `plan`, then journals the rmdir with a mkdir undo", async () => {
+  const sb = await sandbox(
+    `[[section]]\nname = "d"\ndir = [{ path = "~/empty", remove_on_uninstall = true }]\n`,
+  );
+  expect(await reconcile("sync", sb.ctx, {})).toBe(0);
+  const dir = join(sb.home, "empty");
+  expect(await reconcile("uninstall", sb.ctx, { dryRun: true })).toBe(0);
+  expect(sb.out()).toContain("would remove ~/empty"); // the plan tier, shown in the default output
+  expect(await pathExists(dir)).toBe(true);
+  expect(await reconcile("uninstall", sb.ctx, {})).toBe(0);
+  expect(await pathExists(dir)).toBe(false);
+  expect((await readRun(sb.env))?.done).toContainEqual({ op: "rmdir", dst: dir, undo: { kind: "mkdir" } });
+});
 
 test("dir: verify fails when the directory is missing", async () => {
   const sb = await sandbox(`[[section]]\nname = "d"\ndir = [{ path = "~/nope" }]\n`);
@@ -430,6 +444,18 @@ test("osx_default: uninstall is idempotent — a re-deleted key is already-unset
   expect(await reconcile("uninstall", rig.sb.ctx, { verbose: true })).toBe(0);
   expect(rig.sb.out()).toContain("com.test.finder ShowPathbar already unset");
   expect(await rig.value("com.test.dock", "tilesize")).toBe("64"); // and the restore still holds
+});
+
+test("osx_default: uninstall journals its own restore, under an op the pre-boom lookup ignores", async () => {
+  const rig = await osxRig(DOCK_TWO);
+  await writeFile(rig.store, "com.test.dock|tilesize=64\n");
+  expect(await reconcile("sync", rig.sb.ctx, {})).toBe(0);
+  expect(await reconcile("uninstall", rig.sb.ctx, {})).toBe(0);
+  const done = (await readRun(rig.sb.env))?.done ?? [];
+  const ops = done.filter((r) => r.op === "osx-restore").map((r) => r.dst);
+  expect(ops).toContain("com.test.dock tilesize");
+  expect(ops).toContain("com.test.finder ShowPathbar");
+  expect(done.some((r) => r.op === "osx")).toBe(false); // never the sync arm's op
 });
 
 test("osx_default: uninstall with no journal record leaves the key alone", async () => {

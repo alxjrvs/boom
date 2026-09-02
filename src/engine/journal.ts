@@ -12,16 +12,19 @@ import { backupsDir, type Env } from "../lib/paths.ts";
 import { openDb, withDb } from "./db.ts";
 import type { ReconcileCtx } from "./types.ts";
 
-// How to reverse one mutation: remove what we created, rmdir a directory we created, restore a
-// backed-up file, or — for the one non-file effect — re-apply a macOS default's prior value
-// (`prior: null` means the key was unset, so `uninstall` deletes it).
+// How to reverse one mutation: remove what we created, rmdir a directory we created, recreate an
+// empty directory we removed, restore a backed-up file, or — for the one non-file effect —
+// re-apply a macOS default's prior value (`prior: null` means the key was unset).
 //
 // `rmdir` exists because reversing a `mkdir` with `rm -rf` is the one undo that can destroy data
 // boom never touched: by undo time the user may have filled the directory boom created.
 // rmdir(2) refuses a non-empty directory, so the failure mode is a report, not a deletion.
+// `mkdir` is its mirror: the `dir` resource only ever removes an EMPTY directory on uninstall, so
+// putting it back needs no content.
 export type UndoToken =
   | { kind: "remove" }
   | { kind: "rmdir" }
+  | { kind: "mkdir" }
   | { kind: "restore"; from: string }
   | { kind: "osx"; domain: string; key: string; type: string; prior: string | null };
 
@@ -98,6 +101,25 @@ export async function journalRemove(
   }
   ctx.journal.intent(op, file, plannedUndo(file, ctx.backupRoot));
   ctx.journal.done(op, file, await displace(file, ctx.backupRoot, recursive));
+}
+
+// The uninstall arm every file-owning resource ends on: plan it in a dry run, otherwise remove
+// through the journal and say so. One spelling, so the dry-run tier is `plan` (a `note` with no
+// open band is dropped, which made `uninstall --dry-run` lossier than `source --dry-run`) and
+// the wording cannot drift between link, copy and tmpl.
+export async function removeOwned(
+  op: string,
+  file: string,
+  disp: string,
+  ctx: ReconcileCtx,
+  recursive = false,
+): Promise<void> {
+  if (ctx.dryRun) {
+    ctx.report.plan(`would remove ${disp}`);
+    return;
+  }
+  await journalRemove(op, file, ctx, recursive);
+  ctx.report.ok(`${disp} removed`);
 }
 
 interface DoneRecord {
@@ -182,12 +204,9 @@ export class Journal {
 // are deleted oldest-first — run ids sort chronologically. Called after a clean commit.
 export async function pruneRuns(env: Env, keep = 10): Promise<void> {
   const stale = withDb(env, (db) => {
-    // A run carrying a `label` is exempt from the count bound entirely; nothing sets one today
-    // (the column outlives the verb that wrote it — see db.ts), so in practice every run is
-    // unlabelled and history is pruned oldest-first down to the kept window.
-    const ids = (
-      db.query("SELECT run_id FROM runs WHERE label IS NULL ORDER BY run_id").all() as { run_id: string }[]
-    ).map((r) => r.run_id);
+    const ids = (db.query("SELECT run_id FROM runs ORDER BY run_id").all() as { run_id: string }[]).map(
+      (r) => r.run_id,
+    );
     // Pure count-bound (drop oldest beyond `keep`), committed or not — this bounds growth
     // even when a run fails every sync. The most-recent run (the only one `--resume` ever
     // reaches) is always inside the kept window, so its backups are never reaped out from
@@ -201,17 +220,6 @@ export async function pruneRuns(env: Env, keep = 10): Promise<void> {
       delSides.run(id);
       delRun.run(id);
     }
-    // Record how far history was destroyed, in the same callback that destroys it: deleting the
-    // rows erases the only evidence they ever existed. No command reads `prune_horizon` today,
-    // but it is the sole record that a run id older than it was pruned rather than never run,
-    // and it costs one row. The conditional upsert keeps the horizon monotonic (run ids sort
-    // chronologically), so a later prune of *older* rows can never walk it backwards.
-    const newest = drop.at(-1);
-    if (newest !== undefined)
-      db.run(
-        "INSERT INTO meta (key, value) VALUES ('prune_horizon', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value WHERE excluded.value > meta.value",
-        [newest],
-      );
     return drop;
   });
   for (const id of stale) await rm(`${backupsDir(env)}/${id}`, { recursive: true, force: true });
@@ -266,10 +274,7 @@ export async function firstOsxUndo(
 export async function readRun(
   env: Env,
   runId?: string,
-): Promise<
-  | { runId: string; committed: boolean; done: DoneRecord[]; orphans: DoneRecord[]; sides: SideRecord[] }
-  | undefined
-> {
+): Promise<{ runId: string; committed: boolean; done: DoneRecord[]; sides: SideRecord[] } | undefined> {
   return withDb(env, (db) => {
     const id = runId ?? latestRunId(db);
     if (!id) return undefined;
@@ -284,30 +289,10 @@ export async function readRun(
         undo: string;
       }[]
     ).map((r) => ({ op: r.op, dst: r.dst, undo: JSON.parse(r.undo) as UndoToken }));
-    // Intents with no matching `done` — the run died in the window between "original displaced
-    // into the backup tree" and "row written that says where it went". Surfaced so an
-    // interrupted run never reports zero ops while a displaced original sits unaccounted for.
-    //
-    // The completing `done` must come AFTER the intent (`d.id > i.id`), not merely share its
-    // (op, dst). Without that, a destination touched twice in one run has its second, genuinely
-    // orphaned intent masked by the FIRST write's done row — the interrupted mutation then goes
-    // unreported again, which is the whole bug this exists to fix. Rare (the change-gate makes
-    // reconcile idempotent, and `--resume` re-skips what is already correct) but reachable: a
-    // hook may call `api.journalWrite` on a path a resource already wrote.
-    const orphans = (
-      db
-        .query(
-          `SELECT op, dst, undo FROM ops i WHERE run_id = ? AND t = 'intent' AND undo IS NOT NULL
-             AND NOT EXISTS (SELECT 1 FROM ops d WHERE d.run_id = i.run_id AND d.t = 'done'
-                             AND d.op = i.op AND d.dst = i.dst AND d.id > i.id)
-           ORDER BY id`,
-        )
-        .all(id) as { op: string; dst: string; undo: string }[]
-    ).map((r) => ({ op: r.op, dst: r.dst, undo: JSON.parse(r.undo) as UndoToken }));
     const sides = db
       .query("SELECT op, label FROM sides WHERE run_id = ? ORDER BY id")
       .all(id) as SideRecord[];
-    return { runId: id, committed: runRow.committed === 1, done, orphans, sides };
+    return { runId: id, committed: runRow.committed === 1, done, sides };
   });
 }
 
@@ -319,20 +304,20 @@ interface RunSummary {
   readonly ops: number;
   readonly sides: number;
   readonly committed: boolean;
-  readonly label?: string; // the `runs.label` column, when a run carries one
 }
 
 // Enumerate the retained runs, newest first (run ids sort chronologically).
 export async function listRuns(env: Env): Promise<RunSummary[]> {
   return withDb(env, (db) => {
-    const runs = db.query("SELECT run_id, committed, label FROM runs ORDER BY run_id DESC").all() as {
+    const runs = db.query("SELECT run_id, committed FROM runs ORDER BY run_id DESC").all() as {
       run_id: string;
       committed: number;
-      label: string | null;
     }[];
-    // `done` rows plus recoverable orphaned intents. Counting only `done` made an interrupted
-    // run — the one case a run listing exists to surface — report "0 op(s)", which reads as
-    // "nothing to undo" precisely when there is something half-applied to undo.
+    // `done` rows plus orphaned intents — an intent whose completing `done` never came AFTER it
+    // (`d.id > i.id`, not merely sharing its (op, dst): a destination touched twice in one run
+    // would otherwise have its second, genuinely orphaned intent masked by the first write's
+    // done row). Counting only `done` would make an interrupted run — the one case a run
+    // listing exists to surface — report "0 op(s)" precisely when something is half-applied.
     const opsN = db.query(
       `SELECT (SELECT COUNT(*) FROM ops WHERE run_id = ?1 AND t = 'done')
             + (SELECT COUNT(*) FROM ops i WHERE i.run_id = ?1 AND i.t = 'intent' AND i.undo IS NOT NULL
@@ -345,7 +330,6 @@ export async function listRuns(env: Env): Promise<RunSummary[]> {
       ops: (opsN.get(r.run_id) as { n: number }).n,
       sides: (sidesN.get(r.run_id) as { n: number }).n,
       committed: r.committed === 1,
-      ...(r.label ? { label: r.label } : {}),
     }));
   });
 }

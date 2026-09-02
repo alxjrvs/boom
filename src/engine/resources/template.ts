@@ -13,7 +13,7 @@ import { chmod, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { Tmpl } from "../../config/schema.ts";
 import { displayPath, expandTilde, pathExists } from "../../lib/fs.ts";
-import { journalRemove, journalWrite } from "../journal.ts";
+import { journalWrite, removeOwned } from "../journal.ts";
 import type { ReconcileCtx } from "../types.ts";
 
 // The machine vocabulary: `${env:VAR}` / `${host}` / `${os}`. Unknown `${env:…}` resolves to
@@ -143,11 +143,7 @@ export async function reconcileTmpl(entry: Tmpl, ctx: ReconcileCtx): Promise<voi
       // content, the same care `copy`'s uninstall takes.
       const content = await render(false);
       if (content === undefined || (await Bun.file(dst).text()) !== content) return;
-      if (ctx.dryRun) report.note(`would remove ${disp}`);
-      else {
-        await journalRemove("tmpl-rm", dst, ctx);
-        report.ok(`${disp} removed`);
-      }
+      await removeOwned("tmpl-rm", dst, disp, ctx);
       return;
     }
   }

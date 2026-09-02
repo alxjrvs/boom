@@ -111,19 +111,20 @@ const readAll = (s: ReadableStream | number | undefined): Promise<string> =>
 // expansion); `runArgvAsync` runs a tool by argv, so a path is an argument that sh never re-parses.
 // The synchronous `captureArgv` below stays for the fast, non-awaited callers (git plumbing,
 // launchctl, defaults).
+// The wall-clock cap as Bun.spawn's own `timeout` (SIGTERM on the deadline). A child killed that
+// way exits with a null code, which is how `timedOut` is read back — the one other way to a
+// null code is an unrelated signal, and with a deadline set that is the same answer to the
+// caller: the step did not finish on its own. Known limit: the kill reaches the child boom
+// spawned (the `sh`), not a grandchild it forked; a `run` step whose background child holds the
+// piped stderr keeps the drain below open until that child exits.
+const deadline = (opts?: RunOptions): { timeout?: number } =>
+  opts?.timeoutMs && opts.timeoutMs > 0 ? { timeout: opts.timeoutMs } : {};
+const timedOut = (opts: RunOptions | undefined, p: { exitCode: number | null }): boolean =>
+  deadline(opts).timeout !== undefined && p.exitCode === null;
+
 export async function runShellAsync(cmd: string, env: Env, opts?: RunOptions): Promise<ShellResult> {
   const io = stdioFor(opts);
-  const proc = Bun.spawn(["sh", "-c", cmd], { env: cleanEnv(env), cwd: opts?.cwd, ...io });
-  const timeout = opts?.timeoutMs && opts.timeoutMs > 0 ? opts.timeoutMs : undefined;
-  let timedOut = false;
-  // SIGTERM on the deadline, mirroring spawnSync's `timeout`; the flag (not exitCode===null) is the
-  // truthful "did the deadline fire" signal, since any signal death also nulls the exit code.
-  const timer = timeout
-    ? setTimeout(() => {
-        timedOut = true;
-        proc.kill();
-      }, timeout)
-    : undefined;
+  const proc = Bun.spawn(["sh", "-c", cmd], { env: cleanEnv(env), cwd: opts?.cwd, ...io, ...deadline(opts) });
   // Both pipes drained CONCURRENTLY, and before the exit is awaited. Reading one to completion
   // first would stall on a full pipe for a command chatty on the other — the same deadlock the
   // argv path documents. With captureStdout unset this is the single-stream read it always was.
@@ -132,10 +133,9 @@ export async function runShellAsync(cmd: string, env: Env, opts?: RunOptions): P
     opts?.silent && opts.captureStdout ? readAll(proc.stdout) : undefined,
   ]);
   await proc.exited;
-  if (timer) clearTimeout(timer);
   return {
     code: exitOf(proc),
-    timedOut,
+    timedOut: timedOut(opts, proc),
     ...(opts?.silent ? { stderr: stderr?.trim() ?? "" } : {}),
     ...(opts?.silent && opts.captureStdout ? { stdout: stdout?.trim() ?? "" } : {}),
   };
@@ -143,25 +143,20 @@ export async function runShellAsync(cmd: string, env: Env, opts?: RunOptions): P
 
 export async function runArgvAsync(args: string[], env: Env, opts?: RunOptions): Promise<ShellResult> {
   const io = stdioFor(opts);
-  const proc = Bun.spawn(args, { env: cleanEnv(env), cwd: opts?.cwd, ...io });
+  // Same deadline as runShellAsync, so the documented cap holds for every engine-owned argv
+  // invocation — the callers most able to block forever.
+  const proc = Bun.spawn(args, { env: cleanEnv(env), cwd: opts?.cwd, ...io, ...deadline(opts) });
   const watch = opts?.onStdoutLine ? pumpLines(proc.stdout as ReadableStream, opts.onStdoutLine) : undefined;
-  // Same deadline discipline as runShellAsync, so the documented cap holds for every engine-owned
-  // argv invocation — the callers most able to block forever.
-  const timeout = opts?.timeoutMs && opts.timeoutMs > 0 ? opts.timeoutMs : undefined;
-  let timedOut = false;
-  const timer = timeout
-    ? setTimeout(() => {
-        timedOut = true;
-        proc.kill();
-      }, timeout)
-    : undefined;
   // Drain stderr and the watched stdout concurrently, and only then await the exit. Reading one to
   // completion first would stall on a full pipe for a chatty tool — the deadlock this narration
   // exists to avoid, not cause.
   const [stderr] = await Promise.all([opts?.silent ? readAll(proc.stderr) : undefined, watch]);
   await proc.exited;
-  if (timer) clearTimeout(timer);
-  return { code: exitOf(proc), timedOut, ...(opts?.silent ? { stderr: stderr?.trim() ?? "" } : {}) };
+  return {
+    code: exitOf(proc),
+    timedOut: timedOut(opts, proc),
+    ...(opts?.silent ? { stderr: stderr?.trim() ?? "" } : {}),
+  };
 }
 
 export async function captureArgvAsync(args: string[], env: Env, opts?: RunOptions): Promise<CaptureResult> {

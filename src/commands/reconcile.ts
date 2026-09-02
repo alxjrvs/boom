@@ -80,7 +80,7 @@ export const verifyCommand = buildCommand<VerifyFlags, [], BoomContext>({
     flags: {
       only: onlyFlag,
       profile: profileFlag,
-      json: { kind: "boolean", optional: true, brief: "Emit a structured JSON drift report" },
+      json: jsonFlag,
       verbose: verboseFlag,
       ci: {
         kind: "boolean",
