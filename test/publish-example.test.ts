@@ -12,12 +12,16 @@ import { commitAll, git, gitEnv } from "./support/git.ts";
 import { tmp } from "./support/tmp.ts";
 
 // A bare origin plus a clone standing in for the boom-managed config repo. Bare so the clone can
-// push to it.
+// push to it. The clone carries a repo-local identity: publish runs git with the *process*
+// environment (it is loaded by the compiled binary and has no ctx env to thread through), so the
+// git sandbox's identity never reaches its `git commit` — and a CI runner has no ambient one.
 async function fixture(): Promise<{ origin: string; clone: string }> {
   const origin = await tmp("pub-origin");
   const clone = await tmp("pub-clone");
   git(origin, "init", "-q", "--bare", "-b", "main");
   git(clone, "clone", "-q", origin, clone);
+  git(clone, "config", "user.email", "t@t.com");
+  git(clone, "config", "user.name", "t");
   await writeFile(join(clone, "boomfile.toml"), `[[section]]\nname = "x"\n`);
   await writeFile(join(clone, "zshrc"), "export A=1\n");
   commitAll(clone, "init");
@@ -25,7 +29,7 @@ async function fixture(): Promise<{ origin: string; clone: string }> {
   return { origin, clone };
 }
 
-// publish runs git with the ctx env, so the git sandbox (identity included) rides in it.
+// The ctx env still carries the git sandbox for the paths that do read it (configRepo, BOOM_HOST).
 const ctxFor = (clone: string): FakeCtx =>
   fakeCtx({ ...gitEnv, BOOM_CONFIG: clone, BOOM_HOST: "testbox" }, clone);
 
