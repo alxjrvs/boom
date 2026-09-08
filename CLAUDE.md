@@ -1,5 +1,8 @@
 # CLAUDE.md — BoomTube
 
+**Status: retired and archived (September 2026).** The repository is read-only. Do not add
+features, cut releases, or open pull requests; see the notice at the top of `README.md`.
+
 ## What this is
 
 **BoomTube** is **declarative dev-machine setup** — a single self-contained binary (the

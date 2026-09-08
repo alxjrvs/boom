@@ -1,5 +1,25 @@
 # BoomTube
 
+> ## Retired — September 2026
+>
+> **boom is archived and no longer maintained.** The final release is
+> [v0.39.0](https://github.com/alxjrvs/boom/releases/tag/v0.39.0); its binaries, `SHA256SUMS` and
+> Homebrew formula stay downloadable, but nothing will be released again and issues and pull
+> requests are closed.
+>
+> **Why.** A systemic audit in September 2026 found that [chezmoi](https://www.chezmoi.io) covers
+> roughly nine tenths of what boom did for its one real consumer, and that the remainder (a
+> `verify` gate over packages, defaults and launchd; journaled displacement; a clean `uninstall`)
+> was not worth maintaining a bespoke engine, release pipeline and tap. The design is kept in
+> [`SPEC.md`](SPEC.md) and the history in [`CHANGELOG.md`](CHANGELOG.md) for anyone who wants the
+> ideas: one verb-parameterized reconcile loop over a resource registry, undo journaled before the
+> write, never clobber a file you do not own.
+>
+> **If you installed it.** Run `boom uninstall` first if you want the symlinks it placed torn
+> down (your dotfiles repo itself is untouched; boom only ever linked into it), then remove the
+> binary the way you installed it: `brew uninstall alxjrvs/boom/boom && brew untap alxjrvs/boom`,
+> or `rm ~/.local/bin/boom`.
+
 **BoomTube** is **declarative dev-machine setup** — it converges your machine
 to a state you declare once: dotfiles, packages, and tools from a single
 `boomfile.toml`, with drift detection. Its executable, **`boom`**,
@@ -13,7 +33,7 @@ portal to your machine's ideal state.
 
 📐 Design of record → [`SPEC.md`](SPEC.md)
 
-> Status: **early**, pre-1.0 — extracted from [`alxjrvs/dotFiles`](https://github.com/alxjrvs/dotFiles).
+> Status: **retired** at v0.39.0 (see the notice above) — extracted from [`alxjrvs/dotFiles`](https://github.com/alxjrvs/dotFiles), which has moved on to chezmoi.
 
 ## Install
 
