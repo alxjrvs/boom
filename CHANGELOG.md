@@ -12,6 +12,25 @@ there.
 
 ---
 
+## Retired — September 2026
+
+No release. boom is archived at v0.39.0 and will not change again.
+
+**Why.** Its one consumer moved to [chezmoi](https://www.chezmoi.io), which covers the file,
+script, template and secret half of a boomfile natively. What boom added on top — `verify` as a
+single gate over packages, macOS defaults and launchd health, journaled displacement of every file
+it overwrote, and `uninstall` — did not justify a bespoke engine, release pipeline and Homebrew tap
+for one machine.
+
+| Kept working | Gone |
+| --- | --- |
+| `v0.39.0` binaries, `SHA256SUMS`, `install.sh` at any tag, the formula in this repo | new releases, issues, pull requests, the `upgrade_on_sync` nudge finding anything newer |
+
+`boom uninstall` on the last installed version still tears down what boom placed; run it before
+removing the binary if you want the machine returned to its pre-boom state.
+
+---
+
 ## 0.39.0
 
 Two removals. Both fail loudly rather than being accepted and ignored.
